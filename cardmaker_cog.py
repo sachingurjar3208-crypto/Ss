@@ -8,6 +8,9 @@
     /logoadderofplaystyle  add a playstyle logo to the logo list
     /setplaystylelogo      put up to 2 playstyle logos on a card
     /logofixer             move / resize a card's playstyle logos
+    /paneladder     add a new stats-panel overlay image (sits IN FRONT of the foreground)
+    /panelremover   remove a stats-panel overlay from the panel list
+    /panelfixer     move / resize a card's stats-panel overlay
 
 Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 """
@@ -30,7 +33,9 @@ from card_db import (
     background_exists, get_background, add_background, list_backgrounds,
     set_playstyles, update_logo_layout, update_card_layout,
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
-    GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR,
+    panel_exists, get_panel, add_panel, list_panels, remove_panel,
+    update_panel_layout, set_card_panel,
+    GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR,
 )
 from card_image import generate_card_image
 from card_narratives import NARRATIVES, NARRATIVE_NAMES, ROLES, HANDS, BOWLING_TYPES
@@ -81,6 +86,12 @@ async def narrative_name_autocomplete(interaction: discord.Interaction, current:
 async def background_autocomplete(interaction: discord.Interaction, current: str):
     current_l = current.lower()
     names = [n for n in list_backgrounds() if current_l in n.lower()]
+    return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+
+async def panel_autocomplete(interaction: discord.Interaction, current: str):
+    current_l = current.lower()
+    names = [n for n in list_panels() if current_l in n.lower()]
     return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
 
@@ -272,6 +283,7 @@ class CardMakerCog(commands.Cog):
         narrative1="New playstyle 1 (choose None to remove)",
         narrative2="New playstyle 2 (choose None to remove)",
         bowlingtype="New bowling type (Fast / Off Spin / Leg Spin)",
+        panel="Stats-panel overlay image (added via /paneladder) — type none to remove",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
@@ -282,6 +294,7 @@ class CardMakerCog(commands.Cog):
         playername=playername_autocomplete,
         background=background_autocomplete,
         countryflag=country_autocomplete,
+        panel=panel_autocomplete,
     )
     @is_owner()
     async def editcard(
@@ -300,6 +313,7 @@ class CardMakerCog(commands.Cog):
         narrative1: str | None = None,
         narrative2: str | None = None,
         bowlingtype: str | None = None,
+        panel: str | None = None,
     ):
         await interaction.response.defer()
 
@@ -350,7 +364,25 @@ class CardMakerCog(commands.Cog):
         if narrative2 is not None:
             slot_updates["playstyle2"] = None if narrative2 == "NONE" else narrative2
 
-        if not updates and not slot_updates:
+        # Panel overlay: "none" (any case) clears it; otherwise it must be a
+        # known /paneladder pathname.
+        panel_update_pending = False
+        new_panel_value: str | None = None
+        if panel is not None:
+            if panel.strip().lower() == "none":
+                panel_update_pending = True
+                new_panel_value = None
+            else:
+                prow = get_panel(panel)
+                if prow is None:
+                    names = list_panels()
+                    hint = ", ".join(names) if names else "(none added yet — use `/paneladder` first)"
+                    await interaction.followup.send(f"❌ Unknown panel `{panel}`.\nAvailable: {hint}")
+                    return
+                panel_update_pending = True
+                new_panel_value = prow["pathname"]
+
+        if not updates and not slot_updates and not panel_update_pending:
             await interaction.followup.send("❌ Nothing to change — give at least one field besides playername.")
             return
 
@@ -366,6 +398,8 @@ class CardMakerCog(commands.Cog):
             update_card(playername, **updates)
         if slot_updates:
             set_playstyles(playername, **slot_updates)
+        if panel_update_pending:
+            set_card_panel(playername, new_panel_value)
 
         try:
             await _regenerate_and_send(interaction, playername, "✏️ Card updated")
@@ -404,6 +438,73 @@ class CardMakerCog(commands.Cog):
 
         add_background(pathname, link, str(local_path), interaction.user.id)
         await interaction.followup.send(f"✅ Background **{pathname}** added. Pick it in `/cardmaker`'s `background` option.")
+
+    # ── /paneladder ──────────────────────────────────────────────────
+    @app_commands.command(
+        name="paneladder",
+        description="Add a new stats panel overlay image (always drawn in front of the foreground)",
+    )
+    @app_commands.describe(
+        url="Direct link to the panel image (transparent PNG works best)",
+        pathname="Name to pick this panel by in /editcard's `panel` option",
+    )
+    @is_owner()
+    async def paneladder(self, interaction: discord.Interaction, url: str, pathname: str):
+        await interaction.response.defer()
+
+        if panel_exists(pathname):
+            await interaction.followup.send(f"❌ A panel named `{pathname}` already exists — pick a different name.")
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    resp.raise_for_status()
+                    data = await resp.read()
+            # Decode it now so a link that isn't a real image fails here, not later on a card.
+            Image.open(io.BytesIO(data)).convert("RGBA")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Couldn't download that link as an image: `{e}`")
+            return
+
+        local_path = PANELS_DIR / f"{pathname.strip().lower().replace(' ', '_')}.png"
+        with open(local_path, "wb") as f:
+            f.write(data)
+
+        add_panel(pathname, url, str(local_path), interaction.user.id)
+        await interaction.followup.send(
+            f"✅ Panel **{pathname}** added. Put it on a card with "
+            f"`/editcard playername:<card> panel:{pathname}`, then nudge it with `/panelfixer`.\n"
+            f"ℹ️ The panel always renders IN FRONT of the foreground — the foreground never "
+            f"covers it, whatever position/size you set."
+        )
+
+    # ── /panelremover ────────────────────────────────────────────────
+    @app_commands.command(name="panelremover", description="Remove a stats panel overlay from the panel list")
+    @app_commands.describe(pathname="Which panel to remove")
+    @app_commands.autocomplete(pathname=panel_autocomplete)
+    @is_owner()
+    async def panelremover(self, interaction: discord.Interaction, pathname: str):
+        await interaction.response.defer()
+
+        removed = remove_panel(pathname)
+        if removed is None:
+            names = list_panels()
+            hint = ", ".join(names) if names else "(none added yet)"
+            await interaction.followup.send(f"❌ No panel found named `{pathname}`.\nAvailable: {hint}")
+            return
+
+        # Best-effort cleanup of the local file — the DB rows are already
+        # gone either way, so a missing/locked file here is not an error.
+        try:
+            os.remove(removed["local_path"])
+        except OSError:
+            pass
+
+        await interaction.followup.send(
+            f"🗑️ Removed panel **{removed['pathname']}**. "
+            f"Any cards that had it set now render without a panel overlay."
+        )
 
     # ── /foregroundfix ───────────────────────────────────────────────
     @app_commands.command(name="foregroundfix", description="Nudge position and/or resize a card's foreground cutout")
@@ -595,6 +696,61 @@ class CardMakerCog(commands.Cog):
             await _regenerate_and_send(interaction, playername, "🔧 Logo adjusted (" + "; ".join(summary) + ")")
         except Exception as e:
             await interaction.followup.send(f"⚠️ Logo position/size saved, but image regeneration failed: `{e}`")
+
+    # ── /panelfixer ──────────────────────────────────────────────────
+    @app_commands.command(name="panelfixer", description="Move and/or resize a card's stats panel overlay")
+    @app_commands.describe(
+        playername="Which card to adjust",
+        panelup="Pixels to move the panel up",
+        paneldown="Pixels to move the panel down",
+        panelleft="Pixels to move the panel left",
+        panelright="Pixels to move the panel right",
+        panelsizebig="Percent to make the panel bigger, e.g. 10 = +10% size",
+        panelsizesmall="Percent to make the panel smaller, e.g. 10 = -10% size",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def panelfixer(
+        self,
+        interaction: discord.Interaction,
+        playername: str,
+        panelup: app_commands.Range[int, 0, 2000] = 0,
+        paneldown: app_commands.Range[int, 0, 2000] = 0,
+        panelleft: app_commands.Range[int, 0, 2000] = 0,
+        panelright: app_commands.Range[int, 0, 2000] = 0,
+        panelsizebig: app_commands.Range[int, 0, 500] = 0,
+        panelsizesmall: app_commands.Range[int, 0, 90] = 0,
+    ):
+        await interaction.response.defer()
+
+        card = get_card(playername)
+        if card is None:
+            names = list_playernames()
+            hint = ", ".join(names) if names else "(no cards yet)"
+            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
+            return
+
+        if not card["panel_image"]:
+            await interaction.followup.send(
+                f"❌ **{card['playername']}** has no panel set yet — pick one first with "
+                f"`/editcard playername:{card['playername']} panel:<name>`."
+            )
+            return
+
+        new_dx = card["panelimg_dx"] - panelleft + panelright
+        new_dy = card["panelimg_dy"] - panelup + paneldown
+        new_scale = card["panelimg_scale"] + panelsizebig - panelsizesmall
+        new_scale = max(MIN_SCALE_PCT, min(MAX_SCALE_PCT, new_scale))
+
+        update_panel_layout(playername, new_dx, new_dy, new_scale)
+
+        try:
+            await _regenerate_and_send(
+                interaction, playername,
+                f"🔧 Panel adjusted (x={new_dx}, y={new_dy}, size={new_scale}%)",
+            )
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Panel position/size saved, but image regeneration failed: `{e}`")
 
     # ── /cardlayout ──────────────────────────────────────────────────
     @app_commands.command(

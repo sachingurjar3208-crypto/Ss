@@ -17,10 +17,12 @@ DB_PATH = Path(__file__).parent / "cards_maker.db"
 BACKGROUNDS_DIR = Path(__file__).parent / "backgrounds"
 GENERATED_DIR = Path(__file__).parent / "generated"
 LOGOS_DIR = Path(__file__).parent / "playstyle_logos"
+PANELS_DIR = Path(__file__).parent / "panels"
 
 BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 LOGOS_DIR.mkdir(parents=True, exist_ok=True)
+PANELS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Narratives of each card, cached briefly because the match engine asks once per ball.
 _NARRATIVE_CACHE: dict[str, tuple[float, list[str]]] = {}
@@ -56,6 +58,12 @@ _NEW_CARD_COLUMNS = [
     ("panel_dy",      "INTEGER NOT NULL DEFAULT 0"),
     ("country_dy",    "INTEGER NOT NULL DEFAULT 0"),
     ("country_size",  "INTEGER NOT NULL DEFAULT 30"),
+    # ── Optional custom stats-panel overlay image, added via /paneladder,
+    # picked via /editcard's `panel` option, positioned via /panelfixer. ──
+    ("panel_image",    "TEXT"),                              # panels.pathname, or NULL = none
+    ("panelimg_dx",    "INTEGER NOT NULL DEFAULT 0"),
+    ("panelimg_dy",    "INTEGER NOT NULL DEFAULT 0"),
+    ("panelimg_scale", "INTEGER NOT NULL DEFAULT 100"),
 ]
 
 
@@ -105,6 +113,18 @@ def init_card_db() -> None:
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS playstyle_logos (
+                pathname_key  TEXT PRIMARY KEY,   -- lowercase
+                pathname      TEXT NOT NULL,      -- original casing, shown in the picker
+                link          TEXT NOT NULL,
+                local_path    TEXT NOT NULL,
+                added_by      INTEGER,
+                added_at      REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS panels (
                 pathname_key  TEXT PRIMARY KEY,   -- lowercase
                 pathname      TEXT NOT NULL,      -- original casing, shown in the picker
                 link          TEXT NOT NULL,
@@ -325,6 +345,38 @@ def update_logo_layout(playername: str, slot: int, dx: int, dy: int, scale: int)
     return True
 
 
+def update_panel_layout(playername: str, dx: int, dy: int, scale: int) -> bool:
+    """Save the position offset and size (percent) of a card's panel overlay,
+    set via /panelfixer."""
+    if get_card(playername) is None:
+        return False
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE cards SET panelimg_dx = ?, panelimg_dy = ?, panelimg_scale = ?, "
+            "updated_at = ? WHERE playername_key = ?",
+            (dx, dy, scale, time.time(), playername.strip().lower()),
+        )
+        conn.commit()
+    return True
+
+
+def set_card_panel(playername: str, panel_image: str | None) -> bool:
+    """Set (or clear, with None) which panel overlay a card uses. Resets the
+    position/size back to default whenever the panel image itself changes,
+    so a new panel doesn't inherit a stale offset from a differently-shaped
+    old one."""
+    if get_card(playername) is None:
+        return False
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE cards SET panel_image = ?, panelimg_dx = 0, panelimg_dy = 0, "
+            "panelimg_scale = 100, updated_at = ? WHERE playername_key = ?",
+            (panel_image, time.time(), playername.strip().lower()),
+        )
+        conn.commit()
+    return True
+
+
 def update_card_layout(playername: str, **kwargs) -> bool:
     """Save layout offsets/sizes for a card, set via /cardlayout. Pass only
     the keys you want to change — e.g. update_card_layout("Virat Kohli",
@@ -440,6 +492,63 @@ def list_backgrounds() -> list[str]:
     with _conn() as conn:
         rows = conn.execute("SELECT pathname FROM backgrounds ORDER BY pathname").fetchall()
         return [r["pathname"] for r in rows]
+
+
+# ── Panels (stats-panel overlay images, added via /paneladder) ────────────
+
+def panel_exists(pathname: str) -> bool:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM panels WHERE pathname_key = ?",
+            (pathname.strip().lower(),),
+        ).fetchone()
+        return row is not None
+
+
+def get_panel(pathname: str) -> sqlite3.Row | None:
+    with _conn() as conn:
+        return conn.execute(
+            "SELECT * FROM panels WHERE pathname_key = ?",
+            (pathname.strip().lower(),),
+        ).fetchone()
+
+
+def add_panel(pathname: str, link: str, local_path: str, added_by: int) -> None:
+    with _conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO panels (pathname_key, pathname, link, local_path, added_by, added_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (pathname.strip().lower(), pathname.strip(), link.strip(), local_path, added_by, time.time()),
+        )
+        conn.commit()
+
+
+def list_panels() -> list[str]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT pathname FROM panels ORDER BY pathname").fetchall()
+        return [r["pathname"] for r in rows]
+
+
+def remove_panel(pathname: str) -> sqlite3.Row | None:
+    """Delete a panel asset (used by /panelremover) and return the row that
+    was deleted (or None if it didn't exist), so the caller can also clean
+    up its local file. Any cards currently using this panel have it cleared
+    automatically, so they fall back to having no panel overlay instead of
+    pointing at a deleted file."""
+    row = get_panel(pathname)
+    if row is None:
+        return None
+    with _conn() as conn:
+        conn.execute("DELETE FROM panels WHERE pathname_key = ?", (pathname.strip().lower(),))
+        conn.execute(
+            "UPDATE cards SET panel_image = NULL, panelimg_dx = 0, panelimg_dy = 0, "
+            "panelimg_scale = 100 WHERE panel_image IS NOT NULL AND LOWER(panel_image) = ?",
+            (pathname.strip().lower(),),
+        )
+        conn.commit()
+    return row
 
 
 # ── Playstyle logos ──────────────────────────────────────────────────────

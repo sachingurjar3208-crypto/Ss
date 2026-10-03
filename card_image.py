@@ -13,7 +13,11 @@ things like a signature or a hand-written tagline, so those decorative extras
 from the sample card are intentionally left out.
 
 LAYERING: background -> player cutout -> bottom stats panel (restored from
-the template so the player stands BEHIND it) -> text and logos.
+the template so the player stands BEHIND it) -> optional custom panel
+overlay image (added via /paneladder, put on a card via /editcard, moved
+with /panelfixer) -> text and logos. The custom panel overlay is ALWAYS
+drawn after the foreground cutout, so the foreground always sits behind it,
+never in front.
 """
 
 from __future__ import annotations
@@ -24,7 +28,7 @@ from pathlib import Path
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
-from card_db import get_playstyle_logo
+from card_db import get_playstyle_logo, get_panel
 from card_narratives import ROLE_CARD_WORD, HAND_CARD_WORD
 
 CANVAS_W, CANVAS_H = 1037, 1517
@@ -70,6 +74,13 @@ PANEL_TOP_Y = 1146
 
 HAND_CENTER = (518, 1348)        # "RIGHT HAND BAT" / "LEFT HAND BAT", bottom of centre band
 HAND_SIZE = 20
+
+# ── Custom panel overlay image (added via /paneladder). Fits the same way
+# the foreground cutout does: scaled to fit inside this box (keeping aspect
+# ratio), centered on X, anchored near the bottom, THEN the per-card
+# panelimg_dx/dy/scale (from /panelfixer) is applied on top. Full-width by
+# default since a "stats panel" graphic usually spans the card. ──
+PANEL_BOX = {"x": 0, "y": 1080, "w": CANVAS_W, "h": CANVAS_H - 1080}
 
 # ── Playstyle logos: two circles in the centre band, below the role word. ──
 LOGO_CENTER_1 = (400, 1280)      # left circle  (used for slot 1 when there are 2 logos)
@@ -154,6 +165,20 @@ def _load_logo(pathname) -> Image.Image | None:
         return None
 
 
+def _load_panel(pathname) -> Image.Image | None:
+    """Load a stats-panel overlay image by name; None if unset, unknown or
+    unreadable (card just renders without the overlay in that case)."""
+    if not pathname:
+        return None
+    row = get_panel(pathname)
+    if row is None:
+        return None
+    try:
+        return Image.open(row["local_path"]).convert("RGBA")
+    except Exception:
+        return None
+
+
 def _draw_logo(canvas: Image.Image, logo: Image.Image, center, dx: int, dy: int, scale_pct: int) -> None:
     """Fit `logo` in LOGO_BOX, apply the /logofixer size, centre it on
     `center` shifted by (dx, dy) and paste it with its transparency."""
@@ -205,6 +230,22 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     canvas.paste(
         background.crop((0, panel_top, CANVAS_W, CANVAS_H)), (0, panel_top)
     )
+
+    # ── Optional custom stats-panel overlay image ───────────────────────
+    # Added via /paneladder, assigned to a card via /editcard, positioned
+    # via /panelfixer. Drawn AFTER the foreground cutout (and after the
+    # template's own baked-in panel strip above), so it always sits in
+    # FRONT of the player — the foreground never ends up on top of it.
+    panel_pathname = _col(card_row, "panel_image")
+    panel_img = _load_panel(panel_pathname)
+    if panel_img is not None:
+        panelimg_dx = _col(card_row, "panelimg_dx", 0)
+        panelimg_dy = _col(card_row, "panelimg_dy", 0)
+        panelimg_scale = _col(card_row, "panelimg_scale", 100)
+        panel_resized, panel_pos = _fit_foreground(
+            panel_img, PANEL_BOX, panelimg_dx, panelimg_dy, panelimg_scale
+        )
+        canvas.alpha_composite(panel_resized, dest=panel_pos)
 
     draw = ImageDraw.Draw(canvas)
 
