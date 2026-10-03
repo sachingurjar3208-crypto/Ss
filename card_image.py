@@ -118,12 +118,11 @@ async def _download_image(url: str) -> Image.Image:
 
 def _fit_foreground(
     fg: Image.Image, box: dict, offset_x: int, offset_y: int, scale_pct: int = 100
-) -> tuple[Image.Image, tuple[int, int], bool]:
+) -> tuple[Image.Image, tuple[int, int]]:
     """Scale `fg` to fit inside `box` (preserving aspect ratio), apply the
     manual /foregroundfix scale_pct on top (100 = box-fit size, 120 = 20%
-    bigger, 80 = 20% smaller), then clamp the final paste position to stay
-    fully within the canvas bounds. Returns the resized image, the clamped
-    paste position, and whether any clamping was required.
+    bigger, 80 = 20% smaller), and return the resized image plus the
+    (x, y) paste position on the full canvas with the manual offset applied.
     """
     box_w, box_h = box["w"], box["h"]
     base_scale = min(box_w / fg.width, box_h / fg.height)
@@ -141,18 +140,7 @@ def _fit_foreground(
     # left = negative X, right = positive X.
     paste_x += offset_x
     paste_y += offset_y
-
-    # Clamp to the canvas so Pillow never gets a partially/out-of-bounds
-    # alpha_composite destination. The image is allowed to sit flush with the
-    # canvas edge, but never any further outside.
-    min_x = 0
-    max_x = max(0, CANVAS_W - new_w)
-    min_y = 0
-    max_y = max(0, CANVAS_H - new_h)
-    clamped_x = max(min_x, min(paste_x, max_x))
-    clamped_y = max(min_y, min(paste_y, max_y))
-    was_clamped = (clamped_x != paste_x) or (clamped_y != paste_y)
-    return fg_resized, (clamped_x, clamped_y), was_clamped
+    return fg_resized, (paste_x, paste_y)
 
 
 def _col(row, key, default=None):
@@ -228,7 +216,7 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
 
     # ── Foreground cutout ──────────────────────────────────────────────
     fg = await _download_image(card_row["foreground_link"])
-    fg_resized, paste_pos, _ = _fit_foreground(
+    fg_resized, paste_pos = _fit_foreground(
         fg, FG_BOX, card_row["offset_x"], card_row["offset_y"],
         card_row["scale_pct"] if "scale_pct" in card_row.keys() else 100,
     )
@@ -254,7 +242,7 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
         panelimg_dx = _col(card_row, "panelimg_dx", 0)
         panelimg_dy = _col(card_row, "panelimg_dy", 0)
         panelimg_scale = _col(card_row, "panelimg_scale", 100)
-        panel_resized, panel_pos, _ = _fit_foreground(
+        panel_resized, panel_pos = _fit_foreground(
             panel_img, PANEL_BOX, panelimg_dx, panelimg_dy, panelimg_scale
         )
         canvas.alpha_composite(panel_resized, dest=panel_pos)
