@@ -755,7 +755,7 @@ class CardMakerCog(commands.Cog):
     # ── /cardlayout ──────────────────────────────────────────────────
     @app_commands.command(
         name="cardlayout",
-        description="Move/resize the name, OVR, stats, panel or country text on a card",
+        description="Move/resize the name, OVR, stats, or country text on a card",
     )
     @app_commands.describe(
         playername="Which card to adjust",
@@ -775,8 +775,6 @@ class CardMakerCog(commands.Cog):
         statsright="Move the BAT/BOWL hexagon numbers right (px)",
         statssizebig="Make the BAT/BOWL numbers bigger, e.g. 10 = +10px",
         statssizesmall="Make the BAT/BOWL numbers smaller, e.g. 10 = -10px",
-        panelup="Move the bottom stats panel's top border up (px)",
-        paneldown="Move the bottom stats panel's top border down (px)",
         countryup="Move the country text up (px)",
         countrydown="Move the country text down (px)",
     )
@@ -802,8 +800,6 @@ class CardMakerCog(commands.Cog):
         statsright: app_commands.Range[int, 0, 2000] = 0,
         statssizebig: app_commands.Range[int, 0, 300] = 0,
         statssizesmall: app_commands.Range[int, 0, 60] = 0,
-        panelup: app_commands.Range[int, 0, 1000] = 0,
-        paneldown: app_commands.Range[int, 0, 300] = 0,
         countryup: app_commands.Range[int, 0, 500] = 0,
         countrydown: app_commands.Range[int, 0, 500] = 0,
     ):
@@ -828,7 +824,6 @@ class CardMakerCog(commands.Cog):
         new_stats_dy = card["stats_dy"] - statsup + statsdown
         new_stats_size = max(15, card["stats_size"] + statssizebig - statssizesmall)
 
-        new_panel_dy = card["panel_dy"] - panelup + paneldown
         new_country_dy = card["country_dy"] - countryup + countrydown
 
         update_card_layout(
@@ -836,14 +831,14 @@ class CardMakerCog(commands.Cog):
             name_dx=new_name_dx, name_dy=new_name_dy, name_size=new_name_size,
             ovr_dx=new_ovr_dx, ovr_dy=new_ovr_dy, ovr_size=new_ovr_size,
             stats_dx=new_stats_dx, stats_dy=new_stats_dy, stats_size=new_stats_size,
-            panel_dy=new_panel_dy, country_dy=new_country_dy,
+            country_dy=new_country_dy,
         )
 
         try:
             await _regenerate_and_send(
                 interaction, playername,
                 f"🔧 Layout adjusted (name size={new_name_size}, ovr size={new_ovr_size}, "
-                f"stats size={new_stats_size}, panel dy={new_panel_dy})",
+                f"stats size={new_stats_size})",
             )
         except Exception as e:
             await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
