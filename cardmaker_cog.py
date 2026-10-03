@@ -843,9 +843,9 @@ class CardMakerCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
 
-    # ── /layout2 ─────────────────────────────────────────────────────
+    # ── /cardlayout2 ─────────────────────────────────────────────────────
     @app_commands.command(
-        name="layout2",
+        name="cardlayout2",
         description="Move/resize the batting role word and batting-hand text on a card",
     )
     @app_commands.describe(
@@ -897,7 +897,7 @@ class CardMakerCog(commands.Cog):
         try:
             await _regenerate_and_send(
                 interaction, playername,
-                f"🔧 Layout2 adjusted (role size={new_role_size}, hand size={new_hand_size})",
+                f"🔧 Cardlayout2 adjusted (role size={new_role_size}, hand size={new_hand_size})",
             )
         except Exception as e:
             await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
