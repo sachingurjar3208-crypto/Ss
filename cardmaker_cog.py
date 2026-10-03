@@ -777,6 +777,10 @@ class CardMakerCog(commands.Cog):
         statssizesmall="Make the BAT/BOWL numbers smaller, e.g. 10 = -10px",
         countryup="Move the country text up (px)",
         countrydown="Move the country text down (px)",
+        roleup="Move the batting role word (BATTER/BOWLER...) up (px)",
+        roledown="Move the batting role word down (px)",
+        handup="Move the batting-hand text (RIGHT/LEFT HAND BAT) up (px)",
+        handdown="Move the batting-hand text down (px)",
     )
     @app_commands.autocomplete(playername=playername_autocomplete)
     @is_owner()
@@ -802,6 +806,10 @@ class CardMakerCog(commands.Cog):
         statssizesmall: app_commands.Range[int, 0, 60] = 0,
         countryup: app_commands.Range[int, 0, 500] = 0,
         countrydown: app_commands.Range[int, 0, 500] = 0,
+        roleup: app_commands.Range[int, 0, 500] = 0,
+        roledown: app_commands.Range[int, 0, 500] = 0,
+        handup: app_commands.Range[int, 0, 500] = 0,
+        handdown: app_commands.Range[int, 0, 500] = 0,
     ):
         await interaction.response.defer()
 
@@ -826,12 +834,16 @@ class CardMakerCog(commands.Cog):
 
         new_country_dy = card["country_dy"] - countryup + countrydown
 
+        new_role_dy = card["role_dy"] - roleup + roledown
+        new_hand_dy = card["hand_dy"] - handup + handdown
+
         update_card_layout(
             playername,
             name_dx=new_name_dx, name_dy=new_name_dy, name_size=new_name_size,
             ovr_dx=new_ovr_dx, ovr_dy=new_ovr_dy, ovr_size=new_ovr_size,
             stats_dx=new_stats_dx, stats_dy=new_stats_dy, stats_size=new_stats_size,
             country_dy=new_country_dy,
+            role_dy=new_role_dy, hand_dy=new_hand_dy,
         )
 
         try:
@@ -839,65 +851,6 @@ class CardMakerCog(commands.Cog):
                 interaction, playername,
                 f"🔧 Layout adjusted (name size={new_name_size}, ovr size={new_ovr_size}, "
                 f"stats size={new_stats_size})",
-            )
-        except Exception as e:
-            await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
-
-    # ── /cardlayout2 ─────────────────────────────────────────────────────
-    @app_commands.command(
-        name="cardlayout2",
-        description="Move/resize the batting role word and batting-hand text on a card",
-    )
-    @app_commands.describe(
-        playername="Which card to adjust",
-        roleup="Move the role word (BATTER/BOWLER/...) up (px)",
-        roledown="Move the role word down (px)",
-        rolesizebig="Make the role word bigger, e.g. 4 = +4px",
-        rolesizesmall="Make the role word smaller, e.g. 4 = -4px",
-        handup="Move the batting-hand text (RIGHT/LEFT HAND BAT) up (px)",
-        handdown="Move the batting-hand text down (px)",
-        handsizebig="Make the batting-hand text bigger, e.g. 4 = +4px",
-        handsizesmall="Make the batting-hand text smaller, e.g. 4 = -4px",
-    )
-    @app_commands.autocomplete(playername=playername_autocomplete)
-    @is_owner()
-    async def layout2(
-        self,
-        interaction: discord.Interaction,
-        playername: str,
-        roleup: app_commands.Range[int, 0, 500] = 0,
-        roledown: app_commands.Range[int, 0, 500] = 0,
-        rolesizebig: app_commands.Range[int, 0, 100] = 0,
-        rolesizesmall: app_commands.Range[int, 0, 60] = 0,
-        handup: app_commands.Range[int, 0, 500] = 0,
-        handdown: app_commands.Range[int, 0, 500] = 0,
-        handsizebig: app_commands.Range[int, 0, 100] = 0,
-        handsizesmall: app_commands.Range[int, 0, 60] = 0,
-    ):
-        await interaction.response.defer()
-
-        card = get_card(playername)
-        if card is None:
-            names = list_playernames()
-            hint = ", ".join(names) if names else "(no cards yet)"
-            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
-            return
-
-        new_role_dy = card["role_dy"] - roleup + roledown
-        new_role_size = max(10, card["role_size"] + rolesizebig - rolesizesmall)
-        new_hand_dy = card["hand_dy"] - handup + handdown
-        new_hand_size = max(10, card["hand_size"] + handsizebig - handsizesmall)
-
-        update_card_layout(
-            playername,
-            role_dy=new_role_dy, role_size=new_role_size,
-            hand_dy=new_hand_dy, hand_size=new_hand_size,
-        )
-
-        try:
-            await _regenerate_and_send(
-                interaction, playername,
-                f"🔧 Cardlayout2 adjusted (role size={new_role_size}, hand size={new_hand_size})",
             )
         except Exception as e:
             await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
