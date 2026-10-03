@@ -307,16 +307,22 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
 
     # ── OVR + role word, center band ───────────────────────────────────
     ovr_center = (OVR_CENTER[0] + ovr_dx, OVR_CENTER[1] + ovr_dy)
-    role_center = (ROLE_CENTER[0] + ovr_dx, ROLE_CENTER[1] + ovr_dy)
+    role_dx    = _col(card_row, "role_dx", 0)
+    role_dy    = _col(card_row, "role_dy", 0)
+    role_size  = _col(card_row, "role_size", ROLE_SIZE)
+    hand_dy    = _col(card_row, "hand_dy", 0)
+    hand_size  = _col(card_row, "hand_size", HAND_SIZE)
+    role_center = (ROLE_CENTER[0] + ovr_dx + role_dx, ROLE_CENTER[1] + ovr_dy + role_dy)
     ovr_font = _font(FONT_DISPLAY_BOLD, ovr_size)
-    role_font = _font(FONT_LABEL, ROLE_SIZE)
+    role_font = _font(FONT_LABEL, role_size)
     _draw_centered(draw, ovr_center, str(card_row["ovr"]), ovr_font, GOLD)
     _draw_centered(draw, role_center, role_word, role_font, WHITE)
 
     # ── Batting hand, bottom of the centre band ────────────────────────
     hand_word = HAND_CARD_WORD.get(_col(card_row, "batting_hand"))
     if hand_word:
-        _draw_centered(draw, HAND_CENTER, hand_word, _font(FONT_LABEL, HAND_SIZE), WHITE)
+        hand_center = (HAND_CENTER[0], HAND_CENTER[1] + hand_dy)
+        _draw_centered(draw, hand_center, hand_word, _font(FONT_LABEL, hand_size), WHITE)
 
     # ── Playstyle logos (max 2): one sits in the middle, two fill the circles ──
     slots = []
