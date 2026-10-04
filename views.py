@@ -72,10 +72,11 @@ class _ContinueView(ui.View):
     BOTH the in-place edit AND a fresh channel message have already failed
     (e.g. a real outage) — normal hiccups never reach this."""
 
-    def __init__(self, work, allowed_ids: set[int] | None = None, timeout: float = 600.0):
+    def __init__(self, work, allowed_ids: set[int] | None = None, timeout: float = 600.0, attempt: int = 1):
         super().__init__(timeout=timeout)
         self.work = work
         self.allowed_ids = allowed_ids
+        self.attempt = attempt
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if self.allowed_ids and interaction.user.id not in self.allowed_ids:
@@ -92,27 +93,47 @@ class _ContinueView(ui.View):
         except discord.HTTPException:
             pass
         self.stop()
-        await _run_safely(self.work, allowed_ids=self.allowed_ids, notify_channel=interaction.channel)
+        await _run_safely(
+            self.work, allowed_ids=self.allowed_ids, notify_channel=interaction.channel,
+            attempt=self.attempt + 1,
+        )
 
 
-async def _run_safely(work, *, allowed_ids: set[int] | None = None, notify_channel=None) -> None:
+_MAX_RECOVERY_ATTEMPTS = 3
+
+
+async def _run_safely(work, *, allowed_ids: set[int] | None = None, notify_channel=None, attempt: int = 1) -> None:
     """Run `work()` (a no-arg async callable that only touches `channel` /
     `game`, never a specific interaction). If it raises, log it and — only
     as a last resort — post a manual Continue button so the match can
-    never be silently stuck."""
+    never be silently stuck.
+
+    If the SAME step fails `_MAX_RECOVERY_ATTEMPTS` times in a row, it's not
+    a transient network hiccup — it's a real bug (bad asset, bad payload,
+    etc). Stop offering a Continue button that will just fail identically
+    forever, and say so plainly instead so it gets reported/fixed."""
     try:
         await work()
     except Exception as e:
-        print(f"[match recovery] step failed, offering retry: {type(e).__name__}: {e}")
+        print(f"[match recovery] step failed (attempt {attempt}): {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
         if notify_channel is None:
             return
         try:
-            await notify_channel.send(
-                content="A small hiccup sending that step — nothing was lost. Tap to continue.",
-                view=_ContinueView(work, allowed_ids),
-            )
+            if attempt >= _MAX_RECOVERY_ATTEMPTS:
+                await notify_channel.send(
+                    content=(
+                        "This step keeps failing the same way — that's not a network blip, "
+                        "it's a bug. Please report this to the bot admins; your match progress "
+                        "is still saved, but it can't continue on its own from here."
+                    ),
+                )
+            else:
+                await notify_channel.send(
+                    content="A small hiccup sending that step — nothing was lost. Tap to continue.",
+                    view=_ContinueView(work, allowed_ids, attempt=attempt),
+                )
         except discord.HTTPException:
             pass
 
@@ -1078,8 +1099,8 @@ class TossView(_TimeoutMixin, ui.View):
         self._add_buttons()
 
     def _add_buttons(self):
-        head_btn = ui.Button(label="HEADS", emoji=discord.PartialEmoji(name="heads", id=1504775828821774397), style=discord.ButtonStyle.primary,   row=0)
-        tail_btn = ui.Button(label="TAILS", emoji=discord.PartialEmoji(name="tails", id=1504775832932057118), style=discord.ButtonStyle.secondary, row=0)
+        head_btn = ui.Button(label="HEADS", emoji="🪙", style=discord.ButtonStyle.primary,   row=0)
+        tail_btn = ui.Button(label="TAILS", emoji="🪙", style=discord.ButtonStyle.secondary, row=0)
         head_btn.callback = self._make_callback("Head")
         tail_btn.callback = self._make_callback("Tail")
         self.add_item(head_btn)
