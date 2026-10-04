@@ -138,34 +138,19 @@ def _ball_token(outcome: str) -> str:
     return _BALL_EMOJI.get(outcome, outcome)
 
 
-def _timeline_line(game: GameState, max_balls: int = 8) -> str | None:
-    """One single line showing the most recent over.
-
-    The timeline stores a "|" marker when an over finishes, so splitting on
-    it gives exact over boundaries (wides / no-balls don't break the grouping).
-    While an over is in progress its balls are shown; once it completes they
-    stay on screen until the next ball is bowled. The over number is prefixed
-    so it is clear where the over started.
-    """
-    overs: list[list[str]] = []
-    current: list[str] = []
-    for item in game.timeline:
-        if item == "|":
-            overs.append(current)
-            current = []
-        else:
-            current.append(item)
-
-    if current:
-        over_no, balls = len(overs) + 1, current
-    elif overs and overs[-1]:
-        over_no, balls = len(overs), overs[-1]
-    else:
+def _timeline_line(game: GameState, max_overs_shown: int = 2) -> str | None:
+    """Ball-by-ball for the last couple of overs, overs separated by "┃"."""
+    balls = [b for b in game.timeline if b != "|"]
+    if not balls:
         return None
-
-    shown = balls[-max_balls:]
-    tokens = " ".join(_ball_token(b) for b in shown)
-    return f"`Ov {over_no}` ┃ {tokens}"
+    per_over = 6
+    current_over_balls = balls[-(game.current_over_balls or 0):] if game.current_over_balls else []
+    done = balls[: len(balls) - len(current_over_balls)] if current_over_balls else balls
+    overs_chunks = [done[i:i + per_over] for i in range(0, len(done), per_over)]
+    overs_chunks = overs_chunks[-max_overs_shown:]
+    if current_over_balls:
+        overs_chunks.append(current_over_balls)
+    return "  ┃  ".join(" ".join(_ball_token(b) for b in chunk) for chunk in overs_chunks)
 
 
 def build_scoreboard_embed(game: GameState) -> discord.Embed:

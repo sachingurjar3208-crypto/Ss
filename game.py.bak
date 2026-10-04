@@ -486,12 +486,6 @@ class GameState:
             stats["runs"] = stats["r"]
 
     def add_legal_ball(self) -> None:
-        # BUG FIX: _over_ended_flag was only cleared in start_second_innings(),
-        # so after the first over of an innings end_over() became a no-op,
-        # current_over_balls never reset and the bowler prompt popped up
-        # early. Clear the guard as soon as a fresh over begins.
-        if self.current_over_balls == 0:
-            self._over_ended_flag = False
         self.legal_balls[self.innings - 1] += 1
         self.current_over_balls += 1
         if self.striker:

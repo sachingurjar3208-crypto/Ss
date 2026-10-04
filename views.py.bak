@@ -550,24 +550,12 @@ async def _send_commentary_with_gifs(
             pass
 
 
-async def _send_bowling_prompt(
-    channel: discord.TextChannel,
-    game: GameState,
-    *,
-    intro: str | None = None,
-    files: list | None = None,
-):
-    """Send the bowling UI for the current bowler.
-
-    `intro` (e.g. "X starts a new over") is rendered as the last line INSIDE
-    the scoreboard box, so the next-bowler info sits directly under the score.
-    """
+async def _send_bowling_prompt(channel: discord.TextChannel, game: GameState):
+    """Send the bowling UI for the current bowler."""
     # Guard – if bowler was cleared (innings ended) don't crash
     if not game.current_bowler:
         return
     embed = build_scoreboard_embed(game)
-    if intro:
-        embed.set_footer(text=intro)
     btype = game.current_bowler.get("bowling_type", "Fast")
 
     # Show FREE HIT banner if the previous ball was a no-ball
@@ -586,7 +574,7 @@ async def _send_bowling_prompt(
     view._channel = channel
     prefix = "**FREE HIT!**  " if is_free_hit else ""
     content = f"{prefix}Choose delivery  {game.bowling_user.mention}"
-    await channel.send(content=content, embed=embed, view=view, files=files or [])
+    await channel.send(content=content, embed=embed, view=view)
 
 
 async def _send_next_bowler_prompt(channel: discord.TextChannel, game: GameState):
@@ -1408,15 +1396,18 @@ class BowlerSelectView(_TimeoutMixin, ui.View):
         except Exception:
             pass  # cosmetic only
 
-        async def _send_prompt():
+        async def _send_intro():
             bowl_file = await _bowl_stats_file(self.game.bowling_user_id, bowler)
             files = [bowl_file] if bowl_file else []
-            await _send_bowling_prompt(
-                channel, self.game,
-                intro=f"{bname} ({bowler.get('ovr','?')}) comes into the attack",
+            await channel.send(
+                content=f"**{bname}** ({bowler.get('ovr','?')}) comes into the attack",
                 files=files,
             )
-        await _run_safely(_send_prompt, allowed_ids=allowed, notify_channel=channel)
+        await _run_safely(_send_intro, allowed_ids=allowed, notify_channel=channel)
+
+        # The actual delivery-choice buttons — this is the important one to
+        # never lose, so it goes through _run_safely too.
+        await _run_safely(lambda: _send_bowling_prompt(channel, self.game), allowed_ids=allowed, notify_channel=channel)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1997,10 +1988,10 @@ class NextBowlerView(_TimeoutMixin, ui.View):
         async def _work():
             bowl_file = await _bowl_stats_file(self.game.bowling_user_id, bowler)
             files = [bowl_file] if bowl_file else []
-            await _send_bowling_prompt(
-                channel, self.game,
-                intro=f"{bname} ({bowler.get('ovr','?')}) starts a new over",
+            await channel.send(
+                content=f"**{bname}** ({bowler.get('ovr','?')}) comes into the attack",
                 files=files,
             )
+            await _send_bowling_prompt(channel, self.game)
 
         await _safe_next(channel, self.game, _work)
