@@ -33,11 +33,22 @@ from card_narratives import ROLE_CARD_WORD, HAND_CARD_WORD
 
 CANVAS_W, CANVAS_H = 1037, 1517
 
-FONT_DIR = Path(__file__).parent / "fonts"
+_HERE = Path(__file__).parent
+
+
+def _find_font(name: str) -> Path:
+    """Look in ./fonts/ first, then next to this file (where the TTFs actually live)."""
+    for folder in (_HERE / "fonts", _HERE):
+        if (folder / name).is_file():
+            return folder / name
+    return _HERE / "fonts" / name
+
+
+FONT_DIR = _HERE / "fonts"
 # Drop bold display TTFs in cardmaker/fonts/ with these exact names, or the
 # code falls back to Pillow's built-in font (works, but looks plain).
-FONT_DISPLAY_BOLD = FONT_DIR / "display_bold.ttf"     # big gold name / stat numbers
-FONT_LABEL = FONT_DIR / "label.ttf"                   # small caps labels
+FONT_DISPLAY_BOLD = _find_font("display_bold.ttf")     # big gold name / stat numbers
+FONT_LABEL = _find_font("label.ttf")                   # small caps labels
 
 GOLD = (222, 180, 90, 255)
 WHITE = (240, 240, 245, 255)
