@@ -21,11 +21,30 @@ bot = commands.Bot(command_prefix="", intents=intents)
 COGS_DIR = Path(__file__).parent
 
 
+_synced = False
+
+
 @bot.event
 async def on_ready():
     """Called when the bot has connected to Discord and is ready."""
+    global _synced
     print(f"✓ Logged in as {bot.user}")
-    print(f"✓ Synced {len(bot.tree._get_all_commands())} slash commands")
+
+    # Slash commands only show up in Discord after they are SYNCED. Without this,
+    # newly added commands (e.g. /countrylogoadder) never appear. Runs once per start.
+    if not _synced:
+        _synced = True
+        try:
+            guild_id = os.getenv("GUILD_ID")  # optional: your test server id -> commands appear instantly
+            if guild_id:
+                guild = discord.Object(id=int(guild_id))
+                bot.tree.copy_global_to(guild=guild)
+                synced = await bot.tree.sync(guild=guild)
+                print(f"✓ Synced {len(synced)} slash commands to server {guild_id}")
+            synced = await bot.tree.sync()  # global (can take a few minutes to show up everywhere)
+            print(f"✓ Synced {len(synced)} global slash commands")
+        except Exception as e:
+            print(f"✗ Slash command sync failed: {e}")
 
 
 async def load_cogs():
