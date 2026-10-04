@@ -225,11 +225,28 @@ def _draw_logo(canvas: Image.Image, logo: Image.Image, center, dx: int, dy: int,
     canvas.paste(resized, (x, y), resized)
 
 
+# How a background template that is NOT exactly CANVAS_W x CANVAS_H gets fitted:
+#   "stretch" - resize it to exactly the canvas, so the WHOLE background stays visible
+#               (nothing is cut off). A 3:4 template such as 1098x1460 is squeezed ~10%.
+#   "cover"   - keep its shape, fill the canvas and crop whatever overflows (the sides get cut).
+# For no cut AND no squeezing, make the background exactly CANVAS_W x CANVAS_H (1037x1517).
+BG_FIT_MODE = "stretch"
+# "stretch" is only used while the template's shape is within this factor of the canvas's
+# shape; a very different shape (e.g. a wide landscape image) would look badly squashed,
+# so it falls back to "cover".
+BG_MAX_STRETCH = 1.25
+
+
 def _cover_to_canvas(img: Image.Image) -> Image.Image:
-    """Scale the background to fill the canvas while keeping its aspect ratio,
-    then center-crop the overflow. Avoids stretching/squashing the template."""
+    """Fit the background template to the card canvas (see BG_FIT_MODE)."""
     if img.size == (CANVAS_W, CANVAS_H):
         return img
+    if BG_FIT_MODE == "stretch":
+        shape = (img.width / img.height) / (CANVAS_W / CANVAS_H)
+        if 1 / BG_MAX_STRETCH <= shape <= BG_MAX_STRETCH:
+            return img.resize((CANVAS_W, CANVAS_H), Image.LANCZOS)
+    # "cover": scale to fill the canvas while keeping the aspect ratio, then
+    # center-crop the overflow.
     scale = max(CANVAS_W / img.width, CANVAS_H / img.height)
     new_w = round(img.width * scale)
     new_h = round(img.height * scale)
