@@ -145,6 +145,47 @@ class SquadView(OwnedView):
 
 # ── The cog ──────────────────────────────────────────────────────────────────
 
+
+def card_db_owner(player_key: str) -> int | None:
+    """User id that currently owns this card, or None."""
+    from economy import _conn
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM owned WHERE player_key = ? LIMIT 1", (player_key,)
+        ).fetchone()
+    return int(row[0]) if row else None
+
+
+class AutoXiView(ui.View):
+    """Button under your XI: one tap picks the best XI automatically."""
+
+    def __init__(self, owner_id: int):
+        super().__init__(timeout=180)
+        self.owner_id = owner_id
+
+    @ui.button(label="Auto XI", style=discord.ButtonStyle.success, emoji=None)
+    async def auto_xi(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the owner of this XI can use this.", ephemeral=True)
+            return
+        if _in_match(interaction.client, self.owner_id):
+            await interaction.response.send_message("❌ You can't change your XI during a match.", ephemeral=True)
+            return
+        cards = sl.owned_cards(self.owner_id)
+        if len(cards) < economy.XI_SIZE:
+            await interaction.response.send_message(
+                f"❌ You need at least {economy.XI_SIZE} players. Try `csstarterpack`.", ephemeral=True
+            )
+            return
+        xi = sl.best_xi(cards)
+        if not economy.set_full_xi(self.owner_id, [c["playername_key"] for c in xi]):
+            await interaction.response.send_message("❌ Couldn't set your XI. Try again.", ephemeral=True)
+            return
+        await interaction.response.edit_message(
+            embed=_xi_embed(interaction.user, economy.get_user(self.owner_id)), view=self
+        )
+
+
 class SquadCog(commands.Cog, name="Squad"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -336,6 +377,51 @@ class SquadCog(commands.Cog, name="Squad"):
         else:
             await ctx.send(embed=embed)
 
+    # -- player stats card -----------------------------------------------
+    @commands.command(name="csview")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def csview(self, ctx: commands.Context, *, player: str):
+        """Show a player's card with career batting and bowling stats."""
+        from career_stats import get_career, batting_figures, bowling_figures
+
+        card, err = sl.resolve_any(security.clean_input(player))
+        if card is None:
+            await ctx.send(f"❌ {err}")
+            return
+        career = get_career(card["playername_key"])
+        bat = batting_figures(career)
+        bowl = bowling_figures(career)
+
+        width = 24
+        rows = ["Batting".ljust(width) + "Bowling"]
+        for (bl, bv), (wl, wv) in zip(bat, bowl):
+            rows.append(f"{bl}: {bv}".ljust(width) + f"{wl}: {wv}")
+        table = "\n".join(rows)
+
+        owner = None
+        owner_id = card_db_owner(card["playername_key"])
+        if owner_id:
+            member = ctx.guild.get_member(owner_id) if ctx.guild else None
+            owner = member.display_name if member else str(owner_id)
+
+        header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
+        lines = [header]
+        if owner:
+            lines.append(f"Owner: {owner}")
+        lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
+        embed = discord.Embed(
+            title=f"Player Stats: {esc(card['playername'])}",
+            description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
+            color=discord.Color.blurple(),
+        )
+        path = card["image_path"]
+        if path and Path(path).exists():
+            file = discord.File(path, filename="card.png")
+            embed.set_image(url="attachment://card.png")
+            await ctx.send(embed=embed, file=file)
+        else:
+            await ctx.send(embed=embed)
+
     # -- XI --------------------------------------------------------------
     @commands.command(name="csxi", aliases=["csbattingorder"])
     @commands.cooldown(1, 4, commands.BucketType.user)
@@ -346,7 +432,8 @@ class SquadCog(commands.Cog, name="Squad"):
         if user is None:
             await ctx.send(f"**{esc(target.display_name)}** hasn't debuted yet.")
             return
-        await ctx.send(embed=_xi_embed(target, user))
+        view = AutoXiView(ctx.author.id) if target.id == ctx.author.id else None
+        await ctx.send(embed=_xi_embed(target, user), view=view)
 
     @commands.command(name="csautoxi")
     @commands.cooldown(1, 10, commands.BucketType.user)

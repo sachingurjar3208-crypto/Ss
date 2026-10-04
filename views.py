@@ -290,14 +290,19 @@ from data import (
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
     NOT_OUT_EMOJI, LBW_EMOJI,
 )
-try:
-    from career_stats import get_career_stats, save_game_innings_stats
-except ImportError:
-    def get_career_stats(user_id, player_name):
-        return {}
+from career_stats import save_innings as _save_innings
 
-    def save_game_innings_stats(*args, **kwargs):
-        return None
+
+def save_game_innings_stats(game, batting_user_id=None, bowling_user_id=None, is_final=False):
+    """Persist per-card stats for the innings that just ended."""
+    try:
+        _save_innings(game, is_final=is_final)
+    except Exception as e:
+        print(f"[career_stats] save failed: {type(e).__name__}: {e}")
+
+
+def get_career_stats(user_id, player_name):
+    return {}
 from match_records import record_match_result as _record_match_result
 
 

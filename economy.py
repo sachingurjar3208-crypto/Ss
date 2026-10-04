@@ -641,3 +641,15 @@ def give_card(user_id, player_key: str) -> bool:
         if got.rowcount:
             _fill_empty_slots(conn, uid, [player_key])
         return bool(got.rowcount)
+
+
+def reset_all_cards(user_id) -> int:
+    """(Admin) Remove every card the user owns, clear their XI and captain.
+    Coins and team name are kept. Returns how many cards were removed."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM owned WHERE user_id = ?", (uid,)).fetchone()[0]
+        conn.execute("DELETE FROM owned WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
+        conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ?", (uid,))
+        return int(n)
