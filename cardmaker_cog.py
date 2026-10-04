@@ -855,22 +855,6 @@ class CardMakerCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
 
-    # ── /sync ────────────────────────────────────────────────────────
-    @app_commands.command(
-        name="sync",
-        description="Re-sync all slash commands with Discord (owner only)",
-    )
-    @is_owner()
-    async def sync(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            synced = await self.bot.tree.sync()
-            await interaction.followup.send(
-                f"✅ Synced {len(synced)} slash commands.", ephemeral=True
-            )
-        except Exception as e:
-            await interaction.followup.send(f"❌ Sync failed: `{e}`", ephemeral=True)
-
     # ── /removecard ──────────────────────────────────────────────────
     @app_commands.command(name="removecard", description="Delete a player card from the database")
     @app_commands.describe(cardname="Which card to remove")
