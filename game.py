@@ -940,7 +940,7 @@ class GameState:
             self.bowling_team_reviews[uid] = 2
 
     async def build_team_list(self, user_id: int, instances) -> list[MatchPlayer]:
-        from .engine import (
+        from engine import (
             apply_lor_bonus,
             apply_memories_boost,
             apply_potm_boost,

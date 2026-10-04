@@ -150,6 +150,68 @@ class SquadCog(commands.Cog, name="Squad"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    # -- challenge a player (csmp @user <overs>) ---------------------------
+    @commands.command(name="csmp")
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def csmp(self, ctx: commands.Context, opponent: discord.Member, overs: int = 5):
+        """Challenge another player to a match: `csmp @user 5`."""
+        from views import AcceptDeclineView, active_games
+        from game import GameState, MatchPlayer
+        from embeds import build_match_invite_embed
+        from data import random_match_conditions
+
+        challenger = ctx.author
+        if opponent.bot:
+            await ctx.send("❌ You can't challenge a bot.")
+            return
+        if opponent.id == challenger.id:
+            await ctx.send("❌ You can't challenge yourself.")
+            return
+        if not 1 <= overs <= 20:
+            await ctx.send("❌ Overs must be between 1 and 20. Example: `csmp @user 5`")
+            return
+        if ctx.channel.id in active_games:
+            await ctx.send("❌ A match is already running in this channel. Use `cs cancel` first.")
+            return
+        if _in_match(self.bot, challenger.id):
+            await ctx.send("❌ You are already in a match.")
+            return
+        if _in_match(self.bot, opponent.id):
+            await ctx.send(f"❌ {opponent.display_name} is already in a match.")
+            return
+        for who, label in ((challenger, "You"), (opponent, opponent.display_name)):
+            if not economy.user_exists(who.id):
+                await ctx.send(f"❌ {label} must debut first. Use `csdebut`.")
+                return
+            problem = sl.xi_problem(who.id)
+            if problem:
+                await ctx.send(f"❌ {label} {problem}.")
+                return
+
+        game = GameState(ctx.channel.id, challenger, opponent, overs)
+        for uid, idx_base in ((challenger.id, 0), (opponent.id, 100)):
+            team = []
+            for i, c in enumerate(sl.xi_cards(uid)):
+                team.append(MatchPlayer(
+                    name=c["playername"],
+                    ovr=c["ovr"],
+                    bat=c["bat"],
+                    bowl=c["bowl"],
+                    bowling_type=card_db.effective_bowling_type(c),
+                    role=sl.ENGINE_ROLE[card_db.effective_role(c)],
+                    inst_pk=idx_base + i + 1,
+                ))
+            game.teams[uid] = team
+            game.team_pks[uid] = [mp.inst_pk for mp in team]
+
+        active_games[ctx.channel.id] = game
+        embed = build_match_invite_embed(challenger, opponent, overs, random_match_conditions())
+        await ctx.send(
+            content=opponent.mention,
+            embed=embed,
+            view=AcceptDeclineView(game),
+        )
+
     # -- debut -----------------------------------------------------------
     @commands.command(name="csdebut")
     @commands.cooldown(1, 10, commands.BucketType.user)
