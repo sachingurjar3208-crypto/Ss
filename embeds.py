@@ -138,7 +138,7 @@ def _ball_token(outcome: str) -> str:
     return _BALL_EMOJI.get(outcome, outcome)
 
 
-def _timeline_line(game: GameState, max_balls: int = 8) -> str | None:
+def _timeline_line(game: GameState, max_balls: int = 12) -> str | None:
     """One single line showing the most recent over.
 
     The timeline stores a "|" marker when an over finishes, so splitting on
@@ -207,14 +207,17 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
     if bat_rows:
         embed.add_field(name="Batters", value=_table(["BATTER", "R", "B", "SR"], [15, 3, 3, 6], bat_rows), inline=False)
 
-    # ── Stat chips: partnership, CRR, and proj/RRR — inline fields so
-    # Discord renders them as separate boxes next to each other ────────────
-    embed.add_field(name="P'SHIP", value=f"**{game.partnership_runs}** ({game.partnership_balls})", inline=True)
-    embed.add_field(name="CRR", value=f"**{game.crr()}**", inline=True)
+    # ── Stat chips: one inline line in code boxes, like the Glenn McGrath
+    # scorecard:  `P'Ship: 5(2)`  `CRR: 15.0`  `Proj: 300` ─────────────────
     if inn == 2:
-        embed.add_field(name="RRR", value=f"**{game.rrr()}**", inline=True)
+        chip_last = f"`RRR: {game.rrr()}`"
     else:
-        embed.add_field(name="PROJ", value=f"**{game.projected()}**", inline=True)
+        chip_last = f"`Proj: {game.projected()}`"
+    embed.add_field(
+        name="\u200b",
+        value=f"`P'Ship: {game.partnership_runs}({game.partnership_balls})`  `CRR: {game.crr()}`  {chip_last}",
+        inline=False,
+    )
 
     # ── Bowler field ─────────────────────────────────────────────────────────
     if game.current_bowler:

@@ -550,6 +550,24 @@ async def _send_commentary_with_gifs(
             pass
 
 
+async def _post_delivery_prompt(interaction, channel, game, *, content, view, allowed_ids=None):
+    """Show the next delivery the Glenn McGrath way:
+    1) the old bowling message loses its buttons,
+    2) a fresh scoreboard is posted with the current state,
+    3) the "X is coming with N kmph" line + shot buttons go BELOW it.
+    So the next-bowl line is always the last thing under the score box."""
+    try:
+        await interaction.response.edit_message(view=None)
+    except Exception:
+        pass  # cosmetic only
+
+    async def _send():
+        await channel.send(embed=build_scoreboard_embed(game))
+        await channel.send(content=content, view=view)
+
+    await _run_safely(_send, allowed_ids=allowed_ids, notify_channel=channel)
+
+
 async def _send_bowling_prompt(
     channel: discord.TextChannel,
     game: GameState,
@@ -1505,8 +1523,8 @@ class FastBowlStage2View(_TimeoutMixin, ui.View):
             channel = interaction.channel
             batting_view = BattingView(self.game, stage1_choice=self.stage1_choice, is_free_hit=self.is_free_hit)
             batting_view._channel = channel
-            await _advance(
-                interaction, channel,
+            await _post_delivery_prompt(
+                interaction, channel, self.game,
                 content=_delivery_announcement(combined, speed, self.game.batting_user, free_hit=self.is_free_hit),
                 view=batting_view,
                 allowed_ids=_match_ids(self.game),
@@ -1569,8 +1587,8 @@ class BowlingView(_TimeoutMixin, ui.View):
             channel = interaction.channel
             batting_view = BattingView(self.game, is_free_hit=self.is_free_hit)
             batting_view._channel = channel
-            await _advance(
-                interaction, channel,
+            await _post_delivery_prompt(
+                interaction, channel, self.game,
                 content=_delivery_announcement(delivery_button, speed, self.game.batting_user, free_hit=self.is_free_hit),
                 view=batting_view,
                 allowed_ids=_match_ids(self.game),
