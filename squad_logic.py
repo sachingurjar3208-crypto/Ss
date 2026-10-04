@@ -55,58 +55,81 @@ def role_emoji(card) -> str:
     return ROLE_EMOJI.get(card_db.effective_bowling_type(card), ROLE_EMOJI["BOWL"])
 
 
+# Buy price by OVR (coins). Selling gives back (100 - SELL_CUT_PERCENT)% of this.
+BUY_PRICES = {
+    99: 9_000_000, 98: 7_000_000, 97: 5_500_000, 96: 4_000_000, 95: 3_000_000,
+    94: 2_100_000, 93: 1_800_000, 92: 1_250_000, 91: 900_000, 90: 690_000,
+    89: 500_000, 88: 350_000, 87: 200_000, 86: 100_000, 85: 60_000,
+    84: 40_000, 83: 20_000, 82: 10_000, 81: 7_800, 80: 5_000,
+    79: 3_000, 78: 2_500, 77: 2_000, 76: 1_500, 75: 1_000,
+    74: 900, 73: 800, 72: 700, 71: 650, 70: 600,
+    69: 300, 68: 270, 67: 240, 66: 200, 65: 160,
+    64: 120, 63: 90, 62: 60, 61: 50, 60: 40,
+}
+SELL_CUT_PERCENT = 40   # 40% is cut on selling (also used for duplicate refunds)
+
+
 def buy_price(card) -> int:
-    """Price grows fast with rating: ovr 60 ~ 52k, 80 ~ 164k, 96 ~ 340k."""
-    return max(5_000, int((card["ovr"] / 100) ** 4 * 400_000) // 500 * 500)
-
-
-# Resale (selling a card, or a duplicate from a pack) is a small FIXED amount per
-# tier. It must stay well below what a pack costs, otherwise people could buy
-# packs and sell the cards back for endless profit. The test in
-# test_all.py checks this for every pack.
-SELL_VALUE = {"common": 1_000, "rare": 4_000, "elite": 12_000}
+    """Price from the BUY_PRICES table. Above 99 uses the 99 price, below 60 the 60 price."""
+    ovr = max(min(BUY_PRICES), min(max(BUY_PRICES), int(card["ovr"])))
+    return BUY_PRICES[ovr]
 
 
 def sell_value(card) -> int:
-    return SELL_VALUE[tier_of(card["ovr"])]
+    """Buy price minus the 40% cut. A pack's price is higher than the average
+    sell value of what it gives, so buy-pack-then-sell can't make endless profit."""
+    return buy_price(card) * (100 - SELL_CUT_PERCENT) // 100
 
 
 # ── Packs ────────────────────────────────────────────────────────────────────
-# weights = chance of a card from each tier. `guarantee` = at least one card
-# of that tier (if the game has such cards).
+# Every pack gives exactly ONE player.
+#   "range"   = (min ovr, max ovr) of the player you can get
+#   "weights" = (optional) chance weight per ovr; without it every player in
+#               the range is equally likely.
 PACKS = {
-    "bronze": {"label": "Bronze Pack", "emoji": "🟤", "price": 10_000, "cards": 3,
-               "weights": {"common": 70, "rare": 27, "elite": 3}, "guarantee": None},
-    "silver": {"label": "Silver Pack", "emoji": "⚪", "price": 40_000, "cards": 3,
-               "weights": {"common": 35, "rare": 55, "elite": 10}, "guarantee": "rare"},
-    "gold":   {"label": "Gold Pack",   "emoji": "🟡", "price": 100_000, "cards": 3,
-               "weights": {"common": 5, "rare": 55, "elite": 40}, "guarantee": "elite"},
+    "bronze": {"label": "Bronze Pack", "emoji": "🟤", "price": 10_000, "cards": 1,
+               "range": (60, 76)},
+    "silver": {"label": "Silver Pack", "emoji": "⚪", "price": 40_000, "cards": 1,
+               "range": (77, 83)},
+    "gold":   {"label": "Gold Pack",   "emoji": "🟡", "price": 150_000, "cards": 1,
+               "range": (84, 88)},
+    "legendary": {"label": "Legendary Pack", "emoji": "🔥", "price": 1_800_000, "cards": 1,
+                  "range": (90, 95),
+                  "weights": {90: 60, 91: 50, 92: 45, 93: 30, 94: 20, 95: 5}},
 }
 
 
-def _pool_by_tier() -> dict[str, list]:
-    tiers: dict[str, list] = {"common": [], "rare": [], "elite": []}
-    for c in card_db.list_all_cards():
-        tiers[tier_of(c["ovr"])].append(c)
-    return tiers
+def _closest_cards(cards: list, lo: int, hi: int) -> list:
+    """Cards inside lo..hi; if there are none, the cards closest to that range
+    (so a pack never fails just because one ovr has no player yet)."""
+    inside = [c for c in cards if lo <= c["ovr"] <= hi]
+    if inside:
+        return inside
+    mid = (lo + hi) / 2
+    best = min(abs(c["ovr"] - mid) for c in cards)
+    return [c for c in cards if abs(c["ovr"] - mid) == best]
 
 
 def roll_pack(pack_type: str) -> list:
-    """Pick the cards for one pack. Returns card rows (may repeat a card)."""
+    """Pick the single card for one pack. Returns a list with 1 card row
+    (empty list only if the game has no cards at all)."""
     spec = PACKS[pack_type]
-    tiers = _pool_by_tier()
-    if not any(tiers.values()):
+    cards = list(card_db.list_all_cards())
+    if not cards:
         return []
-    names = [t for t in ("common", "rare", "elite") if tiers[t]]
-    picks: list = []
-    if spec["guarantee"] and tiers[spec["guarantee"]]:
-        picks.append(_rng.choice(tiers[spec["guarantee"]]))
-    while len(picks) < spec["cards"]:
-        weights = [spec["weights"][t] for t in names]
-        tier = _rng.choices(names, weights=weights, k=1)[0]
-        picks.append(_rng.choice(tiers[tier]))
-    _rng.shuffle(picks)
-    return picks
+    lo, hi = spec["range"]
+    weights = spec.get("weights")
+    if weights:
+        by_ovr: dict[int, list] = {}
+        for c in cards:
+            if lo <= c["ovr"] <= hi:
+                by_ovr.setdefault(int(c["ovr"]), []).append(c)
+        # only ovr values that have at least one player can be rolled
+        usable = [o for o in weights if o in by_ovr]
+        if usable:
+            ovr = _rng.choices(usable, weights=[weights[o] for o in usable], k=1)[0]
+            return [_rng.choice(by_ovr[ovr])]
+    return [_rng.choice(_closest_cards(cards, lo, hi))]
 
 
 # ── Starter squad and auto XI ────────────────────────────────────────────────

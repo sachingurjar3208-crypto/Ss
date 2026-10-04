@@ -26,6 +26,25 @@ from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
 from squad_cog import _card_line, _in_match, _is_premium, _need_debut
 
+# ── One shared 5 second cooldown for ALL economy commands ────────────────────
+# Each command used to have its own timer, so spamming csbal/csopen/csbuy one
+# after another still worked. Now every economy command shares ONE timer per
+# user: after any of them, the user must wait ECONOMY_COOLDOWN seconds.
+ECONOMY_COOLDOWN = 5
+_econ_bucket = commands.CooldownMapping.from_cooldown(1, ECONOMY_COOLDOWN, commands.BucketType.user)
+
+
+def economy_cooldown():
+    async def predicate(ctx: commands.Context) -> bool:
+        bucket = _econ_bucket.get_bucket(ctx.message)
+        retry_after = bucket.update_rate_limit() if bucket else None
+        if retry_after:
+            # security.py's error handler shows "Wait Xs before using this again".
+            raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
+        return True
+    return commands.check(predicate)
+
+
 # Players with a trade waiting for an answer (each can only have one at a time).
 _pending_trade: set[int] = set()
 
@@ -126,7 +145,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
     # -- purse -----------------------------------------------------------
     @commands.command(name="csbal")
-    @commands.cooldown(1, 4, commands.BucketType.user)
+    @economy_cooldown()
     async def csbal(self, ctx: commands.Context):
         """Show your coins and unopened packs."""
         if not await _need_debut(ctx):
@@ -186,26 +205,26 @@ class EconomyCog(commands.Cog, name="Economy"):
         await ctx.send("\n".join(lines))
 
     @commands.command(name="csdaily")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @economy_cooldown()
     async def csdaily(self, ctx: commands.Context):
         """Claim daily coins + a random 60-78 player (streak bonus every 7th day)."""
         await self._claim(ctx, "daily")
 
     @commands.command(name="csweekly")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @economy_cooldown()
     async def csweekly(self, ctx: commands.Context):
         """(Premium) Claim weekly coins + a random 80-83 player."""
         await self._claim(ctx, "weekly")
 
     @commands.command(name="csmonthly")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @economy_cooldown()
     async def csmonthly(self, ctx: commands.Context):
         """Claim monthly coins + a random 85-88 player."""
         await self._claim(ctx, "monthly")
 
     # -- packs -----------------------------------------------------------
     @commands.command(name="cspack")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @economy_cooldown()
     async def cspack(self, ctx: commands.Context, pack: Optional[str] = None):
         """See packs, or buy one: `cspack bronze`."""
         if not await _need_debut(ctx):
@@ -213,14 +232,14 @@ class EconomyCog(commands.Cog, name="Economy"):
         if pack is None:
             lines = []
             for key, spec in sl.PACKS.items():
-                lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · {spec['cards']} players\n`cspack {key}`")
+                lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · 1 player ({spec['range'][0]}-{spec['range'][1]} OVR)\n`cspack {key}`")
             embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines), color=discord.Color.gold())
             embed.set_footer(text="Buy with cspack <type>, then open with csopen <type>. Duplicates turn into coins.")
             await ctx.send(embed=embed)
             return
         key = security.clean_input(pack, 12).lower()
         if key not in sl.PACKS:
-            await ctx.send("❌ Pick `bronze`, `silver` or `gold`.")
+            await ctx.send("❌ Pick " + ", ".join(f"`{k}`" for k in sl.PACKS) + ".")
             return
         spec = sl.PACKS[key]
         uid = ctx.author.id
@@ -240,7 +259,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         )
 
     @commands.command(name="csopen")
-    @commands.cooldown(1, 4, commands.BucketType.user)
+    @economy_cooldown()
     async def csopen(self, ctx: commands.Context, pack: Optional[str] = None):
         """Open one of your packs: `csopen bronze`."""
         if not await _need_debut(ctx):
@@ -286,7 +305,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
     # -- buy / sell ------------------------------------------------------
     @commands.command(name="csbuy")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @economy_cooldown()
     async def csbuy(self, ctx: commands.Context, *, player: str):
         """Buy a player: `csbuy Virat Kohli`."""
         if not await _need_debut(ctx):
@@ -311,11 +330,12 @@ class EconomyCog(commands.Cog, name="Economy"):
         view = ConfirmView(uid, do_buy)
         view.message = await ctx.send(
             f"Buy {_card_line(card)} for **{economy.fmt_coins(price)}**?\n"
-            f"Your purse: {economy.fmt_coins(economy.get_balance(uid))}", view=view
+            f"Your purse: {economy.fmt_coins(economy.get_balance(uid))}\n"
+            f"(Selling later returns {economy.fmt_coins(sl.sell_value(card))} — {sl.SELL_CUT_PERCENT}% is cut)", view=view
         )
 
     @commands.command(name="cssell")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @economy_cooldown()
     async def cssell(self, ctx: commands.Context, *, player: str):
         """Sell one of your players for coins."""
         if not await _need_debut(ctx):
@@ -342,10 +362,14 @@ class EconomyCog(commands.Cog, name="Economy"):
             return f"❌ {e}" if e else f"✅ Sold **{esc(card['playername'])}** for {economy.fmt_coins(value)}."
 
         view = ConfirmView(uid, do_sell)
-        view.message = await ctx.send(f"Sell {_card_line(card)} for **{economy.fmt_coins(value)}**?", view=view)
+        view.message = await ctx.send(
+            f"Sell {_card_line(card)} for **{economy.fmt_coins(value)}**?\n"
+            f"(Buy price {economy.fmt_coins(sl.buy_price(card))} − {sl.SELL_CUT_PERCENT}% cut)", view=view
+        )
 
     # -- trade -----------------------------------------------------------
     @commands.command(name="cstrade")
+    @economy_cooldown()
     @commands.cooldown(1, 15, commands.BucketType.user)
     async def cstrade(self, ctx: commands.Context, member: discord.Member, *, players: str):
         """Trade players: `cstrade @user my player | their player`."""
