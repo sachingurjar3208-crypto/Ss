@@ -28,7 +28,7 @@ from pathlib import Path
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
-from card_db import get_playstyle_logo, get_panel
+from card_db import get_playstyle_logo, get_panel, get_country_logo
 from card_narratives import ROLE_CARD_WORD, HAND_CARD_WORD
 
 CANVAS_W, CANVAS_H = 1037, 1517
@@ -88,6 +88,12 @@ FG_CLIP_TO_PANEL = False
 
 HAND_CENTER = (518, 1348)        # "RIGHT HAND BAT" / "LEFT HAND BAT", bottom of centre band
 HAND_SIZE = 20
+
+# ── Country logo: sits just ABOVE the country name. It follows the country
+# text (so /cardlayout countryup/down moves both), then the per-card
+# /countrylogofixer dx/dy/scale is applied on top. ──
+COUNTRY_LOGO_BOX = 46            # logo is fitted inside a square this big
+COUNTRY_LOGO_OFFSET_Y = -44      # logo centre is this many px above the country text centre
 
 # ── Custom panel overlay image (added via /paneladder). Fits the same way
 # the foreground cutout does: scaled to fit inside this box (keeping aspect
@@ -193,10 +199,24 @@ def _load_panel(pathname) -> Image.Image | None:
         return None
 
 
-def _draw_logo(canvas: Image.Image, logo: Image.Image, center, dx: int, dy: int, scale_pct: int) -> None:
-    """Fit `logo` in LOGO_BOX, apply the /logofixer size, centre it on
-    `center` shifted by (dx, dy) and paste it with its transparency."""
-    base = min(LOGO_BOX / logo.width, LOGO_BOX / logo.height)
+def _load_country_logo(country) -> Image.Image | None:
+    """Load the logo added for this country via /countrylogoadder; None if
+    there isn't one or it can't be read (card just renders without it)."""
+    row = get_country_logo(country)
+    if row is None:
+        return None
+    try:
+        return Image.open(row["local_path"]).convert("RGBA")
+    except Exception:
+        return None
+
+
+def _draw_logo(canvas: Image.Image, logo: Image.Image, center, dx: int, dy: int, scale_pct: int,
+               box: int = LOGO_BOX) -> None:
+    """Fit `logo` in a `box` x `box` square (LOGO_BOX by default), apply the
+    /logofixer size, centre it on `center` shifted by (dx, dy) and paste it
+    with its transparency."""
+    base = min(box / logo.width, box / logo.height)
     scale = base * (scale_pct / 100)
     w, h = max(1, int(logo.width * scale)), max(1, int(logo.height * scale))
     resized = logo.resize((w, h), Image.LANCZOS)
@@ -321,6 +341,7 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     role_dx    = _col(card_row, "role_dx", 0)
     role_dy    = _col(card_row, "role_dy", 0)
     role_size  = _col(card_row, "role_size", ROLE_SIZE)
+    hand_dx    = _col(card_row, "hand_dx", 0)
     hand_dy    = _col(card_row, "hand_dy", 0)
     hand_size  = _col(card_row, "hand_size", HAND_SIZE)
     role_center = (ROLE_CENTER[0] + ovr_dx + role_dx, ROLE_CENTER[1] + ovr_dy + role_dy)
@@ -332,7 +353,7 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     # ── Batting hand, bottom of the centre band ────────────────────────
     hand_word = HAND_CARD_WORD.get(_col(card_row, "batting_hand"))
     if hand_word:
-        hand_center = (HAND_CENTER[0], HAND_CENTER[1] + hand_dy)
+        hand_center = (HAND_CENTER[0] + hand_dx, HAND_CENTER[1] + hand_dy)
         _draw_centered(draw, hand_center, hand_word, _font(FONT_LABEL, hand_size), WHITE)
 
     # ── Playstyle logos (max 2): one sits in the middle, two fill the circles ──
@@ -359,6 +380,18 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     country_center = (COUNTRY_CENTER[0], COUNTRY_CENTER[1] + country_dy)
     country_font = _font(FONT_LABEL, country_size)
     _draw_centered(draw, country_center, card_row["country"].upper(), country_font, WHITE)
+
+    # ── Country logo, just above the country name ──────────────────────
+    country_logo = _load_country_logo(_col(card_row, "country"))
+    if country_logo is not None:
+        _draw_logo(
+            canvas, country_logo,
+            (country_center[0], country_center[1] + COUNTRY_LOGO_OFFSET_Y),
+            _col(card_row, "countrylogo_dx", 0),
+            _col(card_row, "countrylogo_dy", 0),
+            _col(card_row, "countrylogo_scale", 100),
+            box=COUNTRY_LOGO_BOX,
+        )
 
     buf = io.BytesIO()
     canvas.convert("RGB").save(buf, format="PNG")

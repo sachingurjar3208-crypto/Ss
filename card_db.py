@@ -18,11 +18,13 @@ BACKGROUNDS_DIR = Path(__file__).parent / "backgrounds"
 GENERATED_DIR = Path(__file__).parent / "generated"
 LOGOS_DIR = Path(__file__).parent / "playstyle_logos"
 PANELS_DIR = Path(__file__).parent / "panels"
+COUNTRY_LOGOS_DIR = Path(__file__).parent / "country_logos"
 
 BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 PANELS_DIR.mkdir(parents=True, exist_ok=True)
+COUNTRY_LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Narratives of each card, cached briefly because the match engine asks once per ball.
 _NARRATIVE_CACHE: dict[str, tuple[float, list[str]]] = {}
@@ -57,6 +59,7 @@ _NEW_CARD_COLUMNS = [
     ("role_size",     "INTEGER NOT NULL DEFAULT 26"),
     ("hand_dy",       "INTEGER NOT NULL DEFAULT 0"),
     ("hand_size",     "INTEGER NOT NULL DEFAULT 20"),
+    ("hand_dx",       "INTEGER NOT NULL DEFAULT 0"),      # set via /playtypefixer
     ("stats_dx",      "INTEGER NOT NULL DEFAULT 0"),
     ("stats_dy",      "INTEGER NOT NULL DEFAULT 0"),
     ("stats_size",    "INTEGER NOT NULL DEFAULT 70"),
@@ -69,6 +72,12 @@ _NEW_CARD_COLUMNS = [
     ("panelimg_dx",    "INTEGER NOT NULL DEFAULT 0"),
     ("panelimg_dy",    "INTEGER NOT NULL DEFAULT 0"),
     ("panelimg_scale", "INTEGER NOT NULL DEFAULT 100"),
+    # ── Country logo (drawn just above the country name). The image itself is
+    # per COUNTRY (/countrylogoadder); these are the per-CARD position/size
+    # tweaks set with /countrylogofixer. ──
+    ("countrylogo_dx",    "INTEGER NOT NULL DEFAULT 0"),
+    ("countrylogo_dy",    "INTEGER NOT NULL DEFAULT 0"),
+    ("countrylogo_scale", "INTEGER NOT NULL DEFAULT 100"),
 ]
 
 
@@ -132,6 +141,18 @@ def init_card_db() -> None:
             CREATE TABLE IF NOT EXISTS panels (
                 pathname_key  TEXT PRIMARY KEY,   -- lowercase
                 pathname      TEXT NOT NULL,      -- original casing, shown in the picker
+                link          TEXT NOT NULL,
+                local_path    TEXT NOT NULL,
+                added_by      INTEGER,
+                added_at      REAL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS country_logos (
+                country_key   TEXT PRIMARY KEY,   -- lowercase country name
+                country       TEXT NOT NULL,      -- canonical name, e.g. "India"
                 link          TEXT NOT NULL,
                 local_path    TEXT NOT NULL,
                 added_by      INTEGER,
@@ -392,7 +413,7 @@ def update_card_layout(playername: str, **kwargs) -> bool:
         "name_dx", "name_dy", "name_size",
         "ovr_dx", "ovr_dy", "ovr_size",
         "role_dx", "role_dy", "role_size",
-        "hand_dy", "hand_size",
+        "hand_dx", "hand_dy", "hand_size",
         "stats_dx", "stats_dy", "stats_size",
         "panel_dy", "country_dy", "country_size",
     }
@@ -593,3 +614,51 @@ def list_playstyle_logos() -> list[str]:
     with _conn() as conn:
         rows = conn.execute("SELECT pathname FROM playstyle_logos ORDER BY pathname").fetchall()
         return [r["pathname"] for r in rows]
+
+
+# ── Country logos (one image per country, shown above the country name) ───
+
+def get_country_logo(country: str) -> sqlite3.Row | None:
+    if not country:
+        return None
+    with _conn() as conn:
+        return conn.execute(
+            "SELECT * FROM country_logos WHERE country_key = ?",
+            (country.strip().lower(),),
+        ).fetchone()
+
+
+def add_country_logo(country: str, link: str, local_path: str, added_by: int) -> bool:
+    """Add a country's logo, or replace the existing one. Returns True if it replaced one."""
+    key = country.strip().lower()
+    with _conn() as conn:
+        existed = conn.execute("SELECT 1 FROM country_logos WHERE country_key = ?", (key,)).fetchone() is not None
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO country_logos (country_key, country, link, local_path, added_by, added_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (key, country.strip(), link.strip(), local_path, added_by, time.time()),
+        )
+        conn.commit()
+    return existed
+
+
+def list_country_logos() -> list[str]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT country FROM country_logos ORDER BY country").fetchall()
+        return [r["country"] for r in rows]
+
+
+def update_country_logo_layout(playername: str, dx: int, dy: int, scale: int) -> bool:
+    """Save the position offset and size (percent) of a card's country logo."""
+    if get_card(playername) is None:
+        return False
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE cards SET countrylogo_dx = ?, countrylogo_dy = ?, countrylogo_scale = ?, "
+            "updated_at = ? WHERE playername_key = ?",
+            (dx, dy, scale, time.time(), playername.strip().lower()),
+        )
+        conn.commit()
+    return True

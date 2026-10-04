@@ -8,6 +8,9 @@
     /logoadderofplaystyle  add a playstyle logo to the logo list
     /setplaystylelogo      put up to 2 playstyle logos on a card
     /logofixer             move / resize a card's playstyle logos
+    /countrylogoadder      add (or replace) a country's logo - shown just above the country name
+    /countrylogofixer      move / resize a card's country logo
+    /playtypefixer         move / resize a card's batting-hand text (RIGHT / LEFT HAND BAT)
     /paneladder     add a new stats-panel overlay image (sits IN FRONT of the foreground)
     /panelremover   remove a stats-panel overlay from the panel list
     /panelfixer     move / resize a card's stats-panel overlay
@@ -35,7 +38,8 @@ from card_db import (
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
     panel_exists, get_panel, add_panel, list_panels, remove_panel,
     update_panel_layout, set_card_panel,
-    GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR,
+    get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
+    GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
 from card_image import generate_card_image
 from card_narratives import NARRATIVES, NARRATIVE_NAMES, ROLES, HANDS, BOWLING_TYPES
@@ -696,6 +700,167 @@ class CardMakerCog(commands.Cog):
             await _regenerate_and_send(interaction, playername, "🔧 Logo adjusted (" + "; ".join(summary) + ")")
         except Exception as e:
             await interaction.followup.send(f"⚠️ Logo position/size saved, but image regeneration failed: `{e}`")
+
+    # ── /countrylogoadder ────────────────────────────────────────────
+    @app_commands.command(
+        name="countrylogoadder",
+        description="Add a country logo - it shows just above the country name on every card of that country",
+    )
+    @app_commands.describe(
+        country="Which country this logo is for",
+        url="Direct link to the logo image (transparent PNG works best)",
+    )
+    @app_commands.autocomplete(country=country_autocomplete)
+    @is_owner()
+    async def countrylogoadder(self, interaction: discord.Interaction, country: str, url: str):
+        await interaction.response.defer()
+
+        resolved = resolve_country(country)
+        if resolved is None:
+            await interaction.followup.send(
+                f"❌ Unknown country `{country}` — pick one from the autocomplete list."
+            )
+            return
+        country_name, _emoji = resolved
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    resp.raise_for_status()
+                    data = await resp.read()
+            if len(data) > 15_000_000:
+                raise ValueError("image is bigger than 15 MB")
+            # Decode it now so a link that isn't a real image fails here, not later on a card.
+            logo = Image.open(io.BytesIO(data)).convert("RGBA")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Couldn't download that link as an image: `{e}`")
+            return
+
+        # country_name comes from the fixed country list, so this file name is always safe.
+        local_path = COUNTRY_LOGOS_DIR / f"{country_name.strip().lower().replace(' ', '_')}.png"
+        logo.save(local_path, format="PNG")
+        replaced = add_country_logo(country_name, url, str(local_path), interaction.user.id)
+
+        verb = "replaced" if replaced else "added"
+        await interaction.followup.send(
+            f"✅ Country logo for **{country_name}** {verb}. It now shows above the country name on every "
+            f"{country_name} card (cards update the next time they are generated — e.g. with "
+            f"`/countrylogofixer` or `/editcard`). Fine-tune one card with `/countrylogofixer`."
+        )
+
+    # ── /countrylogofixer ────────────────────────────────────────────
+    @app_commands.command(name="countrylogofixer", description="Move and/or resize a card's country logo")
+    @app_commands.describe(
+        playername="Which card to adjust",
+        logoup="Pixels to move the country logo up",
+        logodown="Pixels to move the country logo down",
+        logoleft="Pixels to move the country logo left",
+        logoright="Pixels to move the country logo right",
+        logosizebig="Percent to make the logo bigger, e.g. 10 = +10% size",
+        logosizesmall="Percent to make the logo smaller, e.g. 10 = -10% size",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def countrylogofixer(
+        self,
+        interaction: discord.Interaction,
+        playername: str,
+        logoup: app_commands.Range[int, 0, 2000] = 0,
+        logodown: app_commands.Range[int, 0, 2000] = 0,
+        logoleft: app_commands.Range[int, 0, 2000] = 0,
+        logoright: app_commands.Range[int, 0, 2000] = 0,
+        logosizebig: app_commands.Range[int, 0, 500] = 0,
+        logosizesmall: app_commands.Range[int, 0, 90] = 0,
+    ):
+        await interaction.response.defer()
+
+        card = get_card(playername)
+        if card is None:
+            names = list_playernames()
+            hint = ", ".join(names) if names else "(no cards yet)"
+            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
+            return
+
+        if get_country_logo(card["country"]) is None:
+            have = list_country_logos()
+            hint = ", ".join(have) if have else "(none added yet)"
+            await interaction.followup.send(
+                f"❌ There is no logo for **{card['country']}** yet — add one with "
+                f"`/countrylogoadder country:{card['country']}` first.\nCountries with a logo: {hint}"
+            )
+            return
+
+        new_dx = card["countrylogo_dx"] - logoleft + logoright
+        new_dy = card["countrylogo_dy"] - logoup + logodown
+        new_scale = card["countrylogo_scale"] + logosizebig - logosizesmall
+        new_scale = max(MIN_SCALE_PCT, min(MAX_SCALE_PCT, new_scale))
+
+        update_country_logo_layout(playername, new_dx, new_dy, new_scale)
+
+        try:
+            await _regenerate_and_send(
+                interaction, playername,
+                f"🔧 Country logo adjusted (x={new_dx}, y={new_dy}, size={new_scale}%)",
+            )
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Country logo position/size saved, but image regeneration failed: `{e}`")
+
+    # ── /playtypefixer ───────────────────────────────────────────────
+    @app_commands.command(
+        name="playtypefixer",
+        description="Move and/or resize the batting-hand text (RIGHT / LEFT HAND BAT) on a card",
+    )
+    @app_commands.describe(
+        playername="Which card to adjust",
+        playtypeup="Pixels to move the text up",
+        playtypedown="Pixels to move the text down",
+        playtypeleft="Pixels to move the text left",
+        playtyperight="Pixels to move the text right",
+        playtypesizebig="Make the text bigger, e.g. 4 = +4px",
+        playtypesizesmall="Make the text smaller, e.g. 4 = -4px",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def playtypefixer(
+        self,
+        interaction: discord.Interaction,
+        playername: str,
+        playtypeup: app_commands.Range[int, 0, 500] = 0,
+        playtypedown: app_commands.Range[int, 0, 500] = 0,
+        playtypeleft: app_commands.Range[int, 0, 500] = 0,
+        playtyperight: app_commands.Range[int, 0, 500] = 0,
+        playtypesizebig: app_commands.Range[int, 0, 60] = 0,
+        playtypesizesmall: app_commands.Range[int, 0, 15] = 0,
+    ):
+        await interaction.response.defer()
+
+        card = get_card(playername)
+        if card is None:
+            names = list_playernames()
+            hint = ", ".join(names) if names else "(no cards yet)"
+            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
+            return
+
+        if not card["batting_hand"]:
+            await interaction.followup.send(
+                f"❌ **{card['playername']}** has no batting hand set, so there is no text to move — "
+                f"set one with `/editcard playername:{card['playername']} battinghand:<Right/Left>`."
+            )
+            return
+
+        new_dx = card["hand_dx"] - playtypeleft + playtyperight
+        new_dy = card["hand_dy"] - playtypeup + playtypedown
+        new_size = max(8, min(80, card["hand_size"] + playtypesizebig - playtypesizesmall))
+
+        update_card_layout(playername, hand_dx=new_dx, hand_dy=new_dy, hand_size=new_size)
+
+        try:
+            await _regenerate_and_send(
+                interaction, playername,
+                f"🔧 Play type text adjusted (x={new_dx}, y={new_dy}, size={new_size}px)",
+            )
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Play type position/size saved, but image regeneration failed: `{e}`")
 
     # ── /panelfixer ──────────────────────────────────────────────────
     @app_commands.command(name="panelfixer", description="Move and/or resize a card's stats panel overlay")
