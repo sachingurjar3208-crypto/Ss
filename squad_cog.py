@@ -43,10 +43,9 @@ def _in_match(bot, user_id: int) -> bool:
     """True if the user is in a live match (their squad is locked meanwhile)."""
     try:
         from views import active_games
-        from practice_views import active_practice
     except Exception:
         return False
-    for store in (active_games, active_practice):
+    for store in (active_games,):
         for obj in list(store.values()):
             for attr in ("challenger", "opponent", "user", "player", "author", "owner"):
                 who = getattr(obj, attr, None)
@@ -156,7 +155,7 @@ class SquadCog(commands.Cog, name="Squad"):
     async def csmp(self, ctx: commands.Context, opponent: discord.Member, overs: int = 5):
         """Challenge another player to a match: `csmp @user 5`."""
         from views import AcceptDeclineView, active_games
-        from game import GameState, MatchPlayer
+        from game import GameState
         from embeds import build_match_invite_embed
         from data import random_match_conditions
 
@@ -171,7 +170,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send("❌ Overs must be between 1 and 20. Example: `csmp @user 5`")
             return
         if ctx.channel.id in active_games:
-            await ctx.send("❌ A match is already running in this channel. Use `cs cancel` first.")
+            await ctx.send("❌ A match is already running in this channel. Use `cscancel` to end it.")
             return
         if _in_match(self.bot, challenger.id):
             await ctx.send("❌ You are already in a match.")
@@ -189,20 +188,11 @@ class SquadCog(commands.Cog, name="Squad"):
                 return
 
         game = GameState(ctx.channel.id, challenger, opponent, overs)
-        for uid, idx_base in ((challenger.id, 0), (opponent.id, 100)):
-            team = []
-            for i, c in enumerate(sl.xi_cards(uid)):
-                team.append(MatchPlayer(
-                    name=c["playername"],
-                    ovr=c["ovr"],
-                    bat=c["bat"],
-                    bowl=c["bowl"],
-                    bowling_type=card_db.effective_bowling_type(c),
-                    role=sl.ENGINE_ROLE[card_db.effective_role(c)],
-                    inst_pk=idx_base + i + 1,
-                ))
-            game.teams[uid] = team
-            game.team_pks[uid] = [mp.inst_pk for mp in team]
+        # The match screens (embeds / dropdowns) work with the "team dict" form:
+        # {"name", "ovr", "chem", "players": [ {name, ovr, bat, bowl, ...}, ... ]}
+        for uid in (challenger.id, opponent.id):
+            game.teams[uid] = sl.build_match_team(uid)
+            game.team_pks[uid] = []
 
         active_games[ctx.channel.id] = game
         embed = build_match_invite_embed(challenger, opponent, overs, random_match_conditions())
@@ -211,6 +201,42 @@ class SquadCog(commands.Cog, name="Squad"):
             embed=embed,
             view=AcceptDeclineView(game),
         )
+
+    # -- end / resume a stuck match ----------------------------------------
+    @commands.command(name="cscancel")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def cscancel(self, ctx: commands.Context):
+        """End the match running in this channel (either player, or a moderator)."""
+        from views import active_games
+        game = active_games.get(ctx.channel.id)
+        if game is None:
+            await ctx.send("❌ There is no match running in this channel.")
+            return
+        is_player = ctx.author.id in (game.challenger.id, game.opponent.id)
+        is_mod = getattr(ctx.author.guild_permissions, "manage_messages", False) if ctx.guild else False
+        if not (is_player or is_mod):
+            await ctx.send("🔒 Only the two players (or a moderator) can cancel this match.")
+            return
+        active_games.pop(ctx.channel.id, None)
+        game._afk_sent = True   # stops any pending timeout from fining anyone
+        await ctx.send("Match cancelled. No result was recorded.")
+
+    @commands.command(name="csresume")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def csresume(self, ctx: commands.Context):
+        """Re-send the current match prompt if the match looks stuck."""
+        from views import active_games, _resume_prompt
+        game = active_games.get(ctx.channel.id)
+        if game is None:
+            await ctx.send("❌ There is no match running in this channel.")
+            return
+        if ctx.author.id not in (game.challenger.id, game.opponent.id):
+            await ctx.send("🔒 Only the two players can resume this match.")
+            return
+        if game.batting_user_id is None:
+            await ctx.send("The match hasn't started yet — finish the toss first.")
+            return
+        await _resume_prompt(ctx.channel, game)
 
     # -- debut -----------------------------------------------------------
     @commands.command(name="csdebut")
@@ -450,7 +476,7 @@ class SquadCog(commands.Cog, name="Squad"):
         """List the commands."""
         embed = discord.Embed(title="🏏 CricStar Help", color=discord.Color.orange())
         embed.add_field(name="Start", value=(
-            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` `csmonthly` free coins"
+            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player"
         ), inline=False)
         embed.add_field(name="Squad", value=(
             "`cssquad` `csshow <player>` `csxi` `csautoxi`\n"
@@ -460,7 +486,7 @@ class SquadCog(commands.Cog, name="Squad"):
             "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"
             "`cstrade @user my player | their player` `csleaderboard`"
         ), inline=False)
-        embed.add_field(name="Play", value="`csmp @user <overs>` challenge • `cs cancel` cancel match", inline=False)
+        embed.add_field(name="Play", value="`csmp @user <overs>` challenge • `cscancel` cancel match", inline=False)
         await ctx.send(embed=embed)
 
     # ── Owner-only tools ─────────────────────────────────────────────────

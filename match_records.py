@@ -281,3 +281,10 @@ def get_achievements(user_id: int | str) -> list[dict]:
         results.append({"id": aid, "emoji": emoji, "name": name, "desc": desc, "earned": earned})
     conn.close()
     return results
+
+
+# Make sure the match-history tables exist before the first result is saved.
+try:
+    init_match_records_db()
+except Exception as _e:
+    print(f"[match_records] could not initialise tables: {_e}")

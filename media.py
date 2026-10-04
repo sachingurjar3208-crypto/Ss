@@ -361,3 +361,10 @@ def delete_attribute_emoji(attribute: str) -> bool:
     conn.commit()
     conn.close()
     return affected > 0
+
+
+# Make sure the media tables exist before the first match event looks them up.
+try:
+    init_media_db()
+except Exception as _e:
+    print(f"[media] could not initialise media tables: {_e}")

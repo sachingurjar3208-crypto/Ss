@@ -24,7 +24,7 @@ import security
 import squad_logic as sl
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
-from squad_cog import _card_line, _in_match, _need_debut
+from squad_cog import _card_line, _in_match, _is_premium, _need_debut
 
 # Players with a trade waiting for an answer (each can only have one at a time).
 _pending_trade: set[int] = set()
@@ -139,10 +139,19 @@ class EconomyCog(commands.Cog, name="Economy"):
         )
 
     # -- rewards ---------------------------------------------------------
-    async def _claim(self, ctx: commands.Context, kind: str, pack: str | None):
+    async def _claim(self, ctx: commands.Context, kind: str):
         if not await _need_debut(ctx):
             return
-        res = economy.claim_reward(ctx.author.id, kind, pack)
+        if kind == "weekly" and not _is_premium(ctx.author):
+            await ctx.send("💎 The weekly reward is for **Premium members** only.")
+            return
+        lo, hi = economy.REWARD_CARD_OVR[kind]
+        pool = [c for c in card_db.list_all_cards() if lo <= int(c["ovr"]) <= hi]
+        res = economy.claim_reward(
+            ctx.author.id, kind,
+            [c["playername_key"] for c in pool],
+            {c["playername_key"]: sl.sell_value(c) for c in pool},
+        )
         if not res["ok"]:
             if res.get("locked"):
                 await ctx.send(
@@ -152,33 +161,47 @@ class EconomyCog(commands.Cog, name="Economy"):
                 return
             await ctx.send(f"⏳ You already claimed your {kind} reward. Come back in **{fmt_wait(res['wait'])}**.")
             return
-        extra = ""
+        lines = [f"{REWARD_EMOJI.get(kind, '🎁')} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**"]
         if kind == "daily":
-            extra = f"\n🔥 Streak: **{res['streak']}** day(s) — keep claiming daily for a bigger bonus!"
-        if pack:
-            extra += f"\n📦 Bonus: 1× {sl.PACKS[pack]['label']} (open it with `csopen {pack}`)"
-        await ctx.send(
-            f"{REWARD_EMOJI.get(kind, '🎁')} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**\n"
-            f"Balance: **{economy.fmt_coins(res['balance'])}**{extra}"
-        )
+            streak = res["streak"]
+            if res["bonus"]:
+                lines.append(
+                    f"🎉 Streak bonus: **+{economy.fmt_coins(res['bonus'])}** "
+                    f"(daily {economy.fmt_coins(res['base'])} + streak {economy.fmt_coins(res['bonus'])})"
+                )
+            nxt = economy.STREAK_EVERY - streak % economy.STREAK_EVERY
+            lines.append(
+                f"🔥 Streak: **{streak}** day(s) — next streak bonus in **{nxt}** day(s). "
+                f"Miss a day and it restarts from 1!"
+            )
+        if res["card"]:
+            card = card_db.get_card(res["card"])
+            if res["dupe"]:
+                lines.append(f"🎴 {_card_line(card, '  ♻️ duplicate')} → **+{economy.fmt_coins(res['refund'])}**")
+            else:
+                lines.append(f"🎴 New player: {_card_line(card, '  🆕')}")
+        else:
+            lines.append(f"🎴 No player cards with rating {lo}-{hi} are available yet.")
+        lines.append(f"Balance: **{economy.fmt_coins(res['balance'])}**")
+        await ctx.send("\n".join(lines))
 
     @commands.command(name="csdaily")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def csdaily(self, ctx: commands.Context):
-        """Claim your daily coins."""
-        await self._claim(ctx, "daily", None)
+        """Claim daily coins + a random 60-78 player (streak bonus every 7th day)."""
+        await self._claim(ctx, "daily")
 
     @commands.command(name="csweekly")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def csweekly(self, ctx: commands.Context):
-        """Claim your weekly coins + a Bronze pack."""
-        await self._claim(ctx, "weekly", "bronze")
+        """(Premium) Claim weekly coins + a random 80-83 player."""
+        await self._claim(ctx, "weekly")
 
     @commands.command(name="csmonthly")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def csmonthly(self, ctx: commands.Context):
-        """Claim your monthly coins + a Silver pack."""
-        await self._claim(ctx, "monthly", "silver")
+        """Claim monthly coins + a random 85-88 player."""
+        await self._claim(ctx, "monthly")
 
     # -- packs -----------------------------------------------------------
     @commands.command(name="cspack")
@@ -228,7 +251,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         have = economy.get_packs(ctx.author.id)
         have = {k: v for k, v in have.items() if k in sl.PACKS}
         if not have:
-            await ctx.send("You have no packs. Get them from `cspack`, `csweekly` or `csmonthly`.")
+            await ctx.send("You have no packs. Buy them with `cspack`.")
             return
         if pack is None:
             if len(have) == 1:

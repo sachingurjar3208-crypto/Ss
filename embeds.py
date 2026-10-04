@@ -1,7 +1,6 @@
 import os
 import discord
 from game import GameState, _pname
-from data import COUNTRY_FLAGS
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "cricstar_logo.png")
 
@@ -20,18 +19,18 @@ def build_match_invite_embed(
 ) -> discord.Embed:
     sep = "──────────────────────"
     embed = discord.Embed(
-        title="🏏  CRICKET CHALLENGE  🏏",
+        title="CRICKET CHALLENGE",
         color=discord.Color.from_rgb(8, 22, 60),
     )
     embed.description = (
         f"{sep}\n"
-        f"⚔️  **{challenger.mention}** has challenged **{opponent.mention}** to a **{overs}-over** match!\n"
+        f"**{challenger.mention}** has challenged **{opponent.mention}** to a **{overs}-over** match!\n"
         f"{sep}\n\n"
-        f"🏟️  **Venue:**      {conditions['venue']}, {conditions['location']}\n"
-        f"🌱  **Pitch:**      {conditions['pitch']}\n"
-        f"{conditions['weather_emoji']}  **Weather:**    {conditions['weather']}  •  {conditions['temperature']}°C\n"
-        f"👤  **Umpire:**     {conditions['umpire']}\n"
-        f"🎉  **Crowd:**      {conditions['crowd']}\n"
+        f"**Venue:**      {conditions['venue']}, {conditions['location']}\n"
+        f"**Pitch:**      {conditions['pitch']}\n"
+        f"**Weather:**    {conditions['weather']}  •  {conditions['temperature']}°C\n"
+        f"**Umpire:**     {conditions['umpire']}\n"
+        f"**Crowd:**      {conditions['crowd']}\n"
         f"{sep}"
     )
     embed.set_footer(text=f"{opponent.display_name}, accept or decline below.")
@@ -54,7 +53,7 @@ def build_playing_xi_embed(team: dict) -> discord.Embed:
         color=discord.Color.dark_blue(),
     )
 
-    header = "`Card | Player             | OVR | BAT | BOWL | Country`"
+    header = "`Player           | OVR | BAT | BOWL`"
     embed.add_field(name="\u200b", value=header, inline=False)
 
     _ROLE_TO_BUCKET = {
@@ -66,10 +65,10 @@ def build_playing_xi_embed(team: dict) -> discord.Embed:
         "Leg Spinner":   "Bowler",
     }
     role_order = [
-        ("Batter",      "Batters 🏏"),
-        ("WK",          "WK 🧤"),
-        ("All-Rounder", "All-Rounders ⚡"),
-        ("Bowler",      "Bowlers 🎯"),
+        ("Batter",      "Batters"),
+        ("WK",          "WK"),
+        ("All-Rounder", "All-Rounders"),
+        ("Bowler",      "Bowlers"),
     ]
 
     for role_key, role_label in role_order:
@@ -84,21 +83,12 @@ def build_playing_xi_embed(team: dict) -> discord.Embed:
         rows = []
         for p in players:
             pn       = _pname(p)
-            flag     = COUNTRY_FLAGS.get(p.get("country", ""), "🏳")
             bowl_val = str(p.get("bowl", "—")) if p.get("bowling_type") else " —"
-            bt       = p.get("bowling_type")
-            if bt == "Fast":
-                ball_icon = "🔥"
-            elif bt in ("Off Spin", "Leg Spin"):
-                ball_icon = "🌀"
-            else:
-                ball_icon = "🏏"
             name_pad = pn[:16].ljust(16)
-            card     = p.get("card", "▪️")
             ovr_val  = p.get("ovr", "?")
             bat_val  = p.get("bat", "?")
             rows.append(
-                f"{card} | `{name_pad}` | {ovr_val} | {bat_val} | {bowl_val:>3} | {ball_icon} | {flag}"
+                f"`{name_pad}` | {ovr_val} | {bat_val} | {bowl_val:>3}"
             )
         embed.add_field(name=label, value="\n".join(rows), inline=False)
 
@@ -126,22 +116,30 @@ def _table(headers: list[str], widths: list[int], rows: list[list[str]]) -> str:
     return "```\n" + "\n".join([head] + body) + "\n```"
 
 
-_BALL_TOKEN = {"W": "❌", "Wd": "wd", "NB": "nb"}
+# Colour-coded ball tokens for the Timeline field — every outcome gets its
+# own colour (not just boundaries/wickets), so the shape of an over is
+# readable at a glance: white = dot, dark = ones/twos/threes, green = four,
+# blue = six, red = wicket, yellow = wide/no-ball.
+_BALL_EMOJI = {
+    "0":    "`0`",
+    "1":    "`1`",
+    "2":    "`2`",
+    "3":    "`3`",
+    "4":    "`4`",
+    "6":    "`6`",
+    "W":    "`W`",
+    "Wd":   "`wd`",
+    "NB":   "`nb`",
+    "NB+1": "`nb+1`",
+}
 
 
 def _ball_token(outcome: str) -> str:
-    if outcome in _BALL_TOKEN:
-        return _BALL_TOKEN[outcome]
-    if outcome in ("4", "6"):
-        return f"**{outcome}**"
-    return outcome  # "0","1","2","3" shown as-is (dot ball reads as "0")
+    return _BALL_EMOJI.get(outcome, outcome)
 
 
 def _timeline_line(game: GameState, max_overs_shown: int = 2) -> str | None:
-    """Ball-by-ball for the last couple of overs, overs separated by "│",
-    boundaries bolded and wickets marked ❌ — a text version of the
-    Cricket Guru-style colour-coded timeline."""
-    history = getattr(game, "over_history", None)
+    """Ball-by-ball for the last couple of overs, overs separated by "┃"."""
     balls = [b for b in game.timeline if b != "|"]
     if not balls:
         return None
@@ -152,11 +150,14 @@ def _timeline_line(game: GameState, max_overs_shown: int = 2) -> str | None:
     overs_chunks = overs_chunks[-max_overs_shown:]
     if current_over_balls:
         overs_chunks.append(current_over_balls)
-    tokens = " │ ".join(" ".join(_ball_token(b) for b in chunk) for chunk in overs_chunks)
-    return f"**This over:**  {tokens}" if len(overs_chunks) == 1 else f"**Recent overs:**  {tokens}"
+    return "  ┃  ".join(" ".join(_ball_token(b) for b in chunk) for chunk in overs_chunks)
 
 
 def build_scoreboard_embed(game: GameState) -> discord.Embed:
+    """Live scoreboard shown after every ball, built from native Discord
+    embed fields so the stat chips (P'SHIP / CRR / RRR …) render as their
+    own little boxes side-by-side on both mobile and desktop, instead of
+    one long block of plain text."""
     inn = game.innings
     r, w = game.current_runs, game.current_wickets
 
@@ -169,18 +170,17 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
     overs_done = game.overs_str()
     overs_total = f"{game.overs}.0"
 
-    lines = []
-
-    # ── Score header: the two team lines, like a real scorecard header ──────
+    # ── Header: score + chase context ───────────────────────────────────────
+    title = f"{bat_team_name}  —  {r}/{w}  ({overs_done}/{overs_total})"
     if inn == 1:
-        lines.append(f"**{bat_team_name}**  {r}/{w}  ({overs_done}/{overs_total})")
-        lines.append(f"{bowl_team_name}  ·  *Yet to bat*")
+        description = f"{bowl_team_name}  ·  *Yet to bat*"
     else:
         r1, w1 = game.runs[0], game.wickets[0]
-        lines.append(f"{bowl_team_name}  {r1}/{w1}")
-        lines.append(f"**{bat_team_name}**  {r}/{w}  ({overs_done}/{overs_total})")
+        description = f"{bowl_team_name} 1st innings:  **{r1}/{w1}**"
 
-    # ── Batters table ────────────────────────────────────────────────────────
+    embed = discord.Embed(title=title, description=description, color=color)
+
+    # ── Batters field ────────────────────────────────────────────────────────
     bat_rows = []
     for p, is_striker in ((game.striker, True), (game.non_striker, False)):
         if not p:
@@ -190,32 +190,44 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
         mark = "*" if is_striker else ""  # striker marked with a *, like on-strike in real scorecards
         bat_rows.append([f"{pn[:14]}{mark}", str(s["runs"]), str(s["balls"]), game.sr(pn) or "0.0"])
     if bat_rows:
-        lines.append(_table(["BATTER", "R", "B", "SR"], [15, 3, 3, 6], bat_rows))
+        embed.add_field(name="Batters", value=_table(["BATTER", "R", "B", "SR"], [15, 3, 3, 6], bat_rows), inline=False)
 
-    # ── Partnership | CRR | Proj/RRR ─────────────────────────────────────────
-    extra = f"Proj **{game.projected()}**" if inn == 1 else f"RRR **{game.rrr()}**"
-    lines.append(f"P'ship **{game.partnership_runs}**({game.partnership_balls})  ·  CRR **{game.crr()}**  ·  {extra}")
+    # ── Stat chips: partnership, CRR, and proj/RRR — inline fields so
+    # Discord renders them as separate boxes next to each other ────────────
+    embed.add_field(name="P'SHIP", value=f"**{game.partnership_runs}** ({game.partnership_balls})", inline=True)
+    embed.add_field(name="CRR", value=f"**{game.crr()}**", inline=True)
+    if inn == 2:
+        embed.add_field(name="RRR", value=f"**{game.rrr()}**", inline=True)
+    else:
+        embed.add_field(name="PROJ", value=f"**{game.projected()}**", inline=True)
 
-    # ── Bowler table ─────────────────────────────────────────────────────────
+    # ── Bowler field ─────────────────────────────────────────────────────────
     if game.current_bowler:
         bn = _pname(game.current_bowler)
         bs = game.bowler_stats.get(bn, {"balls": 0, "runs": 0, "wickets": 0})
         ov = game.bowler_overs_str(bn)
-        lines.append(_table(["BOWLER", "O", "R", "W"], [15, 4, 3, 3], [[bn[:14], ov, str(bs["runs"]), str(bs["wickets"])]]))
+        embed.add_field(
+            name="Bowler",
+            value=_table(["BOWLER", "O", "R", "W"], [15, 4, 3, 3], [[bn[:14], ov, str(bs["runs"]), str(bs["wickets"])]]),
+            inline=False,
+        )
 
-    # ── Timeline ─────────────────────────────────────────────────────────────
+    # ── Timeline field ───────────────────────────────────────────────────────
     timeline = _timeline_line(game)
     if timeline:
-        lines.append(timeline)
+        embed.add_field(name="Timeline", value=timeline, inline=False)
 
-    # ── Target line (innings 2 only) ─────────────────────────────────────────
+    # ── Chase status (innings 2 only) ───────────────────────────────────────
     if inn == 2:
         tgt = game.target()
-        needed = (tgt - r) if tgt else 0
-        balls_left = game.overs * 6 - game.current_legal_balls
-        lines.append(f"🎯 Target **{tgt}** · need **{needed}** off **{balls_left}** balls")
+        needed = max(0, (tgt - r)) if tgt else 0
+        balls_left = max(0, game.overs * 6 - game.current_legal_balls)
+        embed.add_field(
+            name="\u200b",
+            value=f"**{bat_team_name}** need **{needed}** runs to win off **{balls_left}** balls",
+            inline=False,
+        )
 
-    embed = discord.Embed(description="\n".join(lines), color=color)
     if getattr(game, "toss_note", None):
         embed.set_footer(text=game.toss_note)
     return embed
@@ -224,7 +236,7 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
 def build_result_embed(game: GameState) -> discord.Embed:
     result = game.match_result()
     embed  = discord.Embed(
-        title="🏆  MATCH RESULT",
+        title="MATCH RESULT",
         description=result,
         color=discord.Color.gold(),
     )
@@ -246,7 +258,7 @@ def build_result_embed(game: GameState) -> discord.Embed:
     inn1_ovr = game.overs_str() if game.innings >= 1 else "—"
 
     embed.add_field(
-        name="📊 Scorecard",
+        name="Scorecard",
         value=(
             f"**{bat1_team}:** {t1}/{w1}\n"
             f"**{bat2_team}:** {t2}/{w2}"

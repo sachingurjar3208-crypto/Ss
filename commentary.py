@@ -53,7 +53,7 @@ FOUR_TEXTS = [
 
 SIX_DISTANCES = list(range(72, 109))
 
-DIGIT_EMOJIS = ["0️⃣", "1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣"]
+DIGIT_EMOJIS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
 
 def _num_to_emoji(n: int) -> str:
     return "".join(DIGIT_EMOJIS[int(d)] for d in str(n))
@@ -109,13 +109,13 @@ def build_ball_commentary(
         lines.append(f"**{random.choice(FOUR_TEXTS)}**")
     elif outcome == "W":
         wkt_pool = WICKET_TEXTS.get(delivery_internal, GENERIC_WICKET)
-        lines = [f"**{random.choice(wkt_pool)}** {batsman_name} is OUT ☝️"]
+        lines = [f"**{random.choice(wkt_pool)}** {batsman_name} is OUT"]
     elif outcome == "Wd":
         lines = ["**Wide!** Extra run awarded."]
     elif outcome == "NB":
-        lines = ["**No Ball!** Free hit next ball! 🆓"]
+        lines = ["**No Ball!** Free hit next ball!"]
     elif outcome == "NB+1":
-        lines = ["**No Ball!** Plus a run — two extras! 🆓"]
+        lines = ["**No Ball!** Plus a run — two extras!"]
     elif outcome == "0":
         lines.append(f"*{random.choice(DOT_TEXTS)}*")
 

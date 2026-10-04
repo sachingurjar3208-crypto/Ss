@@ -39,13 +39,13 @@ PITCH_REPORTS = [
 ]
 
 WEATHER_CONDITIONS = [
-    ("Clear Skies",    "☀️"),
-    ("Partly Cloudy",  "🌤️"),
-    ("Overcast",       "☁️"),
-    ("Hot & Sunny",    "🌞"),
-    ("Light Breeze",   "🌬️"),
-    ("Humid & Heavy",  "💧"),
-    ("Hazy Sunshine",  "🌅"),
+    ("Clear Skies",    ""),
+    ("Partly Cloudy",  ""),
+    ("Overcast",       ""),
+    ("Hot & Sunny",    ""),
+    ("Light Breeze",   ""),
+    ("Humid & Heavy",  ""),
+    ("Hazy Sunshine",  ""),
 ]
 
 UMPIRES = [
@@ -64,16 +64,16 @@ UMPIRES = [
 ]
 
 CROWD_MOODS = [
-    "Electric ⚡",
-    "Buzzing 🔥",
-    "Explosive 💥",
-    "Roaring 📣",
-    "Tense 😬",
-    "Wild 🎉",
-    "Deafening 🔊",
-    "Fully Packed 🏟️",
-    "On Their Feet 🙌",
-    "Absolutely Rocking 🎸",
+    "Electric",
+    "Buzzing",
+    "Explosive",
+    "Roaring",
+    "Tense",
+    "Wild",
+    "Deafening",
+    "Fully Packed",
+    "On Their Feet",
+    "Absolutely Rocking",
 ]
 
 
@@ -112,9 +112,9 @@ NOT_OUT_EMOJI = "<:cs_notout:1508773208470454382>"
 LBW_EMOJI     = "<:cs_lbw:1519933921385775156>"
 
 BOWLING_TYPE_ICON = {
-    "Fast":     "⚡",
-    "Off Spin": "🌀",
-    "Leg Spin": "🔄",
+    "Fast":     "",
+    "Off Spin": "",
+    "Leg Spin": "",
 }
 
 # Button label → internal delivery name

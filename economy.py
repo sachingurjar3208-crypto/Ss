@@ -17,6 +17,7 @@ SAFETY RULES used everywhere in this file
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -28,8 +29,12 @@ DB_PATH = Path(__file__).parent / "economy.db"
 START_PURSE   = 50_000
 MAX_PURSE     = 2_000_000_000
 DAILY_BASE    = 5_000
-DAILY_STREAK_BONUS = 1_000      # per streak day, up to DAILY_STREAK_MAX days
-DAILY_STREAK_MAX   = 5
+# Streak bonus (daily only): paid on every 7th streak day (7, 14, 21 ...) on top of the
+# normal daily coins. Every 50th day is a milestone: 3x the bonus at 50, 6x at 100, 9x at 150 ...
+STREAK_BONUS          = 10_000
+STREAK_EVERY          = 7
+STREAK_MILESTONE_EVERY = 50
+STREAK_MILESTONE_MULT  = 3      # per STREAK_MILESTONE_EVERY days
 WEEKLY_REWARD = 30_000
 MONTHLY_REWARD = 100_000
 WIN_REWARD    = 5_000
@@ -42,6 +47,21 @@ XI_SIZE       = 11
 DAY = 86_400
 COOLDOWNS = {"daily": DAY, "weekly": 7 * DAY, "monthly": 30 * DAY}
 MONTHLY_UNLOCK_AFTER_DEBUT = 30 * DAY   # monthly reward opens 1 month after debut
+
+# Every daily / weekly / monthly claim also gives one random player card whose
+# overall rating (ovr) falls in this inclusive range.
+REWARD_CARD_OVR = {"daily": (60, 78), "weekly": (80, 83), "monthly": (85, 88)}
+
+_rng = secrets.SystemRandom()
+
+
+def streak_bonus(streak: int) -> int:
+    """Extra coins for reaching `streak` days in a row (0 on ordinary days)."""
+    if streak > 0 and streak % STREAK_MILESTONE_EVERY == 0:
+        return STREAK_BONUS * STREAK_MILESTONE_MULT * (streak // STREAK_MILESTONE_EVERY)
+    if streak > 0 and streak % STREAK_EVERY == 0:
+        return STREAK_BONUS
+    return 0
 
 
 def fmt_coins(n: int) -> str:
@@ -244,9 +264,14 @@ def reward_match_winner(winner_id, loser_id) -> None:
 
 # ── Rewards (daily / weekly / monthly) ──────────────────────────────────────
 
-def claim_reward(user_id, kind: str, pack_type: str | None = None) -> dict:
-    """Claim a daily/weekly/monthly reward atomically.
-    Returns {"ok": True, "coins": n, "balance": n, "streak": n, "pack": type|None}
+def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
+                 dupe_values: dict[str, int] | None = None) -> dict:
+    """Claim a daily/weekly/monthly reward atomically: coins + one random card
+    from `card_pool` (player keys already filtered to the right ovr range).
+    A card the user already owns is skipped if they have any unowned one left in
+    the pool; otherwise it turns into coins using `dupe_values`.
+    Returns {"ok": True, "coins", "base", "bonus", "balance", "streak",
+             "card": key|None, "dupe": bool, "refund": n}
     or {"ok": False, "wait": seconds_left}."""
     if kind not in COOLDOWNS:
         raise ValueError("unknown reward kind")
@@ -265,23 +290,38 @@ def claim_reward(user_id, kind: str, pack_type: str | None = None) -> dict:
         if left > 0:
             return {"ok": False, "wait": int(left) + 1}
         streak = int(row["daily_streak"])
+        base, bonus = 0, 0
         if kind == "daily":
-            streak = streak + 1 if now - float(row["last_daily"]) <= 2 * DAY else 1
-            coins = DAILY_BASE + DAILY_STREAK_BONUS * min(streak - 1, DAILY_STREAK_MAX)
+            # Next claim must come within 24h after the 24h cooldown ends, else the streak restarts at 1.
+            last = float(row["last_daily"])
+            streak = streak + 1 if last > 0 and now - last <= 2 * DAY else 1
+            base, bonus = DAILY_BASE, streak_bonus(streak)
             conn.execute("UPDATE users SET daily_streak = ? WHERE user_id = ?", (streak, uid))
         elif kind == "weekly":
-            coins = WEEKLY_REWARD
+            base = WEEKLY_REWARD
         else:
-            coins = MONTHLY_REWARD
+            base = MONTHLY_REWARD
+        coins = base + bonus
         conn.execute(f"UPDATE users SET {col} = ? WHERE user_id = ?", (now, uid))
-        balance = _apply_coins(conn, uid, coins, f"{kind} reward")
-        if pack_type:
-            conn.execute(
-                "INSERT INTO packs (user_id, pack_type, qty) VALUES (?, ?, 1) "
-                "ON CONFLICT(user_id, pack_type) DO UPDATE SET qty = qty + 1",
-                (uid, pack_type),
-            )
-        return {"ok": True, "coins": coins, "balance": balance, "streak": streak, "pack": pack_type}
+        balance = _apply_coins(conn, uid, coins, f"{kind} reward" + (f" (streak {streak} bonus)" if bonus else ""))
+        card_key, dupe, refund = None, False, 0
+        pool = list(card_pool or [])
+        if pool:
+            owned = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
+            fresh = [k for k in pool if k not in owned]
+            if fresh:
+                card_key = _rng.choice(fresh)
+                conn.execute(
+                    "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, card_key, now)
+                )
+                _fill_empty_slots(conn, uid, [card_key])
+            else:
+                card_key, dupe = _rng.choice(pool), True
+                refund = int((dupe_values or {}).get(card_key, 0))
+                if refund:
+                    balance = _apply_coins(conn, uid, refund, f"Duplicate refund ({kind} reward)")
+        return {"ok": True, "coins": coins, "base": base, "bonus": bonus, "balance": balance,
+                "streak": streak, "card": card_key, "dupe": dupe, "refund": refund}
 
 
 # ── Owned cards ─────────────────────────────────────────────────────────────

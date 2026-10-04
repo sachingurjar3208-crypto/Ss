@@ -32,7 +32,7 @@ def _delivery_announcement(bowler_label: str, speed: float, batter: discord.Memb
     "**Inswing Yorker** is coming with **147.3 kmph** — @batter, pick your shot!"
     The bowler's name and the delivery type are NOT repeated in the result
     commentary afterwards — this line is the only place they're announced."""
-    prefix = "🟡 **FREE HIT!**  " if free_hit else ""
+    prefix = "**FREE HIT!**  " if free_hit else ""
     return f"{prefix}**{bowler_label}** is coming with **{speed:.1f} kmph** — {batter.mention}, pick your shot!"
 
 
@@ -83,7 +83,7 @@ class _ContinueView(ui.View):
             return False
         return True
 
-    @ui.button(label="🔄 Continue", style=discord.ButtonStyle.success)
+    @ui.button(label="Continue", style=discord.ButtonStyle.success)
     async def cont(self, interaction: discord.Interaction, button: ui.Button):
         for child in self.children:
             child.disabled = True
@@ -110,7 +110,7 @@ async def _run_safely(work, *, allowed_ids: set[int] | None = None, notify_chann
             return
         try:
             await notify_channel.send(
-                content="⚠️ A small hiccup sending that step — nothing was lost. Tap to continue.",
+                content="A small hiccup sending that step — nothing was lost. Tap to continue.",
                 view=_ContinueView(work, allowed_ids),
             )
         except discord.HTTPException:
@@ -168,7 +168,7 @@ async def _send_opener_prompt(channel: discord.TextChannel, game: GameState) -> 
     opener_view = OpenerSelectView(game)
     opener_view._channel = channel
     await channel.send(
-        content=f"🏏  Select your openers, {game.batting_user.mention}",
+        content=f"Select your openers, {game.batting_user.mention}",
         embed=xi_embed,
         view=opener_view,
     )
@@ -192,11 +192,6 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
             active_games.pop(channel.id, None)
-            try:
-                from practice_views import active_practice
-                active_practice.pop(channel.id, None)
-            except Exception:
-                pass
         return True
 
     if game.striker is None and game.non_striker is None:
@@ -230,7 +225,7 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
         # with the same announcement (speed is cached when the delivery is set).
         speed = getattr(game, "pending_delivery_speed", None)
         stage1_choice = getattr(game, "pending_stage1_choice", "")
-        is_free_hit = getattr(game, "pending_free_hit", False)
+        is_free_hit = getattr(game, "current_ball_free_hit", False)
         label = f"{stage1_choice} {game.pending_delivery}".strip()
         batting_view = BattingView(game, stage1_choice=stage1_choice, is_free_hit=is_free_hit)
         batting_view._channel = channel
@@ -259,7 +254,7 @@ async def _safe_next(channel: discord.TextChannel, game: GameState, work) -> Non
         traceback.print_exc()
         try:
             await channel.send(
-                content="⚠️ A small hiccup — your match is safe. Tap to continue.",
+                content="A small hiccup — your match is safe. Tap to continue.",
                 view=_ContinueView(lambda: _resume_prompt(channel, game), _match_ids(game)),
             )
         except discord.HTTPException:
@@ -415,18 +410,18 @@ class _TimeoutMixin:
                     else:
                         leaver_mention = f"<@{leaver_id}>"
                 penalty_msg = (
-                    f"\n💸 {leaver_mention} left the match midway and was fined "
+                    f"\n{leaver_mention} left the match midway and was fined "
                     f"**{fmt_coins(penalty)}**!\n"
                     f"New balance: **{fmt_coins(new_bal)}**"
-                    + (" ⚠️ (negative balance)" if new_bal < 0 else "")
+                    + (" (negative balance)" if new_bal < 0 else "")
                 )
             except Exception as e:
                 print(f"[economy] penalty deduction failed: {e}")
 
         try:
             await ch.send(
-                "⏰ **Match abandoned — a player went AFK.**\n"
-                "No response was received in time. Use `/cs challenge` to start a fresh match."
+                "**Match abandoned — a player went AFK.**\n"
+                "No response was received in time. Use `csmp @user <overs>` to start a fresh match."
                 + penalty_msg
             )
         except Exception:
@@ -436,6 +431,18 @@ class _TimeoutMixin:
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+def _dismissal_type(text: str) -> str:
+    """Guess the dismissal from the commentary line (used for bowler credit)."""
+    t = (text or "").upper()
+    if "LBW" in t or "PLUMB" in t or "IN FRONT" in t:
+        return "LBW"
+    if "STUMP" in t:
+        return "Stumped"
+    if "CAUGHT" in t or "CATCH" in t or "HOLES OUT" in t:
+        return "Caught"
+    return "Bowled"
+
 
 def _timeline_emoji(outcome: str) -> str:
     return TIMELINE_EMOJIS.get(outcome, "•")
@@ -533,15 +540,18 @@ async def _send_bowling_prompt(channel: discord.TextChannel, game: GameState):
     # Show FREE HIT banner if the previous ball was a no-ball
     is_free_hit = getattr(game, "pending_free_hit", False)
     if is_free_hit:
-        embed.set_footer(text="⚡ FREE HIT — batsman cannot be dismissed (except run out)")
+        embed.set_footer(text="FREE HIT — batsman cannot be dismissed (except run out)")
         game.pending_free_hit = False  # consume the flag
+    # Remember that THIS ball is a free hit — the shot handler reads it from here
+    # (the flag above is already cleared by the time the batter plays).
+    game.current_ball_free_hit = is_free_hit
 
     if btype == "Fast":
         view = FastBowlStage1View(game, is_free_hit=is_free_hit)
     else:
         view = BowlingView(game, is_free_hit=is_free_hit)
     view._channel = channel
-    prefix = "🟡 **FREE HIT!**  " if is_free_hit else ""
+    prefix = "**FREE HIT!**  " if is_free_hit else ""
     content = f"{prefix}Choose delivery  {game.bowling_user.mention}"
     await channel.send(content=content, embed=embed, view=view)
 
@@ -570,6 +580,7 @@ async def _process_delivery(
     stage1_choice: str = "",
     is_recommended_shot: bool = False,
     guide_entry_exists: bool = False,
+    is_free_hit: bool = False,
 ):
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
     delivery_button   = game.pending_delivery
@@ -590,7 +601,7 @@ async def _process_delivery(
     if not bowler or not striker:
         try:
             await interaction.response.send_message(
-                "⚠️ Game state error — the match may have ended or timed out. "
+                "Game state error — the match may have ended or timed out. "
                 "Please wait for the next prompt.",
                 ephemeral=True,
             )
@@ -624,7 +635,8 @@ async def _process_delivery(
     # If the previous delivery was a no-ball, this is a free-hit.
     # We consume the flag here (before _send_bowling_prompt clears it) so
     # the flag is accurate for this ball's processing.
-    this_ball_is_free_hit = getattr(game, "pending_free_hit", False)
+    this_ball_is_free_hit = bool(is_free_hit or getattr(game, "current_ball_free_hit", False))
+    game.current_ball_free_hit = False
     if this_ball_is_free_hit and outcome == "W":
         # Downgrade to a dot ball — batsman survives
         outcome  = "0"
@@ -667,7 +679,8 @@ async def _process_delivery(
         _pre_wicket_pship_runs  = game.partnership_runs
         _pre_wicket_pship_balls = game.partnership_balls
         _pre_wicket_balls_since = game.balls_since_wicket
-        game.add_wicket()
+        _pre_wicket_striker     = game.striker
+        game.add_wicket(_dismissal_type(commentary))
         # Timeline emoji deferred until DRS decision (or added immediately if no DRS)
 
     elif outcome == "Wd":
@@ -678,6 +691,8 @@ async def _process_delivery(
         # batter got nothing off the bat).  add_extra_runs() doesn't touch
         # consecutive_dots, so we increment it manually here.
         game.consecutive_dots += 1
+        if this_ball_is_free_hit:
+            game.pending_free_hit = True   # a wide does not use up the free hit
         # Wide: re-bowled; no legal ball, no batsman credit, no strike rotation
 
     elif outcome == "NB":
@@ -792,10 +807,11 @@ async def _process_delivery(
                     pre_wicket_pship_runs=_pre_wicket_pship_runs,
                     pre_wicket_pship_balls=_pre_wicket_pship_balls,
                     pre_wicket_balls_since=_pre_wicket_balls_since,
+                    pre_wicket_striker=_pre_wicket_striker,
                 )
                 drs_view.message = await channel.send(
                     content=(
-                        f"⚡ **DECISION REVIEW SYSTEM**\n"
+                        f"**DECISION REVIEW SYSTEM**\n"
                         f"{game.batting_user.mention} — On-field decision: **OUT**\n"
                         f"Reviews remaining: **{reviews}**\n"
                         f"Do you want to challenge the umpire's decision?"
@@ -857,7 +873,7 @@ async def _process_delivery(
         traceback.print_exc()
         try:
             await channel.send(
-                content="⚠️ A small hiccup showing that result — your score is safe. Tap to continue.",
+                content="A small hiccup showing that result — your score is safe. Tap to continue.",
                 view=_ContinueView(lambda: _resume_prompt(channel, game), _match_ids(game)),
             )
         except discord.HTTPException:
@@ -927,7 +943,7 @@ async def _do_innings_break_allout(channel, game: GameState):
     overs_used = game.overs_str()
     try:
         await channel.send(
-            f"🏏 **ALL OUT!**  {team_name} are bowled out for **{total_runs}** "
+            f"**ALL OUT!**  {team_name} are bowled out for **{total_runs}** "
             f"in {overs_used} overs!"
         )
     except Exception:
@@ -947,7 +963,7 @@ async def _start_second_innings(channel, game: GameState):
     score_to_beat = game.runs[0]
     await channel.send(
         content=(
-            f"**⏸ Innings Break!**\n"
+            f"**Innings Break!**\n"
             f"**{game.get_batting_team()['name']} require {score_to_beat + 1} to win "
             f"off {balls} balls  (RRR: {rrr_val})**"
         )
@@ -965,7 +981,7 @@ class AcceptDeclineView(ui.View):
         self.game  = game
         self._done = False
 
-    @ui.button(label="✅  Accept", style=discord.ButtonStyle.success)
+    @ui.button(label="Accept", style=discord.ButtonStyle.success)
     async def accept(self, interaction: discord.Interaction, button: ui.Button):
         if interaction.user.id != self.game.opponent.id:
             await interaction.response.send_message(
@@ -983,7 +999,7 @@ class AcceptDeclineView(ui.View):
         try:
             embed = interaction.message.embeds[0] if interaction.message.embeds else None
             if embed:
-                embed.set_footer(text="✅  Challenge accepted! Toss coming up…")
+                embed.set_footer(text="Challenge accepted! Toss coming up…")
                 embed.color = discord.Color.from_rgb(30, 160, 80)
             await interaction.response.edit_message(embed=embed, view=None)
         except Exception:
@@ -996,7 +1012,7 @@ class AcceptDeclineView(ui.View):
             await channel.send(embed=toss_embed, view=toss_view, file=_toss_image_file())
         await _run_safely(_send_toss, allowed_ids=allowed, notify_channel=channel)
 
-    @ui.button(label="❌  Decline", style=discord.ButtonStyle.danger)
+    @ui.button(label="Decline", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: discord.Interaction, button: ui.Button):
         both_ids = (self.game.challenger.id, self.game.opponent.id)
         if interaction.user.id not in both_ids:
@@ -1013,7 +1029,7 @@ class AcceptDeclineView(ui.View):
         who   = interaction.user.display_name
         embed = interaction.message.embeds[0] if interaction.message.embeds else None
         if embed:
-            embed.set_footer(text=f"❌  {who} declined the match.")
+            embed.set_footer(text=f"{who} declined the match.")
             embed.color = discord.Color.from_rgb(180, 30, 30)
         await interaction.response.edit_message(embed=embed, view=None)
 
@@ -1028,7 +1044,7 @@ class AcceptDeclineView(ui.View):
             if self.message:
                 embed = self.message.embeds[0] if self.message.embeds else None
                 if embed:
-                    embed.set_footer(text="⌛  Match cancelled — no response within 30 seconds.")
+                    embed.set_footer(text="Match cancelled — no response within 30 seconds.")
                     embed.color = discord.Color.from_rgb(100, 100, 100)
                 await self.message.edit(embed=embed, view=None)
         except Exception:
@@ -1041,13 +1057,13 @@ class AcceptDeclineView(ui.View):
 
 def _build_toss_embed(game: GameState) -> discord.Embed:
     sep = "──────────────────────"
-    embed = discord.Embed(title="🪙  COIN TOSS  🪙", color=discord.Color.from_rgb(212, 175, 55))
+    embed = discord.Embed(title="COIN TOSS", color=discord.Color.from_rgb(212, 175, 55))
     embed.description = (
         f"{sep}\n"
-        f"👤  **Challenger:**  {game.challenger.mention}\n"
-        f"👤  **Opponent:**    {game.opponent.mention}\n"
+        f"**Challenger:**  {game.challenger.mention}\n"
+        f"**Opponent:**    {game.opponent.mention}\n"
         f"{sep}\n\n"
-        f"📢  {game.challenger.mention}, it's your call!\n"
+        f"{game.challenger.mention}, it's your call!\n"
         f"Choose **Heads** or **Tails** below."
     )
     embed.set_footer(text="The toss winner chooses to bat or bowl.")
@@ -1083,23 +1099,23 @@ class TossView(_TimeoutMixin, ui.View):
 
             channel = interaction.channel
             allowed = _match_ids(self.game)
-            coin_face = "🟡  **HEADS**" if result == "Head" else "⚪  **TAILS**"
+            coin_face = "**HEADS**" if result == "Head" else "**TAILS**"
             sep       = "──────────────────────"
 
             # Best-effort only: the actual result/next-step below never
             # depends on this succeeding, so a failure here is harmless.
             try:
-                await interaction.response.edit_message(view=None, embed=None, content="🪙 Coin tossed!")
+                await interaction.response.edit_message(view=None, embed=None, content="Coin tossed!")
             except Exception:
                 pass
 
             async def _send_result():
                 result_file, result_fname = _toss_result_file(result)
-                result_embed = discord.Embed(title="🪙  COIN TOSS  🪙", color=discord.Color.from_rgb(212, 175, 55))
+                result_embed = discord.Embed(title="COIN TOSS", color=discord.Color.from_rgb(212, 175, 55))
                 result_embed.description = (
                     f"{sep}\nThe coin spins in the air…\n\n"
                     f"{coin_face}\n\n"
-                    f"🏆  **{winner.display_name}** won the toss!\n{sep}"
+                    f"**{winner.display_name}** won the toss!\n{sep}"
                 )
                 result_embed.set_footer(text=f"{loser.display_name} called {call.lower()} — coin landed {result.lower()}.")
                 result_embed.set_image(url=f"attachment://{result_fname}")
@@ -1107,9 +1123,9 @@ class TossView(_TimeoutMixin, ui.View):
             await _run_safely(_send_result, allowed_ids=allowed, notify_channel=channel)
 
             async def _send_choice():
-                bb_embed = discord.Embed(title="⚔️  CHOOSE YOUR STRATEGY", color=discord.Color.from_rgb(8, 22, 60))
+                bb_embed = discord.Embed(title="CHOOSE YOUR STRATEGY", color=discord.Color.from_rgb(8, 22, 60))
                 bb_embed.description = (
-                    f"{sep}\n🏆  **{winner.display_name}** won the toss!\n\n"
+                    f"{sep}\n**{winner.display_name}** won the toss!\n\n"
                     f"What would you like to do, {winner.mention}?"
                 )
                 bat_bowl_view = BatBowlView(self.game)
@@ -1128,11 +1144,11 @@ class BatBowlView(_TimeoutMixin, ui.View):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.game = game
 
-    @ui.button(label="🏏  Bat First",  style=discord.ButtonStyle.success)
+    @ui.button(label="Bat First",  style=discord.ButtonStyle.success)
     async def bat(self, interaction: discord.Interaction, button: ui.Button):
         await self._choose(interaction, bat=True)
 
-    @ui.button(label="🎯  Bowl First", style=discord.ButtonStyle.danger)
+    @ui.button(label="Bowl First", style=discord.ButtonStyle.danger)
     async def bowl(self, interaction: discord.Interaction, button: ui.Button):
         await self._choose(interaction, bat=False)
 
@@ -1146,11 +1162,11 @@ class BatBowlView(_TimeoutMixin, ui.View):
         if bat:
             self.game.batting_user_id = winner.id
             self.game.bowling_user_id = other.id
-            choice_icon, choice_text = "🏏", "opted to **BAT FIRST**"
+            choice_text = "opted to **BAT FIRST**"
         else:
             self.game.bowling_user_id = winner.id
             self.game.batting_user_id = other.id
-            choice_icon, choice_text = "🎯", "opted to **BOWL FIRST**"
+            choice_text = "opted to **BOWL FIRST**"
 
         # Initialise DRS reviews for both teams
         self.game.drs_reviews[self.game.batting_user_id] = 2
@@ -1162,11 +1178,11 @@ class BatBowlView(_TimeoutMixin, ui.View):
         sep = "──────────────────────"
         channel = interaction.channel
         allowed = _match_ids(self.game)
-        choice_embed = discord.Embed(title=f"{choice_icon}  MATCH IS SET", color=discord.Color.from_rgb(30, 160, 80))
+        choice_embed = discord.Embed(title="MATCH IS SET", color=discord.Color.from_rgb(30, 160, 80))
         choice_embed.description = (
             f"{sep}\n{winner.mention} {choice_text}\n\n"
-            f"🏏  **Batting:**  {self.game.batting_user.mention}\n"
-            f"🎯  **Bowling:**  {self.game.bowling_user.mention}\n{sep}"
+            f"**Batting:**  {self.game.batting_user.mention}\n"
+            f"**Bowling:**  {self.game.bowling_user.mention}\n{sep}"
         )
         try:
             await interaction.response.edit_message(embed=choice_embed, view=None)
@@ -1268,7 +1284,7 @@ class StrikerDesignateView(_TimeoutMixin, ui.View):
             allowed = _match_ids(self.game)
             try:
                 await interaction.response.edit_message(
-                    content=f"🔴 **{sn}** on strike · **{nn}** at non-striker end",
+                    content=f"**{sn}** on strike · **{nn}** at non-striker end",
                     view=None,
                 )
             except Exception:
@@ -1355,7 +1371,7 @@ class BowlerSelectView(_TimeoutMixin, ui.View):
         channel = interaction.channel
         allowed = _match_ids(self.game)
         try:
-            await interaction.response.edit_message(content=f"🎯 **{bname}** will bowl.", view=None, embed=None)
+            await interaction.response.edit_message(content=f"**{bname}** will bowl.", view=None, embed=None)
         except Exception:
             pass  # cosmetic only
 
@@ -1589,6 +1605,7 @@ class BattingView(_TimeoutMixin, ui.View):
                 stage1_choice=self.stage1_choice,
                 is_recommended_shot=is_recommended,
                 guide_entry_exists=guide_entry_exists,
+                is_free_hit=self.is_free_hit,
             )
         return callback
 
@@ -1610,8 +1627,10 @@ class DRSView(ui.View):
         pre_wicket_pship_runs: int = 0,
         pre_wicket_pship_balls: int = 0,
         pre_wicket_balls_since: int = 999,
+        pre_wicket_striker=None,
     ):
         super().__init__(timeout=10)
+        self._striker              = pre_wicket_striker
         self.game                  = game
         self.channel               = channel
         self.delivery_internal     = delivery_internal
@@ -1620,12 +1639,12 @@ class DRSView(ui.View):
         self.message               = None
         text_upper                 = commentary.upper()
         self.is_lbw                = "LBW" in text_upper or "PLUMB" in text_upper or "IN FRONT" in text_upper
-        self._out_emoji            = LBW_EMOJI if self.is_lbw else TIMELINE_EMOJIS.get("W", "🔴")
+        self._out_emoji            = LBW_EMOJI if self.is_lbw else TIMELINE_EMOJIS.get("W", "")
         self._pship_runs           = pre_wicket_pship_runs
         self._pship_balls          = pre_wicket_pship_balls
         self._balls_since          = pre_wicket_balls_since
 
-    @ui.button(label="✅  Challenge", style=discord.ButtonStyle.danger)
+    @ui.button(label="Challenge", style=discord.ButtonStyle.danger)
     async def challenge(self, interaction: discord.Interaction, button: ui.Button):
         if interaction.user.id != self.game.batting_user_id:
             await interaction.response.send_message("Only the batting team can challenge!", ephemeral=True)
@@ -1645,7 +1664,7 @@ class DRSView(ui.View):
         try:
             await interaction.response.edit_message(
                 content=(
-                    f"📡 **Review Referred to Third Umpire…**\n"
+                    f"**Review Referred to Third Umpire…**\n"
                     f"Reviews remaining after this: **{remaining}**"
                 ),
                 view=None,
@@ -1657,7 +1676,7 @@ class DRSView(ui.View):
             await asyncio.sleep(1.5)
             try:
                 await interaction.edit_original_response(
-                    content="📺 **Checking…** Ball Tracking | Hot Spot | Ultra Edge"
+                    content="**Checking…** Ball Tracking | Hot Spot | Ultra Edge"
                 )
             except Exception:
                 pass
@@ -1674,9 +1693,15 @@ class DRSView(ui.View):
                     self.game.dismissed.pop()
                 bowler_key = _pname(self.game.current_bowler) if self.game.current_bowler else None
                 if bowler_key and bowler_key in self.game.bowler_stats:
-                    self.game.bowler_stats[bowler_key]["wickets"] = max(
-                        0, self.game.bowler_stats[bowler_key]["wickets"] - 1
-                    )
+                    _bs = self.game.bowler_stats[bowler_key]
+                    for _k in ("wickets", "w"):
+                        if _k in _bs:
+                            _bs[_k] = max(0, _bs[_k] - 1)
+
+                # add_wicket() cleared the striker — put the batter back at the crease
+                if self._striker is not None:
+                    self.game.striker = self._striker
+                self.game.last_ball_was_wicket = False
 
                 # Restore partnership state wiped by add_wicket()
                 self.game.partnership_runs   = self._pship_runs
@@ -1695,7 +1720,7 @@ class DRSView(ui.View):
                 try:
                     await interaction.edit_original_response(
                         content=(
-                            f"🏟️ **THIRD UMPIRE DECISION:**\n"
+                            f"**THIRD UMPIRE DECISION:**\n"
                             f"{NOT_OUT_EMOJI} **NOT OUT — Decision Overturned!**\n"
                             f"The batsman stays at the crease!"
                         )
@@ -1726,7 +1751,7 @@ class DRSView(ui.View):
                 try:
                     await interaction.edit_original_response(
                         content=(
-                            f"🏟️ **THIRD UMPIRE DECISION:**\n"
+                            f"**THIRD UMPIRE DECISION:**\n"
                             f"{self._out_emoji} **OUT — Decision Upheld!**\n"
                             f"The original decision stands."
                         )
@@ -1742,13 +1767,13 @@ class DRSView(ui.View):
             traceback.print_exc()
             try:
                 await self.channel.send(
-                    content="⚠️ A small hiccup with that review — your match is safe. Tap to continue.",
+                    content="A small hiccup with that review — your match is safe. Tap to continue.",
                     view=_ContinueView(lambda: _resume_prompt(self.channel, self.game), _match_ids(self.game)),
                 )
             except discord.HTTPException:
                 pass
 
-    @ui.button(label="❌  Accept Decision", style=discord.ButtonStyle.secondary)
+    @ui.button(label="Accept Decision", style=discord.ButtonStyle.secondary)
     async def accept(self, interaction: discord.Interaction, button: ui.Button):
         if interaction.user.id != self.game.batting_user_id:
             await interaction.response.send_message("Only the batting team can respond!", ephemeral=True)
@@ -1778,7 +1803,7 @@ class DRSView(ui.View):
             try:
                 await self.message.edit(
                     content=(
-                        "⏱️ **Review time expired — OUT decision stands.**\n"
+                        "**Review time expired — OUT decision stands.**\n"
                         "The batsman must walk."
                     ),
                     view=None,
@@ -1837,7 +1862,7 @@ class NextBatsmanView(_TimeoutMixin, ui.View):
 
         try:
             await interaction.response.edit_message(
-                content=f"🏏 **{name}** selected.", view=None, embed=None
+                content=f"**{name}** selected.", view=None, embed=None
             )
         except Exception:
             pass  # cosmetic only
@@ -1920,7 +1945,7 @@ class NextBowlerView(_TimeoutMixin, ui.View):
         balls_so_far = self.game.bowler_ball_count.get(bname, 0)
         if balls_so_far >= max_balls:
             await interaction.response.send_message(
-                f"❌ **{bname}** has already bowled their maximum of "
+                f"**{bname}** has already bowled their maximum of "
                 f"{max_balls // 6} overs. Choose someone else.",
                 ephemeral=True,
             )
@@ -1934,7 +1959,7 @@ class NextBowlerView(_TimeoutMixin, ui.View):
 
         try:
             await interaction.response.edit_message(
-                content=f"🎯 **{bname}** starts a new over.", view=None, embed=None
+                content=f"**{bname}** starts a new over.", view=None, embed=None
             )
         except Exception:
             pass  # cosmetic only

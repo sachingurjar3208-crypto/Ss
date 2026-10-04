@@ -120,32 +120,60 @@ def order_xi(cards: list) -> list:
     return sorted(cards, key=lambda c: (-c["bat"], -c["ovr"]))
 
 
+# Stat used to rank each role when auto-picking (higher is better for that role).
+_ROLE_RANK_STAT = {"WK": "bat", "BAT": "bat", "AR": "ovr", "BOWL": "bowl"}
+
+
 def best_xi(cards: list) -> list:
-    """Best 11 of `cards`: at least MIN_BOWLERS bowlers and (if possible) a
-    wicketkeeper, otherwise highest overall. Returned in batting order."""
+    """Best 11 of `cards`, satisfying ROLE_LIMITS when the owned pool allows
+    it (WK 1-2, BAT 5-6, AR 1-3, BOWL 3-5), otherwise highest overall.
+    Returned in batting order."""
     if len(cards) <= economy.XI_SIZE:
         return order_xi(list(cards))
-    remaining = sorted(cards, key=lambda c: -c["ovr"])
+
+    by_role: dict[str, list] = {role: [] for role in ROLE_LIMITS}
+    for c in cards:
+        role = card_db.effective_role(c)
+        if role in by_role:
+            by_role[role].append(c)
+    for role, pool in by_role.items():
+        pool.sort(key=lambda c, r=_ROLE_RANK_STAT[role]: -c[r])
+
     chosen: list = []
 
-    def take(card):
-        chosen.append(card)
-        remaining.remove(card)
+    # Pass 1: fill each role's minimum requirement first.
+    for role, (lo, _hi) in ROLE_LIMITS.items():
+        for c in by_role[role][:lo]:
+            chosen.append(c)
 
-    keepers = [c for c in remaining if card_db.effective_role(c) == "WK"]
-    if keepers:
-        take(keepers[0])
-    bowlers = sorted((c for c in remaining if _bowler_capable(c)), key=lambda c: -c["bowl"])
-    have = sum(1 for c in chosen if _bowler_capable(c))
-    for c in bowlers:
-        if have >= MIN_BOWLERS:
-            break
-        take(c)
-        have += 1
-    for c in list(remaining):
+    # Pass 2: fill remaining slots with the next-best players overall,
+    # never exceeding a role's maximum.
+    taken_ids = {id(c) for c in chosen}
+    role_counts = {role: sum(1 for c in chosen if card_db.effective_role(c) == role)
+                   for role in ROLE_LIMITS}
+    leftovers = sorted(
+        (c for c in cards if id(c) not in taken_ids),
+        key=lambda c: -c["ovr"],
+    )
+    for c in leftovers:
         if len(chosen) >= economy.XI_SIZE:
             break
-        take(c)
+        role = card_db.effective_role(c)
+        hi = ROLE_LIMITS.get(role, (0, 99))[1]
+        if role_counts.get(role, 0) >= hi:
+            continue
+        chosen.append(c)
+        role_counts[role] = role_counts.get(role, 0) + 1
+
+    # Still short of 11 (owned pool too thin in some role) — top up with
+    # whatever's left over, ignoring the max cap as a last resort.
+    if len(chosen) < economy.XI_SIZE:
+        taken_ids = {id(c) for c in chosen}
+        for c in sorted((c for c in cards if id(c) not in taken_ids), key=lambda c: -c["ovr"]):
+            if len(chosen) >= economy.XI_SIZE:
+                break
+            chosen.append(c)
+
     return order_xi(chosen)
 
 
@@ -194,14 +222,45 @@ def xi_cards(user_id) -> list:
     return out
 
 
+# Role composition required for a legal Playing XI.
+# (min, max) count of each role, by card_db.effective_role().
+ROLE_LIMITS = {
+    "WK":   (1, 2),
+    "BAT":  (5, 6),
+    "AR":   (1, 3),
+    "BOWL": (3, 5),
+}
+
+XI_ROLE_LABEL = {"WK": "wicketkeeper(s)", "BAT": "batsman/batsmen", "AR": "all-rounder(s)", "BOWL": "bowler(s)"}
+
+
+def xi_role_counts(cards: list) -> dict[str, int]:
+    """{'WK': n, 'BAT': n, 'AR': n, 'BOWL': n} for a list of card rows."""
+    counts = {role: 0 for role in ROLE_LIMITS}
+    for c in cards:
+        role = card_db.effective_role(c)
+        if role in counts:
+            counts[role] += 1
+    return counts
+
+
 def xi_problem(user_id) -> str | None:
     """Why this user can't play a match yet, or None if their XI is ready."""
     cards = xi_cards(user_id)
     if len(cards) != economy.XI_SIZE:
         return f"has only {len(cards)}/{economy.XI_SIZE} players in the XI"
-    bowlers = sum(1 for c in cards if _bowler_capable(c))
+
+    counts = xi_role_counts(cards)
+    for role, (lo, hi) in ROLE_LIMITS.items():
+        n = counts[role]
+        if n < lo:
+            return f"needs at least {lo} {XI_ROLE_LABEL[role]} in the XI (has {n})"
+        if n > hi:
+            return f"can have at most {hi} {XI_ROLE_LABEL[role]} in the XI (has {n})"
+    bowlers = sum(1 for c in cards if card_db.effective_bowling_type(c))
     if bowlers < MIN_BOWLERS:
-        return f"needs at least {MIN_BOWLERS} bowlers in the XI (has {bowlers})"
+        return (f"needs at least {MIN_BOWLERS} players who can bowl (bowlers / all-rounders) "
+                f"in the XI (has {bowlers})")
     return None
 
 

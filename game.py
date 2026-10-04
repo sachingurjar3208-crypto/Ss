@@ -247,6 +247,11 @@ class GameState:
 
         # Current delivery state
         self.pending_delivery: str | None = None
+        self.pending_delivery_speed: float | None = None
+        self.pending_stage1_choice: str = ""
+        self.current_ball_free_hit: bool = False
+        # DRS reviews left per user id (set when the toss decision is made)
+        self.drs_reviews: dict[int, int] = {}
         self.pending_delivery_label: str | None = None
         self.pending_delivery_speed_mod: float = 0.0
         self.current_over_balls: int = 0
@@ -504,7 +509,7 @@ class GameState:
         self, dismissal_type: str | None = None, batsman: MatchPlayer | None = None
     ) -> None:
         self.wickets[self.innings - 1] += 1
-        bowler_credit = dismissal_type in (
+        bowler_credit = dismissal_type is None or dismissal_type in (
             "Bowled",
             "LBW",
             "Caught",
@@ -552,17 +557,21 @@ class GameState:
         if self._over_ended_flag:
             return
         self._over_ended_flag = True
-        self.rotate_strike()
+        # NOTE: strike rotation for the change of ends is the CALLER's
+        # responsibility (it depends on whether the last ball scored odd or
+        # even runs — see views.py call sites). end_over() used to also
+        # rotate strike unconditionally here, which double-rotated (and so
+        # cancelled out) whenever the last ball of the over was even runs,
+        # leaving the wrong batsman on strike for the new over. Do not add
+        # an unconditional rotate_strike() call here again.
         if self.striker is None and self.non_striker is not None:
             self.striker, self.non_striker = self.non_striker, self.striker
         legal_balls = getattr(self, "current_over_balls", 0)
         if self.current_bowler and legal_balls == 6 and self.current_over_runs == 0:
-            self.bowler_maidens[self.current_bowler.name] = (
-                self.bowler_maidens.get(self.current_bowler.name, 0) + 1
-            )
-            self.bowler_stats[self.current_bowler.name]["m"] = self.bowler_maidens[
-                self.current_bowler.name
-            ]
+            _bn = _pname(self.current_bowler)
+            self.bowler_maidens[_bn] = self.bowler_maidens.get(_bn, 0) + 1
+            self._ensure_bowl_stats(_bn)
+            self.bowler_stats[_bn]["m"] = self.bowler_maidens[_bn]
         self.over_history.append(
             {
                 "runs": self.current_over_runs,
@@ -582,7 +591,7 @@ class GameState:
         if is_wicket_over:
             self.over_history[-1]["wickets"] = 1
         self.last_over_bowler = (
-            self.current_bowler.name if self.current_bowler else None
+            _pname(self.current_bowler) if self.current_bowler else None
         )
         self.current_over_balls = 0
         self.current_over_runs = 0
@@ -591,102 +600,13 @@ class GameState:
         self.current_over_bowlers_runs = 0
         self.current_bowler = None
 
-    def apply_ball_result(
-        self, outcome_dict: dict, batsman: MatchPlayer | None = None
-    ) -> None:
-        outcome_str = outcome_dict.get("outcome_str", "0")
-        runs = outcome_dict.get("runs_batter", 0)
-        overthrows = outcome_dict.get("overthrows", 0)
-        is_extra = outcome_dict.get("extra_type") is not None
-        extra_type = outcome_dict.get("extra_type")
-        dismissal_type = outcome_dict.get("dismissal_type")
-        is_wicket = outcome_str == "W" or dismissal_type in (
-            "Bowled",
-            "LBW",
-            "Caught",
-            "Stumped",
-        )
-        free_hit_saved = outcome_dict.get("free_hit_saved", False)
-
-        self.timeline.append(outcome_str)
-        self.record_ball(outcome_str)
-
-        if is_extra:
-            self.last_was_no_ball = extra_type == "NB"
-            if extra_type == "Wd":
-                self.runs[self.innings - 1] += 1
-                self.current_over_runs += 1
-                if self.current_bowler:
-                    self._ensure_bowl_stats(self.current_bowler.name)
-                    self.bowler_stats[self.current_bowler.name]["r"] += 1
-            elif extra_type == "NB":
-                nb_runs = runs + overthrows
-                self.runs[self.innings - 1] += 1 + nb_runs
-                self.current_over_runs += 1 + nb_runs
-                if nb_runs > 0 and self.striker:
-                    self._ensure_bat_stats_for_player(self.striker)
-                    sk = self._player_key(self.striker)
-                    self.batsman_stats[sk]["r"] += nb_runs
-                    if nb_runs == 4:
-                        self.batsman_stats[sk]["4s"] += 1
-                    elif nb_runs == 6:
-                        self.batsman_stats[sk]["6s"] += 1
-                if self.current_bowler:
-                    self._ensure_bowl_stats(self.current_bowler.name)
-                    self.bowler_stats[self.current_bowler.name]["r"] += nb_runs
-            elif extra_type in ("B", "LB"):
-                bye_runs = outcome_dict.get("runs_extras", 0)
-                self.runs[self.innings - 1] += bye_runs
-                self.current_over_runs += bye_runs
-                if self.striker:
-                    self._ensure_bat_stats_for_player(self.striker)
-                    self.batsman_stats[self._player_key(self.striker)]["b"] += 1
-                if self.current_bowler:
-                    self._ensure_bowl_stats(self.current_bowler.name)
-                    self.bowler_stats[self.current_bowler.name]["b"] += 1
-                    self.bowler_stats[self.current_bowler.name]["r"] += bye_runs
-                    self.bowler_ball_count[self.current_bowler.name] = (
-                        self.bowler_ball_count.get(self.current_bowler.name, 0) + 1
-                    )
-                self.legal_balls[self.innings - 1] += 1
-                self.current_over_balls += 1
-                if self.current_partnership:
-                    self.current_partnership.runs += bye_runs
-                    self.current_partnership.add_ball()
-        else:
-            self.last_was_no_ball = False
-            self.add_legal_ball()
-            if is_wicket and dismissal_type not in ("Run Out", None):
-                dismissed_runs = runs + overthrows
-                self.runs[self.innings - 1] += dismissed_runs
-                self.current_over_runs += dismissed_runs
-                self.current_over_runs_off_bat += dismissed_runs
-                self.current_over_bowlers_runs += dismissed_runs
-                if self.striker:
-                    self._ensure_bat_stats_for_player(self.striker)
-                    sk = self._player_key(self.striker)
-                    self.batsman_stats[sk]["r"] += dismissed_runs
-                if self.current_bowler:
-                    self._ensure_bowl_stats(self.current_bowler.name)
-                    self.bowler_stats[self.current_bowler.name]["r"] += dismissed_runs
-                if self.current_partnership:
-                    self.current_partnership.runs += dismissed_runs
-            else:
-                self.add_runs(runs + overthrows)
-
-        dismissed = batsman or self.striker
-        if is_wicket and dismissal_type not in ("Run Out", None) and not free_hit_saved:
-            self.add_wicket(dismissal_type, batsman=dismissed)
-        elif dismissal_type == "Run Out" and not free_hit_saved:
-            self.add_wicket("Run Out", batsman=dismissed)
-
     def _do_record_boundary_direction(
         self, runs: int, delivery: str, shot: str
     ) -> None:
         if runs not in (4, 6):
             return
-        striker_name = self.striker.name if self.striker else "?"
-        bowler_name = self.current_bowler.name if self.current_bowler else "?"
+        striker_name = _pname(self.striker) if self.striker else "?"
+        bowler_name = _pname(self.current_bowler) if self.current_bowler else "?"
         direction = self._choose_direction(delivery, shot, runs)
         bw = BallDirection(
             over=self.current_over_balls // 6 + 1,
@@ -938,6 +858,9 @@ class GameState:
         for uid in self.teams.keys():
             self.batting_team_reviews[uid] = 2
             self.bowling_team_reviews[uid] = 2
+            self.drs_reviews[uid] = 2
+        self.pending_free_hit = False
+        self.current_ball_free_hit = False
 
     async def build_team_list(self, user_id: int, instances) -> list[MatchPlayer]:
         from engine import (
