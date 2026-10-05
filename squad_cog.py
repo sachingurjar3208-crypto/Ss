@@ -223,7 +223,10 @@ class SquadCog(commands.Cog, name="Squad"):
             if not economy.user_exists(who.id):
                 await ctx.send(f"❌ {label} must debut first. Use `csdebut`.")
                 return
-            problem = sl.xi_problem(who.id)
+            # Checks both the general XI rules AND whether this player has
+            # enough distinct bowling options to legally cover a match of
+            # THIS length (a 4-bowler XI is fine for 1 over, not for 20).
+            problem = sl.xi_problem_for_match(who.id, overs)
             if problem:
                 await ctx.send(f"❌ {label} {problem}.")
                 return

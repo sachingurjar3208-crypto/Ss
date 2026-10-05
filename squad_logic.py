@@ -6,6 +6,7 @@ owns lives in economy.db. This module joins the two.
 
 from __future__ import annotations
 
+import math
 import secrets
 
 import card_db
@@ -14,7 +15,22 @@ from card_narratives import ENGINE_ROLE, ROLES
 
 _rng = secrets.SystemRandom()  # unpredictable, so pack results can't be guessed
 
-MIN_BOWLERS = 5   # the match engine needs 5 bowlers to finish the overs
+MIN_BOWLERS = 4   # general "is this XI even playable" floor, independent of
+                   # any specific match length — lines up with the new
+                   # BOWL(2-4)/AR(2-3) role minimums (2+2 is the smallest
+                   # legal combo now). The real, overs-aware requirement is
+                   # bowlers_required_for() below — see xi_problem_for_match().
+
+
+def bowlers_required_for(overs: int) -> int:
+    """How many distinct bowling-capable players a team needs to legally
+    cover a match of this length, given no bowler may bowl more than
+    ceil(overs / 5) overs (same rule the match engine itself enforces via
+    GameState.max_bowler_balls()). E.g. 20 overs → 4 overs/bowler max → 5
+    bowlers needed; 1 over → 1 bowler needed."""
+    overs = max(1, overs)
+    max_overs_per_bowler = max(1, math.ceil(overs / 5))
+    return max(1, math.ceil(overs / max_overs_per_bowler))
 
 
 # ── Tiers and prices ─────────────────────────────────────────────────────────
@@ -138,9 +154,20 @@ def _bowler_capable(card) -> bool:
     return card_db.effective_bowling_type(card) is not None
 
 
+# Display/batting order: grouped by role in this order — Batters, then
+# All-rounders, then Wicketkeepers, then Bowlers — highest OVR first
+# within each group. (Previously this sorted everyone together by bat/ovr,
+# so a high-OVR bowler could show up above lower-OVR batters.)
+_XI_ROLE_ORDER = ["BAT", "AR", "WK", "BOWL"]
+
+
 def order_xi(cards: list) -> list:
-    """Batting order: best batters first."""
-    return sorted(cards, key=lambda c: (-c["bat"], -c["ovr"]))
+    """Batting order: grouped by role, highest OVR first within each role."""
+    def sort_key(c):
+        role = card_db.effective_role(c)
+        role_rank = _XI_ROLE_ORDER.index(role) if role in _XI_ROLE_ORDER else len(_XI_ROLE_ORDER)
+        return (role_rank, -c["ovr"])
+    return sorted(cards, key=sort_key)
 
 
 # Stat used to rank each role when auto-picking (higher is better for that role).
@@ -249,10 +276,14 @@ def xi_cards(user_id) -> list:
 # (min, max) count of each role, by card_db.effective_role().
 ROLE_LIMITS = {
     "WK":   (1, 2),
-    "BAT":  (5, 6),
-    "AR":   (1, 3),
-    "BOWL": (3, 5),
+    "BAT":  (3, 4),
+    "AR":   (2, 3),
+    "BOWL": (2, 4),
 }
+
+# BAT is allowed to dip to 2 in practice (match still runs) even though 3
+# is the normal minimum everywhere else (auto-XI, the limits above, etc).
+BAT_HARD_MIN = 2
 
 XI_ROLE_LABEL = {"WK": "wicketkeeper(s)", "BAT": "batsman/batsmen", "AR": "all-rounder(s)", "BOWL": "bowler(s)"}
 
@@ -276,14 +307,35 @@ def xi_problem(user_id) -> str | None:
     counts = xi_role_counts(cards)
     for role, (lo, hi) in ROLE_LIMITS.items():
         n = counts[role]
-        if n < lo:
-            return f"needs at least {lo} {XI_ROLE_LABEL[role]} in the XI (has {n})"
+        # BAT specifically allows 2 as a hard floor — a match can still be
+        # played with 2 batters even though 3 is the normal minimum.
+        effective_lo = BAT_HARD_MIN if role == "BAT" else lo
+        if n < effective_lo:
+            return f"needs at least {effective_lo} {XI_ROLE_LABEL[role]} in the XI (has {n})"
         if n > hi:
             return f"can have at most {hi} {XI_ROLE_LABEL[role]} in the XI (has {n})"
     bowlers = sum(1 for c in cards if card_db.effective_bowling_type(c))
     if bowlers < MIN_BOWLERS:
         return (f"needs at least {MIN_BOWLERS} players who can bowl (bowlers / all-rounders) "
                 f"in the XI (has {bowlers})")
+    return None
+
+
+def xi_problem_for_match(user_id, overs: int) -> str | None:
+    """Like xi_problem(), but also checks this user's XI has enough distinct
+    bowling options to legally cover a match of this specific length (no
+    bowler may exceed ceil(overs/5) overs). xi_problem() alone can't catch
+    this because it has no idea how many overs the match being set up is —
+    a 4-bowler XI is fine for a 1-over match but not for a 20-over one."""
+    base = xi_problem(user_id)
+    if base:
+        return base
+    cards = xi_cards(user_id)
+    bowlers = sum(1 for c in cards if card_db.effective_bowling_type(c))
+    needed = bowlers_required_for(overs)
+    if bowlers < needed:
+        return (f"needs at least {needed} bowling option(s) (bowlers / all-rounders) "
+                f"for a {overs}-over match (has {bowlers})")
     return None
 
 

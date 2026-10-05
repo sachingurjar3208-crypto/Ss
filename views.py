@@ -375,6 +375,23 @@ class _TimeoutMixin:
     """
     _channel: discord.TextChannel | None = None
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Block every button/select on this view once the match is no
+        longer registered in active_games. Without this, `cscancel` only
+        removed the game from that dict — the views already on-screen kept
+        calling straight into `self.game` and the match carried on as if
+        nothing happened."""
+        game = getattr(self, "game", None)
+        if game is not None and active_games.get(interaction.channel_id) is not game:
+            try:
+                await interaction.response.send_message(
+                    "This match has been cancelled.", ephemeral=True
+                )
+            except discord.InteractionResponded:
+                pass
+            return False
+        return True
+
     def _get_leaver_id(self, game) -> int | None:
         """
         Identify whose turn it was when this view timed out.
@@ -638,6 +655,21 @@ async def _process_delivery(
     guide_entry_exists: bool = False,
     is_free_hit: bool = False,
 ):
+    # BUG FIX: `cscancel` only removed the game from active_games — it never
+    # stopped the match itself, because this function (and every other
+    # button callback) kept acting on `game` directly regardless of whether
+    # it was still registered. That let players keep playing balls on a
+    # "cancelled" match. Bail out here if the game is no longer live.
+    channel_id = interaction.channel_id
+    if active_games.get(channel_id) is not game:
+        try:
+            await interaction.response.send_message(
+                "This match has been cancelled.", ephemeral=True
+            )
+        except discord.InteractionResponded:
+            pass
+        return
+
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
     delivery_button   = game.pending_delivery
     delivery_internal = game.pending_delivery_internal
@@ -672,21 +704,30 @@ async def _process_delivery(
     speed        = random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
 
-    outcome, is_extra = calculate_outcome(
-        delivery_internal, shot_internal,
-        bowler.get("bowl", 80), striker.get("bat", 80),
-        bowler_attrs=player_attributes(bowler),
-        batsman_attrs=player_attributes(striker),
-        innings=game.innings,
-        current_over=current_over,
-        rrr=game.rrr(),
-        balls_since_wicket=game.balls_since_wicket,
-        partnership_runs=game.partnership_runs,
-        is_recommended_shot=is_recommended_shot,
-        guide_entry_exists=guide_entry_exists,
-        total_overs=game.overs,
-        ground_type=getattr(game, "pitch_type", None),
-    )
+    if shot_button == "Leave":
+        # BUG FIX: "Leave" was mapped to the "Defend" internal shot purely
+        # for matchup/narrative lookups, but that meant it also went through
+        # the normal weighted outcome roll — so leaving the ball could
+        # occasionally come back as a 4 or even a 6, which makes no sense
+        # (nobody scores runs off a ball they didn't play at). A genuine
+        # leave is always a dot ball: no runs, no wicket.
+        outcome, is_extra = "0", False
+    else:
+        outcome, is_extra = calculate_outcome(
+            delivery_internal, shot_internal,
+            bowler.get("bowl", 80), striker.get("bat", 80),
+            bowler_attrs=player_attributes(bowler),
+            batsman_attrs=player_attributes(striker),
+            innings=game.innings,
+            current_over=current_over,
+            rrr=game.rrr(),
+            balls_since_wicket=game.balls_since_wicket,
+            partnership_runs=game.partnership_runs,
+            is_recommended_shot=is_recommended_shot,
+            guide_entry_exists=guide_entry_exists,
+            total_overs=game.overs,
+            ground_type=getattr(game, "pitch_type", None),
+        )
 
     # ── Free-hit: batsman cannot be dismissed (except run out) ───────────
     # If the previous delivery was a no-ball, this is a free-hit.
@@ -1225,6 +1266,13 @@ class BatBowlView(_TimeoutMixin, ui.View):
             self.game.batting_user_id = other.id
             choice_text = "opted to **BOWL FIRST**"
 
+        # Record who is batting in innings 1 — match_result(), team1_name/
+        # team2_name, and the t1_/t2_ batsmen/bowlers properties all key off
+        # this. It was never being set, so it stayed None forever and the
+        # winner/team labelling was effectively random (always fell back to
+        # the "else" branch), which could show the losing side as the winner.
+        self.game.innings1_batting_user_id = self.game.batting_user_id
+
         # Initialise DRS reviews for both teams
         self.game.drs_reviews[self.game.batting_user_id] = 2
         self.game.drs_reviews[self.game.bowling_user_id] = 2
@@ -1698,6 +1746,17 @@ class DRSView(ui.View):
         self._pship_balls          = pre_wicket_pship_balls
         self._balls_since          = pre_wicket_balls_since
 
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if active_games.get(interaction.channel_id) is not self.game:
+            try:
+                await interaction.response.send_message(
+                    "This match has been cancelled.", ephemeral=True
+                )
+            except discord.InteractionResponded:
+                pass
+            return False
+        return True
+
     @ui.button(label="Challenge", style=discord.ButtonStyle.danger)
     async def challenge(self, interaction: discord.Interaction, button: ui.Button):
         if interaction.user.id != self.game.batting_user_id:
@@ -1710,8 +1769,13 @@ class DRSView(ui.View):
         self.stop()
 
         uid = self.game.batting_user_id
-        self.game.drs_reviews[uid] = max(0, self.game.drs_reviews.get(uid, 0) - 1)
-        remaining = self.game.drs_reviews[uid]
+        reviews_before = self.game.drs_reviews.get(uid, 0)
+        # BUG FIX (cricket rule): a successful review does NOT cost you a
+        # review in real DRS — only an unsuccessful one does. The review is
+        # only actually deducted below once we know whether it was upheld or
+        # overturned; this provisional number is just for the "pending"
+        # message so the player sees what it would drop to if unsuccessful.
+        provisional_remaining = max(0, reviews_before - 1)
 
         # Cosmetic status message only — the actual decision below does not
         # depend on this succeeding.
@@ -1719,7 +1783,7 @@ class DRSView(ui.View):
             await interaction.response.edit_message(
                 content=(
                     f"**Review Referred to Third Umpire…**\n"
-                    f"Reviews remaining after this: **{remaining}**"
+                    f"Reviews remaining if unsuccessful: **{provisional_remaining}**"
                 ),
                 view=None,
             )
@@ -1740,6 +1804,9 @@ class DRSView(ui.View):
             overturned      = random.random() < overturn_chance
 
             if overturned:
+                # Review succeeded — real DRS does not cost a review in this
+                # case, so drs_reviews is left untouched (still at
+                # reviews_before).
                 # Undo the wicket
                 inn = self.game.innings - 1
                 self.game.wickets[inn] = max(0, self.game.wickets[inn] - 1)
@@ -1800,7 +1867,9 @@ class DRSView(ui.View):
                     await _send_bowling_prompt(self.channel, self.game)
 
             else:
-                # OUT upheld
+                # OUT upheld — unsuccessful review, so it actually costs
+                # them a review now.
+                self.game.drs_reviews[uid] = provisional_remaining
                 self.game.timeline.append(_timeline_emoji("W"))
                 try:
                     await interaction.edit_original_response(
