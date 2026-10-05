@@ -35,14 +35,25 @@ NARRATIVE_NAMES: list[str] = list(NARRATIVES)
 ROLES: dict[str, str] = {
     "BAT": "Batter",
     "BOWL": "Bowler",
+    "LBOWL": "Left Arm Bowler",
+    "RBOWL": "Right Arm Bowler",
     "AR": "All-Rounder",
     "WK": "Wicketkeeper",
+}
+
+# LBOWL / RBOWL only change the word printed on the card; everywhere else
+# (XI rules, match engine, squad screens) they count as a normal BOWL.
+BASE_ROLE: dict[str, str] = {
+    "BAT": "BAT", "BOWL": "BOWL", "AR": "AR", "WK": "WK",
+    "LBOWL": "BOWL", "RBOWL": "BOWL",
 }
 
 # Words printed on the card image.
 ROLE_CARD_WORD: dict[str, str] = {
     "BAT": "BATTER",
     "BOWL": "BOWLER",
+    "LBOWL": "LEFT ARM BOWLER",
+    "RBOWL": "RIGHT ARM BOWLER",
     "AR": "ALL-ROUNDER",
     "WK": "WICKETKEEPER",
 }

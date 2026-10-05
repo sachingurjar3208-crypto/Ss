@@ -297,6 +297,8 @@ def effective_role(card) -> str:
     """BAT / BOWL / AR / WK for a card. Old cards with no role saved are
     guessed from their stats."""
     role = card["role"] if "role" in card.keys() else None
+    if role in ("LBOWL", "RBOWL"):   # left/right arm bowler = a normal bowler for the game
+        return "BOWL"
     if role in ("BAT", "BOWL", "AR", "WK"):
         return role
     bat, bowl = card["bat"], card["bowl"]

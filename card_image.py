@@ -70,10 +70,10 @@ STAT_LABEL_OFFSET_Y = 55         # label sits this many px below the number
 ROLE_CENTER = (518, 1210)        # "BATTER" / "BOWLER" word, center band
 ROLE_SIZE = 26
 
-OVR_CENTER = (518, 1160)         # OVR number, above the role word
+OVR_CENTER = (518, 1170)         # OVR number, above the role word (moved 10px down)
 OVR_SIZE = 46
 
-COUNTRY_CENTER = (518, 1455)     # bottom strip: "🇮🇳 India"
+COUNTRY_CENTER = (518, 1465)     # bottom strip: "🇮🇳 India" (moved 10px down)
 COUNTRY_SIZE = 30
 
 # ── Bottom stats panel (the boxed strip with the two hexagons + centre band).
@@ -86,7 +86,7 @@ PANEL_TOP_Y = 1146
 # When False (default), the cutout is never clipped by the panel.
 FG_CLIP_TO_PANEL = False
 
-HAND_CENTER = (518, 1348)        # "RIGHT HAND BAT" / "LEFT HAND BAT", bottom of centre band
+HAND_CENTER = (518, 1357)        # "RIGHT HAND BAT" / "LEFT HAND BAT", bottom of centre band (moved 9px down)
 HAND_SIZE = 20
 
 # ── Country logo: sits just ABOVE the country name. It follows the country
@@ -324,7 +324,7 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     # "jo batsmen hoga uski batting aage" / "jo bowler hoga uski bowling aage".
     bat, bowl = card_row["bat"], card_row["bowl"]
     role = _col(card_row, "role")
-    if role == "BOWL":
+    if role in ("BOWL", "LBOWL", "RBOWL"):
         is_batter = False
     elif role in ("BAT", "WK"):
         is_batter = True
