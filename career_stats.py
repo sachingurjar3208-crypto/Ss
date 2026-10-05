@@ -172,14 +172,14 @@ def batting_figures(c: dict) -> list[tuple[str, str]]:
     avg = f"{c['runs'] / dismissals:.1f}" if dismissals > 0 else "-"
     sr = f"{c['runs'] / c['balls'] * 100:.1f}" if c["balls"] else "0.0"
     return [
-        ("Inns", str(c["bat_inns"])),
-        ("Runs", str(c["runs"])),
-        ("50s", str(c["fifties"])),
-        ("100s", str(c["hundreds"])),
-        ("4/6", f"{c['fours']}/{c['sixes']}"),
-        ("Avg", avg),
-        ("SR", sr),
-        ("Ducks", str(c["ducks"])),
+        ("Mat", str(c["bat_inns"])),
+        ("Runs", f"{c['runs']:,}"),
+        ("50", str(c["fifties"])),
+        ("100", str(c["hundreds"])),
+        ("4s/6s", f"{c['fours']}/{c['sixes']}"),
+        ("Ave", avg),
+        ("S/R", sr),
+        ("0s", str(c["ducks"])),
         ("HS", str(c["highest"]) if c["bat_inns"] else "-"),
     ]
 
@@ -191,13 +191,13 @@ def bowling_figures(c: dict) -> list[tuple[str, str]]:
     sr = f"{c['balls_bowled'] / c['wickets']:.1f}" if c["wickets"] else "-"
     bbf = f"{c['best_w']}/{c['best_r']}" if c["best_w"] else "-"
     return [
-        ("Inns", str(c["bowl_inns"])),
-        ("Wickets", str(c["wickets"])),
-        ("3-Fers", str(c["three_fers"])),
-        ("5-Fers", str(c["five_fers"])),
-        ("Avg", avg),
-        ("Economy", econ),
-        ("SR", sr),
-        ("Maidens", str(c["maidens"])),
-        ("BBF", bbf),
+        ("Mat", str(c["bowl_inns"])),
+        ("Wkts", str(c["wickets"])),
+        ("3W", str(c["three_fers"])),
+        ("5W", str(c["five_fers"])),
+        ("Ave", avg),
+        ("Econ", econ),
+        ("S/R", sr),
+        ("Mdns", str(c["maidens"])),
+        ("BBI", bbf),
     ]

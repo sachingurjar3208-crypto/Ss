@@ -403,13 +403,23 @@ class SquadCog(commands.Cog, name="Squad"):
         owner_id = await asyncio.to_thread(card_db_owner, card["playername_key"])
         if owner_id:
             member = ctx.guild.get_member(owner_id) if ctx.guild else None
-            owner = member.display_name if member else str(owner_id)
+            if member:
+                owner = member.display_name
+            else:   # not in this server / not cached: ask Discord for the name
+                try:
+                    user = self.bot.get_user(owner_id) or await self.bot.fetch_user(owner_id)
+                    owner = user.display_name
+                except discord.HTTPException:
+                    owner = "Unknown"
 
         header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
         lines = [header]
         if owner:
-            lines.append(f"Owner: {owner}")
+            lines.append(f"Owner: {esc(owner)}")
         lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
+        styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
+        if styles:   # only cards that have a playstyle/narrative
+            lines.append("Playstyle: " + " · ".join(styles))
         embed = discord.Embed(
             title=f"Player Stats: {esc(card['playername'])}",
             description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",

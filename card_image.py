@@ -22,6 +22,7 @@ never in front.
 
 from __future__ import annotations
 
+import asyncio
 import io
 from pathlib import Path
 
@@ -264,7 +265,24 @@ def _cover_to_canvas(img: Image.Image) -> Image.Image:
 
 
 async def generate_card_image(card_row, background_local_path: str) -> io.BytesIO:
-    """Build the final PNG for a card DB row. Returns an in-memory PNG."""
+    """Build the final PNG for a card DB row. Returns an in-memory PNG.
+
+    Only the foreground download needs the event loop (network I/O). Every
+    other step below is CPU-bound Pillow work (opening/resizing/compositing
+    images, drawing several text fields with font rendering, saving the
+    PNG) — running that inline on the event loop would block ALL other
+    Discord interactions (other users' commands, gateway heartbeats) for
+    as long as it takes, which is what was causing random
+    "Unknown Message"/"Unknown interaction" 404s on followup.send() across
+    the bot, not just on this command. So we download the foreground async,
+    then hand the rest off to a worker thread via asyncio.to_thread.
+    """
+    fg = await _download_image(card_row["foreground_link"])
+    return await asyncio.to_thread(_build_card_image_sync, card_row, background_local_path, fg)
+
+
+def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image) -> io.BytesIO:
+    """All the CPU-bound Pillow work — runs in a worker thread, never on the event loop."""
     background = Image.open(background_local_path).convert("RGBA")
     background = _cover_to_canvas(background)
 
@@ -286,7 +304,6 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     country_size = _col(card_row, "country_size", COUNTRY_SIZE)
 
     # ── Foreground cutout ──────────────────────────────────────────────
-    fg = await _download_image(card_row["foreground_link"])
     fg_resized, paste_pos = _fit_foreground(
         fg, FG_BOX, card_row["offset_x"], card_row["offset_y"],
         card_row["scale_pct"] if "scale_pct" in card_row.keys() else 100,
