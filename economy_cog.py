@@ -12,6 +12,7 @@ Safety notes
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -91,7 +92,7 @@ def _buysell_embed(card, text: str) -> discord.Embed:
     embed = discord.Embed(description=text, color=discord.Color.gold())
     path = card["image_path"]
     if path and Path(path).exists():
-        embed.set_image(url=f"attachment://{card_cache.FILENAME}")
+        embed.set_image(url=card_cache.image_url(path))
     return embed
 
 
@@ -100,17 +101,21 @@ async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable
     import time as _t
     view = BuySellView(ctx.author.id, card, action)
     t0 = _t.perf_counter()
-    file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
+    embed = _buysell_embed(card, text)
+    path = card["image_path"]
+    url = card_cache.cached_url(path)
+    file = None if url else await card_cache.card_file(path)   # cached link = no upload
+    if not url and file is None:
+        embed = discord.Embed(description=text, color=discord.Color.gold())
     t1 = _t.perf_counter()
-    embed = _buysell_embed(card, text) if file else discord.Embed(description=text, color=discord.Color.gold())
     if file:
         view.message = await ctx.send(embed=embed, file=file, view=view)
+        card_cache.remember(path, view.message)
     else:
         view.message = await ctx.send(embed=embed, view=view)
     t2 = _t.perf_counter()
-    kb = len(file.fp.getvalue()) // 1024 if file else 0
-    # Timing log: image = making/loading the picture, send = uploading it to Discord
-    print(f"[timing buy/sell] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  size={kb}KB")
+    how = "cdn-link" if url else ("upload" if file else "no-image")
+    print(f"[timing buy/sell] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  via={how}")
 
 
 class BuySellView(OwnedView):
@@ -379,7 +384,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if _in_match(self.bot, ctx.author.id):
             await ctx.send("You can't buy players during a match.")
             return
-        card, err = sl.resolve_any(security.clean_input(player))
+        card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
         if card is None:
             await ctx.send(str(err))
             return
@@ -409,7 +414,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if _in_match(self.bot, ctx.author.id):
             await ctx.send("You can't sell players during a match.")
             return
-        card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
+        card, err = await asyncio.to_thread(sl.resolve_owned, ctx.author.id, security.clean_input(player))
         if card is None:
             await ctx.send(str(err))
             return

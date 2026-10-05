@@ -253,12 +253,9 @@ def pick_starter_squad() -> list | None:
 def owned_cards(user_id) -> list:
     """Card rows for everything the user owns (players removed from the card
     database are skipped)."""
-    out = []
-    for key in economy.owned_keys(user_id):
-        card = card_db.get_card(key)
-        if card is not None:
-            out.append(card)
-    return out
+    keys = economy.owned_keys(user_id)
+    found = card_db.get_cards(keys)   # one query instead of one per card
+    return [found[k.strip().lower()] for k in keys if k.strip().lower() in found]
 
 
 def xi_cards(user_id) -> list:

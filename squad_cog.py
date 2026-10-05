@@ -376,13 +376,7 @@ class SquadCog(commands.Cog, name="Squad"):
             )
         desc += f"\n\n💰 Buy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
         embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
-        file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
-        if file is not None:
-            embed.set_image(url=f"attachment://{card_cache.FILENAME}")
-        if file is not None:
-            await ctx.send(embed=embed, file=file)
-        else:
-            await ctx.send(embed=embed)
+        await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
     # -- player stats card -----------------------------------------------
     @commands.command(name="csview")
@@ -391,11 +385,11 @@ class SquadCog(commands.Cog, name="Squad"):
         """Show a player's card with career batting and bowling stats."""
         from career_stats import get_career, batting_figures, bowling_figures
 
-        card, err = sl.resolve_any(security.clean_input(player))
+        card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
         if card is None:
             await ctx.send(f"❌ {err}")
             return
-        career = get_career(card["playername_key"])
+        career = await asyncio.to_thread(get_career, card["playername_key"])
         bat = batting_figures(career)
         bowl = bowling_figures(career)
 
@@ -406,7 +400,7 @@ class SquadCog(commands.Cog, name="Squad"):
         table = "\n".join(rows)
 
         owner = None
-        owner_id = card_db_owner(card["playername_key"])
+        owner_id = await asyncio.to_thread(card_db_owner, card["playername_key"])
         if owner_id:
             member = ctx.guild.get_member(owner_id) if ctx.guild else None
             owner = member.display_name if member else str(owner_id)
@@ -421,18 +415,7 @@ class SquadCog(commands.Cog, name="Squad"):
             description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
             color=discord.Color.blurple(),
         )
-        import time as _t
-        t0 = _t.perf_counter()
-        file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
-        t1 = _t.perf_counter()
-        if file:
-            embed.set_image(url=f"attachment://{card_cache.FILENAME}")
-            await ctx.send(embed=embed, file=file)
-        else:
-            await ctx.send(embed=embed)
-        t2 = _t.perf_counter()
-        kb = len(file.fp.getvalue()) // 1024 if file else 0
-        print(f"[timing csview] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  size={kb}KB")
+        await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
     # -- XI --------------------------------------------------------------
     @commands.command(name="csxi", aliases=["csbattingorder"])

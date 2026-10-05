@@ -187,6 +187,19 @@ def get_card(playername: str) -> sqlite3.Row | None:
         ).fetchone()
 
 
+def get_cards(keys: list[str]) -> dict[str, sqlite3.Row]:
+    """Many cards in ONE query: {playername_key: row}. Missing keys are skipped."""
+    keys = [k.strip().lower() for k in keys]
+    out: dict[str, sqlite3.Row] = {}
+    with _conn() as conn:
+        for i in range(0, len(keys), 500):   # stay under SQLite's variable limit
+            chunk = keys[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            for row in conn.execute(f"SELECT * FROM cards WHERE playername_key IN ({marks})", chunk):
+                out[row["playername_key"]] = row
+    return out
+
+
 def create_card(
     *,
     playername: str,
