@@ -67,11 +67,15 @@ STAT_NUMBER_SIZE = 70
 STAT_LABEL_SIZE = 24
 STAT_LABEL_OFFSET_Y = 55         # label sits this many px below the number
 
-ROLE_CENTER = (518, 1210)        # "BATTER" / "BOWLER" word, center band
+ROLE_CENTER = (518, 1200)        # role word (BATTER / BOWLER / WICKETKEEPER...) alone in the top centre strip
 ROLE_SIZE = 26
 
-OVR_CENTER = (518, 1170)         # OVR number, above the role word (moved 10px down)
-OVR_SIZE = 46
+# OVR now lives inside the big centre circle: number on top, small "OVR" word under it.
+# Number uses the SAME font/size/colour as the BAT / BOWL numbers; the word uses the SAME
+# font/size/colour as the BATTING / BOWLING labels and the same gap below the number.
+OVR_CENTER = (518, 1320)         # OVR number centre (fixed px for every card)
+OVR_SIZE = STAT_NUMBER_SIZE      # same size as the BAT / BOWL numbers
+OVR_LABEL_TEXT = "OVR"
 
 COUNTRY_CENTER = (518, 1465)     # bottom strip: "🇮🇳 India" (moved 10px down)
 COUNTRY_SIZE = 30
@@ -88,6 +92,9 @@ FG_CLIP_TO_PANEL = False
 
 HAND_CENTER = (518, 1357)        # "RIGHT HAND BAT" / "LEFT HAND BAT", bottom of centre band (moved 9px down)
 HAND_SIZE = 20
+# The centre circle now holds the OVR, so the "RIGHT HAND BAT" text is not drawn by default.
+# Set True to draw it again (it would sit on top of the OVR, so move HAND_CENTER first).
+SHOW_HAND_TEXT = False
 
 # ── Country logo: sits just ABOVE the country name. It follows the country
 # text (so /cardlayout countryup/down moves both), then the per-card
@@ -353,23 +360,30 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
         right_label, label_font, WHITE,
     )
 
-    # ── OVR + role word, center band ───────────────────────────────────
-    ovr_center = (OVR_CENTER[0] + ovr_dx, OVR_CENTER[1] + ovr_dy)
+    # ── Role word alone in the top centre strip ────────────────────────
     role_dx    = _col(card_row, "role_dx", 0)
     role_dy    = _col(card_row, "role_dy", 0)
     role_size  = _col(card_row, "role_size", ROLE_SIZE)
     hand_dx    = _col(card_row, "hand_dx", 0)
     hand_dy    = _col(card_row, "hand_dy", 0)
     hand_size  = _col(card_row, "hand_size", HAND_SIZE)
-    role_center = (ROLE_CENTER[0] + ovr_dx + role_dx, ROLE_CENTER[1] + ovr_dy + role_dy)
-    ovr_font = _font(FONT_DISPLAY_BOLD, ovr_size)
+    role_center = (ROLE_CENTER[0] + role_dx, ROLE_CENTER[1] + role_dy)
     role_font = _font(FONT_LABEL, role_size)
-    _draw_centered(draw, ovr_center, str(card_row["ovr"]), ovr_font, GOLD)
     _draw_centered(draw, role_center, role_word, role_font, WHITE)
 
-    # ── Batting hand, bottom of the centre band ────────────────────────
+    # ── OVR inside the big centre circle: number, then the word "OVR" under it ──
+    ovr_center = (OVR_CENTER[0] + ovr_dx, OVR_CENTER[1] + ovr_dy)
+    ovr_font = _font(FONT_DISPLAY_BOLD, ovr_size)
+    _draw_centered(draw, ovr_center, str(card_row["ovr"]), ovr_font, GOLD)
+    _draw_centered(
+        draw,
+        (ovr_center[0], ovr_center[1] + STAT_LABEL_OFFSET_Y),
+        OVR_LABEL_TEXT, label_font, WHITE,
+    )
+
+    # ── Batting hand (off by default, see SHOW_HAND_TEXT) ──────────────
     hand_word = HAND_CARD_WORD.get(_col(card_row, "batting_hand"))
-    if hand_word:
+    if SHOW_HAND_TEXT and hand_word:
         hand_center = (HAND_CENTER[0] + hand_dx, HAND_CENTER[1] + hand_dy)
         _draw_centered(draw, hand_center, hand_word, _font(FONT_LABEL, hand_size), WHITE)
 

@@ -20,7 +20,7 @@ from PIL import Image
 
 DISPLAY_W = 800          # width of the copy that gets sent in chat
 JPEG_QUALITY = 90
-MAX_MEMORY_ITEMS = 300   # how many cards stay in RAM
+MAX_MEMORY_ITEMS = 100   # how many cards stay in RAM (~300KB each, kept small for a 1GB server)
 FILENAME = "card.jpg"    # embeds must use attachment://card.jpg
 
 _DISPLAY_DIR = Path(__file__).parent / "generated" / "display"

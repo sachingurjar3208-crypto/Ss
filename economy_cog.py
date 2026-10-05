@@ -97,13 +97,20 @@ def _buysell_embed(card, text: str) -> discord.Embed:
 
 async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable[[], Awaitable[str]]):
     """Send the card image + text with the check / cross buttons."""
+    import time as _t
     view = BuySellView(ctx.author.id, card, action)
+    t0 = _t.perf_counter()
     file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
+    t1 = _t.perf_counter()
     embed = _buysell_embed(card, text) if file else discord.Embed(description=text, color=discord.Color.gold())
     if file:
         view.message = await ctx.send(embed=embed, file=file, view=view)
     else:
         view.message = await ctx.send(embed=embed, view=view)
+    t2 = _t.perf_counter()
+    kb = len(file.fp.getvalue()) // 1024 if file else 0
+    # Timing log: image = making/loading the picture, send = uploading it to Discord
+    print(f"[timing buy/sell] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  size={kb}KB")
 
 
 class BuySellView(OwnedView):

@@ -421,12 +421,18 @@ class SquadCog(commands.Cog, name="Squad"):
             description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
             color=discord.Color.blurple(),
         )
+        import time as _t
+        t0 = _t.perf_counter()
         file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
+        t1 = _t.perf_counter()
         if file:
             embed.set_image(url=f"attachment://{card_cache.FILENAME}")
             await ctx.send(embed=embed, file=file)
         else:
             await ctx.send(embed=embed)
+        t2 = _t.perf_counter()
+        kb = len(file.fp.getvalue()) // 1024 if file else 0
+        print(f"[timing csview] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  size={kb}KB")
 
     # -- XI --------------------------------------------------------------
     @commands.command(name="csxi", aliases=["csbattingorder"])
