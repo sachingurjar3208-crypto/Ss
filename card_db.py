@@ -19,14 +19,12 @@ GENERATED_DIR = Path(__file__).parent / "generated"
 LOGOS_DIR = Path(__file__).parent / "playstyle_logos"
 PANELS_DIR = Path(__file__).parent / "panels"
 COUNTRY_LOGOS_DIR = Path(__file__).parent / "country_logos"
-BG_LOGOS_DIR = Path(__file__).parent / "bg_logos"
 
 BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 PANELS_DIR.mkdir(parents=True, exist_ok=True)
 COUNTRY_LOGOS_DIR.mkdir(parents=True, exist_ok=True)
-BG_LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Narratives of each card, cached briefly because the match engine asks once per ball.
 _NARRATIVE_CACHE: dict[str, tuple[float, list[str]]] = {}
@@ -80,16 +78,6 @@ _NEW_CARD_COLUMNS = [
     ("countrylogo_dx",    "INTEGER NOT NULL DEFAULT 0"),
     ("countrylogo_dy",    "INTEGER NOT NULL DEFAULT 0"),
     ("countrylogo_scale", "INTEGER NOT NULL DEFAULT 100"),
-    # ── Background emblem/watermark (added via /bglogoadder, assigned via
-    # /bglogoadd, positioned via /bglogofixer). Drawn BEHIND the foreground
-    # cutout and behind every text field — it sits directly on top of the
-    # background template, same as the big circle crest behind the player
-    # on a reference card. `bg_logo` is this card's own override pathname;
-    # NULL means "use the universal logo, if one is set, else none". ──
-    ("bg_logo",       "TEXT"),                              # bg_logos.pathname, or NULL
-    ("bglogo_dx",     "INTEGER NOT NULL DEFAULT 0"),
-    ("bglogo_dy",     "INTEGER NOT NULL DEFAULT 0"),
-    ("bglogo_scale",  "INTEGER NOT NULL DEFAULT 100"),
 ]
 
 
@@ -167,19 +155,6 @@ def init_card_db() -> None:
                 country       TEXT NOT NULL,      -- canonical name, e.g. "India"
                 link          TEXT NOT NULL,
                 local_path    TEXT NOT NULL,
-                added_by      INTEGER,
-                added_at      REAL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS bg_logos (
-                pathname_key  TEXT PRIMARY KEY,   -- lowercase
-                pathname      TEXT NOT NULL,      -- original casing, shown in the picker
-                link          TEXT NOT NULL,
-                local_path    TEXT NOT NULL,
-                is_universal  INTEGER NOT NULL DEFAULT 0,  -- 1 = default logo for every card
                 added_by      INTEGER,
                 added_at      REAL
             )
@@ -697,135 +672,6 @@ def update_country_logo_layout(playername: str, dx: int, dy: int, scale: int) ->
     with _conn() as conn:
         conn.execute(
             "UPDATE cards SET countrylogo_dx = ?, countrylogo_dy = ?, countrylogo_scale = ?, "
-            "updated_at = ? WHERE playername_key = ?",
-            (dx, dy, scale, time.time(), playername.strip().lower()),
-        )
-        conn.commit()
-    return True
-
-
-# ── Background emblem logos (added via /bglogoadder) ──────────────────────
-# A big watermark/crest drawn behind the foreground cutout and behind all
-# text — same spot as the circle crest behind the player on a reference
-# card. One logo can be marked "universal" (shows on every card by default);
-# a card can also have its own override via /bglogoadd, which always wins.
-
-def bg_logo_exists(pathname: str) -> bool:
-    with _conn() as conn:
-        row = conn.execute(
-            "SELECT 1 FROM bg_logos WHERE pathname_key = ?",
-            (pathname.strip().lower(),),
-        ).fetchone()
-        return row is not None
-
-
-def get_bg_logo(pathname: str) -> sqlite3.Row | None:
-    if not pathname:
-        return None
-    with _conn() as conn:
-        return conn.execute(
-            "SELECT * FROM bg_logos WHERE pathname_key = ?",
-            (pathname.strip().lower(),),
-        ).fetchone()
-
-
-def get_universal_bg_logo() -> sqlite3.Row | None:
-    """The logo currently marked universal (shown on every card that has no
-    override of its own), or None if none is set."""
-    with _conn() as conn:
-        return conn.execute(
-            "SELECT * FROM bg_logos WHERE is_universal = 1 LIMIT 1"
-        ).fetchone()
-
-
-def add_bg_logo(pathname: str, link: str, local_path: str, added_by: int) -> None:
-    with _conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO bg_logos (pathname_key, pathname, link, local_path, is_universal, added_by, added_at)
-            VALUES (?, ?, ?, ?, 0, ?, ?)
-            """,
-            (pathname.strip().lower(), pathname.strip(), link.strip(), local_path, added_by, time.time()),
-        )
-        conn.commit()
-
-
-def list_bg_logos() -> list[str]:
-    with _conn() as conn:
-        rows = conn.execute("SELECT pathname FROM bg_logos ORDER BY pathname").fetchall()
-        return [r["pathname"] for r in rows]
-
-
-def remove_bg_logo(pathname: str) -> sqlite3.Row | None:
-    """Delete a background logo (used by /bglogoremover) and return the row
-    that was deleted (or None if it didn't exist), so the caller can also
-    clean up its local file. Any card currently overriding with this logo
-    has the override cleared automatically, so it falls back to the
-    universal logo (if any) instead of pointing at a deleted file."""
-    row = get_bg_logo(pathname)
-    if row is None:
-        return None
-    with _conn() as conn:
-        conn.execute("DELETE FROM bg_logos WHERE pathname_key = ?", (pathname.strip().lower(),))
-        conn.execute(
-            "UPDATE cards SET bg_logo = NULL, bglogo_dx = 0, bglogo_dy = 0, "
-            "bglogo_scale = 100 WHERE bg_logo IS NOT NULL AND LOWER(bg_logo) = ?",
-            (pathname.strip().lower(),),
-        )
-        conn.commit()
-    return row
-
-
-def set_universal_bg_logo(pathname: str) -> bool:
-    """Mark one logo as THE default shown on every card that doesn't have
-    its own override. Only one logo can be universal at a time — setting a
-    new one clears the flag off any previous one. Returns False if
-    `pathname` isn't a known logo."""
-    key = pathname.strip().lower()
-    if not bg_logo_exists(pathname):
-        return False
-    with _conn() as conn:
-        conn.execute("UPDATE bg_logos SET is_universal = 0 WHERE is_universal = 1")
-        conn.execute("UPDATE bg_logos SET is_universal = 1 WHERE pathname_key = ?", (key,))
-        conn.commit()
-    return True
-
-
-def clear_universal_bg_logo() -> None:
-    """Turn off the universal logo (no logo shows by default any more;
-    cards with their own override via /bglogoadd are unaffected)."""
-    with _conn() as conn:
-        conn.execute("UPDATE bg_logos SET is_universal = 0 WHERE is_universal = 1")
-        conn.commit()
-
-
-def set_card_bg_logo(playername: str, bg_logo: str | None) -> bool:
-    """Set (or clear, with None) this card's OWN background-logo override.
-    None means "fall back to the universal logo, if any". Resets the
-    position/size back to default whenever the logo image itself changes,
-    so a new logo doesn't inherit a stale offset from a differently-shaped
-    old one."""
-    if get_card(playername) is None:
-        return False
-    with _conn() as conn:
-        conn.execute(
-            "UPDATE cards SET bg_logo = ?, bglogo_dx = 0, bglogo_dy = 0, "
-            "bglogo_scale = 100, updated_at = ? WHERE playername_key = ?",
-            (bg_logo, time.time(), playername.strip().lower()),
-        )
-        conn.commit()
-    return True
-
-
-def update_bg_logo_layout(playername: str, dx: int, dy: int, scale: int) -> bool:
-    """Save the position offset and size (percent) of a card's background
-    logo, set via /bglogofixer. Works whether the card is showing its own
-    override or just falling back to the universal logo."""
-    if get_card(playername) is None:
-        return False
-    with _conn() as conn:
-        conn.execute(
-            "UPDATE cards SET bglogo_dx = ?, bglogo_dy = ?, bglogo_scale = ?, "
             "updated_at = ? WHERE playername_key = ?",
             (dx, dy, scale, time.time(), playername.strip().lower()),
         )
