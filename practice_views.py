@@ -1033,58 +1033,73 @@ class PracticeNextBatsmanView(_PracticeTimeoutMixin, ui.View):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
+    """Fast bowling (practice) — ONE message, two rows.
+    Row 0 active first, row 1 greyed. After row 0 pick: row 0 grey, row 1 active."""
+
+    _S1_STYLES = {
+        "Outswing": discord.ButtonStyle.primary,
+        "Inswing":  discord.ButtonStyle.secondary,
+        "Fast":     discord.ButtonStyle.danger,
+        "Slow":     discord.ButtonStyle.success,
+    }
+    _S2_STYLES = {
+        "Bouncer": discord.ButtonStyle.danger,
+        "Full":    discord.ButtonStyle.primary,
+        "Good":    discord.ButtonStyle.success,
+        "Yorker":  discord.ButtonStyle.secondary,
+    }
+
     def __init__(self, game: GameState, is_free_hit: bool = False):
         super().__init__(timeout=VIEW_TIMEOUT)
-        self.game        = game
-        self.is_free_hit = is_free_hit
-        _STYLES = {
-            "Outswing": discord.ButtonStyle.primary,
-            "Inswing":  discord.ButtonStyle.secondary,
-            "Fast":     discord.ButtonStyle.danger,
-            "Slow":     discord.ButtonStyle.success,
-        }
+        self.game          = game
+        self.is_free_hit   = is_free_hit
+        self.stage1_choice = ""
+        self._stage1_btns: list = []
+        self._stage2_btns: list = []
+
         for label in FAST_STAGE1:
-            btn          = ui.Button(label=label, style=_STYLES.get(label, discord.ButtonStyle.secondary), row=0)
-            btn.callback = self._make_callback(label)
+            btn = ui.Button(label=label, style=self._S1_STYLES.get(label, discord.ButtonStyle.secondary), row=0)
+            btn.callback = self._make_stage1_callback(label)
+            self._stage1_btns.append(btn)
             self.add_item(btn)
 
-    def _make_callback(self, stage1: str):
+        for label in FAST_STAGE2:
+            btn = ui.Button(label=label, style=discord.ButtonStyle.secondary, row=1, disabled=True)
+            btn.callback = self._make_stage2_callback(label)
+            self._stage2_btns.append(btn)
+            self.add_item(btn)
+
+    def _make_stage1_callback(self, stage1: str):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.bowling_user_id:
                 await interaction.response.send_message("Only you bowl!", ephemeral=True)
                 return
-            self.stop()
-            view = PracticeFastBowlStage2View(self.game, stage1_choice=stage1, is_free_hit=self.is_free_hit)
-            view._channel = interaction.channel
-            await interaction.response.edit_message(
-                content=f"**{_pname(self.game.current_bowler)}** — **{stage1}**. Now pick line/length:",
-                view=view,
-                embed=None,
-            )
+            if self.stage1_choice:
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
+                return
+            self.stage1_choice = stage1
+            for b in self._stage1_btns:
+                b.disabled = True
+                b.style    = discord.ButtonStyle.secondary
+            for b in self._stage2_btns:
+                b.disabled = False
+                b.style    = self._S2_STYLES.get(b.label, discord.ButtonStyle.secondary)
+            try:
+                await interaction.response.edit_message(view=self)
+            except Exception as e:
+                print(f"[practice fast bowl] stage1 edit failed ({type(e).__name__}: {e})")
         return callback
 
-
-class PracticeFastBowlStage2View(_PracticeTimeoutMixin, ui.View):
-    def __init__(self, game: GameState, stage1_choice: str, is_free_hit: bool = False):
-        super().__init__(timeout=VIEW_TIMEOUT)
-        self.game          = game
-        self.stage1_choice = stage1_choice
-        self.is_free_hit   = is_free_hit
-        _STYLES = {
-            "Bouncer": discord.ButtonStyle.danger,
-            "Full":    discord.ButtonStyle.primary,
-            "Good":    discord.ButtonStyle.success,
-            "Yorker":  discord.ButtonStyle.secondary,
-        }
-        for label in FAST_STAGE2:
-            btn          = ui.Button(label=label, style=_STYLES.get(label, discord.ButtonStyle.secondary), row=0)
-            btn.callback = self._make_callback(label)
-            self.add_item(btn)
-
-    def _make_callback(self, delivery_button: str):
+    def _make_stage2_callback(self, delivery_button: str):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.bowling_user_id:
                 await interaction.response.send_message("Only you bowl!", ephemeral=True)
+                return
+            if not self.stage1_choice:
+                await interaction.response.send_message("Pehle swing/speed choose karo.", ephemeral=True)
                 return
             self.stop()
             delivery_internal = DELIVERY_BUTTON_MAP.get(delivery_button, delivery_button)

@@ -42,6 +42,7 @@ from card_db import (
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
 from card_image import generate_card_image
+import card_cache
 from card_narratives import NARRATIVES, NARRATIVE_NAMES, ROLES, HANDS, BOWLING_TYPES
 
 import aiohttp
@@ -125,6 +126,7 @@ async def _regenerate_and_send(interaction: discord.Interaction, playername: str
     with open(out_path, "wb") as f:
         f.write(buf.getvalue())
     set_card_image_path(playername, str(out_path))
+    await card_cache.warm(str(out_path))   # so csview/csbuy/cssell are instant
     buf.seek(0)
     file = discord.File(buf, filename=f"{card['displayname']}.png")
     extras = ""

@@ -23,6 +23,7 @@ import card_db
 import economy
 import security
 import squad_logic as sl
+import card_cache
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
 from squad_cog import _card_line, _in_match, _is_premium, _need_debut
@@ -90,17 +91,17 @@ def _buysell_embed(card, text: str) -> discord.Embed:
     embed = discord.Embed(description=text, color=discord.Color.gold())
     path = card["image_path"]
     if path and Path(path).exists():
-        embed.set_image(url="attachment://card.png")
+        embed.set_image(url=f"attachment://{card_cache.FILENAME}")
     return embed
 
 
 async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable[[], Awaitable[str]]):
     """Send the card image + text with the check / cross buttons."""
     view = BuySellView(ctx.author.id, card, action)
-    embed = _buysell_embed(card, text)
-    path = card["image_path"]
-    if path and Path(path).exists():
-        view.message = await ctx.send(embed=embed, file=discord.File(path, filename="card.png"), view=view)
+    file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
+    embed = _buysell_embed(card, text) if file else discord.Embed(description=text, color=discord.Color.gold())
+    if file:
+        view.message = await ctx.send(embed=embed, file=file, view=view)
     else:
         view.message = await ctx.send(embed=embed, view=view)
 

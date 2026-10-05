@@ -17,6 +17,7 @@ import discord
 from discord import ui
 from discord.ext import commands
 
+import card_cache
 import card_db
 import economy
 import security
@@ -375,11 +376,9 @@ class SquadCog(commands.Cog, name="Squad"):
             )
         desc += f"\n\n💰 Buy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
         embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
-        file = None
-        path = card["image_path"]
-        if path and Path(path).exists():
-            file = discord.File(path, filename="card.png")
-            embed.set_image(url="attachment://card.png")
+        file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
+        if file is not None:
+            embed.set_image(url=f"attachment://{card_cache.FILENAME}")
         if file is not None:
             await ctx.send(embed=embed, file=file)
         else:
@@ -422,10 +421,9 @@ class SquadCog(commands.Cog, name="Squad"):
             description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
             color=discord.Color.blurple(),
         )
-        path = card["image_path"]
-        if path and Path(path).exists():
-            file = discord.File(path, filename="card.png")
-            embed.set_image(url="attachment://card.png")
+        file = await card_cache.card_file(card["image_path"])   # small cached copy = fast
+        if file:
+            embed.set_image(url=f"attachment://{card_cache.FILENAME}")
             await ctx.send(embed=embed, file=file)
         else:
             await ctx.send(embed=embed)
