@@ -40,6 +40,15 @@ def init_media_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS stadiums (
+            name          TEXT PRIMARY KEY,
+            location      TEXT,
+            soil          TEXT,
+            stadium_type  TEXT,
+            gif_url       TEXT
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS milestone_media (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             universal   INTEGER NOT NULL DEFAULT 0,
@@ -217,6 +226,39 @@ def list_stadium_gifs() -> list[dict]:
     rows = [dict(r) for r in c.fetchall()]
     conn.close()
     return rows
+
+
+# ── Stadium details (/stadium_edit) ───────────────────────────────────────────
+# One row per stadium. A row only stores what the owner changed; anything left
+# empty (NULL) falls back to the built-in default in data.py.
+
+def upsert_stadium(name: str, location=None, soil=None, stadium_type=None, gif_url=None):
+    """Create the stadium row or update ONLY the fields that are not None."""
+    conn = _conn()
+    conn.execute("INSERT OR IGNORE INTO stadiums (name) VALUES (?)", (name,))
+    for col, val in (("location", location), ("soil", soil),
+                     ("stadium_type", stadium_type), ("gif_url", gif_url)):
+        if val is not None:
+            conn.execute(f"UPDATE stadiums SET {col}=? WHERE name=?", (val, name))
+    conn.commit()
+    conn.close()
+
+
+def list_stadium_rows() -> list[dict]:
+    conn = _conn()
+    rows = [dict(r) for r in conn.execute("SELECT * FROM stadiums ORDER BY name").fetchall()]
+    conn.close()
+    return rows
+
+
+def delete_stadium_row(name: str) -> bool:
+    conn = _conn()
+    c = conn.execute("DELETE FROM stadiums WHERE LOWER(name)=LOWER(?)", (name,))
+    n = c.rowcount
+    conn.commit()
+    conn.close()
+    return n > 0
+
 
 
 def set_player_media(player_name: str, category: str, event_type: str, gif_url: str):

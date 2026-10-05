@@ -25,18 +25,122 @@ VENUES = [
     ("Sabina Park",                   "Kingston, West Indies"),
 ]
 
-PITCH_REPORTS = [
-    "Dry & Dusty",
-    "Green & Lively",
-    "Hard & Flat",
-    "Soft & Slow",
-    "Fresh & Bouncy",
-    "Cracked & Turning",
-    "Damp & Seaming",
-    "Batting Paradise",
-    "Two-Paced Track",
-    "Sandy & Abrasive",
+# ── Stadium details ───────────────────────────────────────────────────────────
+# Each stadium has: location, soil, stadium type and a GIF.
+# Built-in values are below; the owner can change them (or add new stadiums)
+# with /stadium_edit — those changes are saved in the database and win over
+# the built-in values.
+#
+# STADIUM TYPE → effect on the match, only GROUND_EFFECT_PCT (15%), never more:
+#   "spinner"     → wickets from spinners +15%, from pace deliveries -15%
+#   "pacer"       → wickets from pace deliveries +15%, from spinners -15%
+#   "medium_pace" → wickets from seam/swing/length deliveries (Swing, Good
+#                   Length, Full) +15%; nothing else changes
+#   "batting"     → fours/sixes +15%, wickets -15%
+GROUND_EFFECT_PCT = 15
+
+STADIUM_TYPES = {          # key -> label shown to users
+    "spinner":     "Spinner",
+    "medium_pace": "Medium Pace",
+    "pacer":       "Pacer",
+    "batting":     "Batting",
+}
+
+# Soil list for /stadium_edit (Discord allows max 25 choices).
+SOIL_TYPES = [
+    "Black Soil", "Red Soil", "Mixed (Black & Red)", "Clay", "Brown Clay",
+    "Loam", "Sandy Loam", "Sandy", "Alluvial", "Laterite", "Silt",
+    "Compacted Clay Loam", "Drop-in Pitch", "Rocky / Hard Ground", "Chalky",
 ]
+
+# Built-in type per venue (change anything with /stadium_edit).
+VENUE_TYPES = {
+    "Wankhede Stadium":              "batting",
+    "Eden Gardens":                  "medium_pace",
+    "M. Chinnaswamy Stadium":        "batting",
+    "Narendra Modi Stadium":         "batting",
+    "Melbourne Cricket Ground":      "pacer",
+    "Sydney Cricket Ground":         "spinner",
+    "Adelaide Oval":                 "batting",
+    "Lord's Cricket Ground":         "pacer",
+    "Edgbaston":                     "pacer",
+    "Old Trafford":                  "medium_pace",
+    "Headingley":                    "pacer",
+    "Newlands":                      "pacer",
+    "SuperSport Park":               "pacer",
+    "National Stadium":              "batting",
+    "Gaddafi Stadium":               "batting",
+    "Sharjah Cricket Stadium":       "spinner",
+    "Dubai International Stadium":   "spinner",
+    "R. Premadasa Stadium":          "spinner",
+    "Shere Bangla National Stadium": "spinner",
+    "Sabina Park":                   "pacer",
+}
+
+# Soil is only filled in where it is well known; the rest is set with /stadium_edit.
+VENUE_SOILS = {
+    "Wankhede Stadium":         "Red Soil",
+    "Narendra Modi Stadium":    "Mixed (Black & Red)",
+    "Melbourne Cricket Ground": "Drop-in Pitch",
+    "Adelaide Oval":            "Drop-in Pitch",
+}
+
+# The pitch report text always matches the stadium type.
+PITCH_REPORTS_BY_TYPE = {
+    "batting":     ["Hard & Flat", "Batting Paradise"],
+    "pacer":       ["Green & Lively", "Fresh & Bouncy"],
+    "medium_pace": ["Damp & Seaming", "Two-Paced Track", "Soft & Slow"],
+    "spinner":     ["Dry & Dusty", "Cracked & Turning", "Sandy & Abrasive"],
+}
+
+# Default stadium GIFs (direct links).
+STADIUM_GIFS = {
+    "Narendra Modi Stadium": "https://media.giphy.com/media/iDiekmNhPy45LYW4sN/giphy.gif",
+}
+
+
+def get_all_stadiums() -> list[dict]:
+    """Every stadium as {name, location, soil, type, gif_url}: built-ins merged
+    with the owner's changes from the database (plus any stadium added by the owner)."""
+    merged: dict[str, dict] = {}
+    for name, loc in VENUES:
+        merged[name] = {
+            "name": name, "location": loc,
+            "soil": VENUE_SOILS.get(name),
+            "type": VENUE_TYPES.get(name, "medium_pace"),
+            "gif_url": STADIUM_GIFS.get(name),
+        }
+    try:
+        import media
+        rows = media.list_stadium_rows()
+        for row in rows:
+            cur = merged.setdefault(row["name"], {
+                "name": row["name"], "location": None, "soil": None,
+                "type": "medium_pace", "gif_url": None,
+            })
+            if row.get("location"):     cur["location"] = row["location"]
+            if row.get("soil"):         cur["soil"] = row["soil"]
+            if row.get("stadium_type"): cur["type"] = row["stadium_type"]
+            # gif_url: a link = use it, "" = GIF was removed on purpose (no GIF,
+            # not even the built-in default), NULL = never touched.
+            if row.get("gif_url") is not None:
+                cur["gif_url"] = row["gif_url"] or None
+        # older GIFs saved with media.set_stadium_gif()
+        touched = {r["name"] for r in rows if r.get("gif_url") is not None}
+        for old in media.list_stadium_gifs():
+            if old["venue_name"] in merged and old["venue_name"] not in touched:
+                merged[old["venue_name"]]["gif_url"] = old["gif_url"]
+    except Exception:
+        pass
+    return list(merged.values())
+
+
+def find_stadium(name: str) -> dict | None:
+    for st in get_all_stadiums():
+        if st["name"].lower() == name.strip().lower():
+            return st
+    return None
+
 
 WEATHER_CONDITIONS = [
     ("Clear Skies",    ""),
@@ -78,15 +182,19 @@ CROWD_MOODS = [
 
 
 def random_match_conditions() -> dict:
-    venue_name, venue_loc = random.choice(VENUES)
+    st = random.choice(get_all_stadiums())
+    pitch_type = st["type"] if st["type"] in STADIUM_TYPES else "medium_pace"
     weather_label, weather_emoji = random.choice(WEATHER_CONDITIONS)
     return {
-        "venue":         venue_name,
-        "location":      venue_loc,
-        "pitch":         random.choice(PITCH_REPORTS),
+        "venue":         st["name"],
+        "location":      st["location"] or "Unknown",
+        "soil":          st["soil"],
+        "pitch":         random.choice(PITCH_REPORTS_BY_TYPE[pitch_type]),
+        "pitch_type":    pitch_type,
+        "gif_url":       st["gif_url"],
         "weather":       weather_label,
         "weather_emoji": weather_emoji,
-        "temperature":   random.randint(15, 37),
+        "temperature":   random.randint(10, 35),   # sunshine / heat, always 10-35 °C
         "umpire":        random.choice(UMPIRES),
         "crowd":         random.choice(CROWD_MOODS),
     }

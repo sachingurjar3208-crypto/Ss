@@ -189,6 +189,8 @@ class GameState:
         self.overs = overs
         self.bot = None
         self.is_bot_match: bool = False
+        self.conditions: dict | None = None   # venue / pitch / weather of this match
+        self.pitch_type: str | None = None    # batting / pace / spin / balanced (15% effect)
         self.teams: dict[int, list[MatchPlayer]] = {}
         self.team_pks: dict[int, list[int]] = {}
 

@@ -12,6 +12,7 @@ Safety notes
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 import discord
@@ -72,6 +73,63 @@ class ConfirmView(OwnedView):
         self.used = True
         self.stop()
         await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+
+
+# ── csbuy / cssell: card image + two emoji buttons ───────────────────────────
+# The message shows the card image with a green check and a red cross under it.
+# After BUYSELL_TIMEOUT seconds both buttons switch off (greyed out), so
+# pressing them later does nothing.
+BUYSELL_TIMEOUT = 20.0
+
+
+def _plain_coins(n: int) -> str:
+    return f"{int(n):,} coins"
+
+
+def _buysell_embed(card, text: str) -> discord.Embed:
+    embed = discord.Embed(description=text, color=discord.Color.gold())
+    path = card["image_path"]
+    if path and Path(path).exists():
+        embed.set_image(url="attachment://card.png")
+    return embed
+
+
+async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable[[], Awaitable[str]]):
+    """Send the card image + text with the check / cross buttons."""
+    view = BuySellView(ctx.author.id, card, action)
+    embed = _buysell_embed(card, text)
+    path = card["image_path"]
+    if path and Path(path).exists():
+        view.message = await ctx.send(embed=embed, file=discord.File(path, filename="card.png"), view=view)
+    else:
+        view.message = await ctx.send(embed=embed, view=view)
+
+
+class BuySellView(OwnedView):
+    def __init__(self, user_id: int, card, action: Callable[[], Awaitable[str]]):
+        super().__init__(user_id, timeout=BUYSELL_TIMEOUT)
+        self.card = card
+        self.action = action
+        self.used = False
+
+    @ui.button(emoji="✅", style=discord.ButtonStyle.success)
+    async def yes(self, interaction: discord.Interaction, button: ui.Button):
+        if self.used:  # a second click can never run the action twice
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        result = await self.action()
+        await interaction.response.edit_message(embed=_buysell_embed(self.card, result), view=None)
+
+    @ui.button(emoji="❌", style=discord.ButtonStyle.danger)
+    async def no(self, interaction: discord.Interaction, button: ui.Button):
+        if self.used:
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        await interaction.response.edit_message(embed=_buysell_embed(self.card, "Cancelled."), view=None)
 
 
 # ── Trade offer buttons ──────────────────────────────────────────────────────
@@ -311,11 +369,11 @@ class EconomyCog(commands.Cog, name="Economy"):
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
-            await ctx.send("❌ You can't buy players during a match.")
+            await ctx.send("You can't buy players during a match.")
             return
         card, err = sl.resolve_any(security.clean_input(player))
         if card is None:
-            await ctx.send(f"❌ {err}")
+            await ctx.send(str(err))
             return
         if economy.owns(ctx.author.id, card["playername_key"]):
             await ctx.send("You already own this player.")
@@ -325,13 +383,13 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         async def do_buy() -> str:
             e = economy.buy_card(uid, key, price)
-            return f"❌ {e}" if e else f"✅ Bought **{esc(card['playername'])}** for {economy.fmt_coins(price)}!"
+            return str(e) if e else f"Bought {esc(card['playername'])} for {_plain_coins(price)}."
 
-        view = ConfirmView(uid, do_buy)
-        view.message = await ctx.send(
-            f"Buy {_card_line(card)} for **{economy.fmt_coins(price)}**?\n"
-            f"Your purse: {economy.fmt_coins(economy.get_balance(uid))}\n"
-            f"(Selling later returns {economy.fmt_coins(sl.sell_value(card))} — {sl.SELL_CUT_PERCENT}% is cut)", view=view
+        await _send_buysell(
+            ctx, card,
+            f"Buy {esc(card['playername'])} ({card['ovr']} OVR) for {_plain_coins(price)}?\n"
+            f"Your coins: {_plain_coins(economy.get_balance(uid))}",
+            do_buy,
         )
 
     @commands.command(name="cssell")
@@ -341,11 +399,11 @@ class EconomyCog(commands.Cog, name="Economy"):
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
-            await ctx.send("❌ You can't sell players during a match.")
+            await ctx.send("You can't sell players during a match.")
             return
         card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
         if card is None:
-            await ctx.send(f"❌ {err}")
+            await ctx.send(str(err))
             return
         uid, key = ctx.author.id, card["playername_key"]
         value = sl.sell_value(card)
@@ -359,12 +417,12 @@ class EconomyCog(commands.Cog, name="Economy"):
                 if bench:
                     replacement = max(bench, key=lambda c: c["ovr"])["playername_key"]
             e = economy.sell_card(uid, key, value, replacement)
-            return f"❌ {e}" if e else f"✅ Sold **{esc(card['playername'])}** for {economy.fmt_coins(value)}."
+            return str(e) if e else f"Sold {esc(card['playername'])} for {_plain_coins(value)}."
 
-        view = ConfirmView(uid, do_sell)
-        view.message = await ctx.send(
-            f"Sell {_card_line(card)} for **{economy.fmt_coins(value)}**?\n"
-            f"(Buy price {economy.fmt_coins(sl.buy_price(card))} − {sl.SELL_CUT_PERCENT}% cut)", view=view
+        await _send_buysell(
+            ctx, card,
+            f"Sell {esc(card['playername'])} ({card['ovr']} OVR) for {_plain_coins(value)}?",
+            do_sell,
         )
 
     # -- trade -----------------------------------------------------------

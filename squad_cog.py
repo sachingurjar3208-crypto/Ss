@@ -236,7 +236,12 @@ class SquadCog(commands.Cog, name="Squad"):
             game.team_pks[uid] = []
 
         active_games[ctx.channel.id] = game
-        embed = build_match_invite_embed(challenger, opponent, overs, random_match_conditions())
+        conditions = random_match_conditions()
+        game.conditions = conditions
+        game.pitch_type = conditions["pitch_type"]
+        embed = build_match_invite_embed(
+            challenger, opponent, overs, conditions, gif_url=conditions.get("gif_url")
+        )
         await ctx.send(
             content=opponent.mention,
             embed=embed,

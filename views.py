@@ -685,6 +685,7 @@ async def _process_delivery(
         is_recommended_shot=is_recommended_shot,
         guide_entry_exists=guide_entry_exists,
         total_overs=game.overs,
+        ground_type=getattr(game, "pitch_type", None),
     )
 
     # ── Free-hit: batsman cannot be dismissed (except run out) ───────────

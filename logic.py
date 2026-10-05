@@ -230,6 +230,7 @@ _SWING_DELIVERIES  = {"Swing", "In Swinger", "Out Swinger", "Reverse Swing"}
 _YORKER_DELIVERIES = {"Yorker", "Yorker Full Toss"}
 _PACE_DELIVERIES   = {"Swing", "Good Length", "Fast", "Bouncer", "Full", "Yorker"}
 _BOUNCER_DELIVERIES = {"Bouncer", "Short Ball"}
+_SEAM_DELIVERIES   = {"Swing", "In Swinger", "Out Swinger", "Good Length", "Full"}
 
 # ── Phase modifiers ──────────────────────────────────────────────────────────
 # Each phase tweaks boundary/wicket/six weights independently.
@@ -269,6 +270,7 @@ def calculate_outcome(
     is_recommended_shot: bool = False,
     guide_entry_exists: bool = False,
     total_overs: int = 20,
+    ground_type: str | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -545,6 +547,25 @@ def calculate_outcome(
     # This keeps good-stats players from losing wickets on every single ball.
     other_total = sum(v for k, v in w.items() if k != "W")
     w["W"] = min(w["W"], other_total * 0.165)   # 0.165 / 1.165 ≈ 14%
+
+    # ── Stadium effect — only GROUND_EFFECT_PCT (15%) ────────────────────────
+    # Applied AFTER the global wicket cap so the full 15% always shows up.
+    if ground_type in ("batting", "pacer", "spinner", "medium_pace"):
+        from data import GROUND_EFFECT_PCT
+        up   = 1.0 + GROUND_EFFECT_PCT / 100.0
+        down = 1.0 - GROUND_EFFECT_PCT / 100.0
+        is_spin_ball = delivery_internal in _SPIN_DELIVERIES
+        if ground_type == "batting":
+            w["4"] = w["4"] * up
+            w["6"] = w["6"] * up
+            w["W"] = w["W"] * down
+        elif ground_type == "pacer":
+            w["W"] = w["W"] * (down if is_spin_ball else up)
+        elif ground_type == "spinner":
+            w["W"] = w["W"] * (up if is_spin_ball else down)
+        elif ground_type == "medium_pace":
+            if delivery_internal in _SEAM_DELIVERIES:
+                w["W"] = w["W"] * up
 
     outcome = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
     is_extra = outcome in ("Wd", "NB", "NB+1")

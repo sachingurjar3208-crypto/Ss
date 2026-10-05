@@ -10,6 +10,12 @@ def logo_file() -> discord.File:
     return discord.File(_LOGO_PATH, filename="cricstar_logo.png")
 
 
+def _ground_line(conditions: dict) -> str:
+    from data import STADIUM_TYPES, GROUND_EFFECT_PCT
+    ptype = conditions.get("pitch_type", "medium_pace")
+    return f"{STADIUM_TYPES.get(ptype, 'Medium Pace')} friendly (±{GROUND_EFFECT_PCT}% effect)"
+
+
 def build_match_invite_embed(
     challenger: discord.Member,
     opponent: discord.Member,
@@ -28,6 +34,9 @@ def build_match_invite_embed(
         f"{sep}\n\n"
         f"**Venue:**      {conditions['venue']}, {conditions['location']}\n"
         f"**Pitch:**      {conditions['pitch']}\n"
+        f"**Ground:**     {_ground_line(conditions)}\n"
+        + (f"**Soil:**       {conditions['soil']}\n" if conditions.get("soil") else "")
+        +
         f"**Weather:**    {conditions['weather']}  •  {conditions['temperature']}°C\n"
         f"**Umpire:**     {conditions['umpire']}\n"
         f"**Crowd:**      {conditions['crowd']}\n"

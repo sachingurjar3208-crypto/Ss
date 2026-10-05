@@ -53,6 +53,7 @@ async def load_cogs():
         "cardmaker_cog",
         "economy_cog",
         "squad_cog",
+        "stadium_cog",
         "admin_cog",
         # Add other cogs here as needed
     ]
