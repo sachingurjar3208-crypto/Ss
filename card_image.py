@@ -12,12 +12,14 @@ role, batting hand and up to two playstyle logos. There is no data field for
 things like a signature or a hand-written tagline, so those decorative extras
 from the sample card are intentionally left out.
 
-LAYERING: background -> player cutout -> bottom stats panel (restored from
-the template so the player stands BEHIND it) -> optional custom panel
-overlay image (added via /paneladder, put on a card via /editcard, moved
-with /panelfixer) -> text and logos. The custom panel overlay is ALWAYS
-drawn after the foreground cutout, so the foreground always sits behind it,
-never in front.
+LAYERING: background -> background emblem/logo (added via /bglogoadder,
+assigned via /bglogoadd, moved with /bglogofixer — sits right on the
+background, behind everything else) -> player cutout -> bottom stats panel
+(restored from the template so the player stands BEHIND it) -> optional
+custom panel overlay image (added via /paneladder, put on a card via
+/editcard, moved with /panelfixer) -> text and logos. The custom panel
+overlay is ALWAYS drawn after the foreground cutout, so the foreground
+always sits behind it, never in front.
 """
 
 from __future__ import annotations
@@ -29,7 +31,7 @@ from pathlib import Path
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
-from card_db import get_playstyle_logo, get_panel, get_country_logo
+from card_db import get_playstyle_logo, get_panel, get_country_logo, get_bg_logo, get_universal_bg_logo
 from card_narratives import ROLE_CARD_WORD, HAND_CARD_WORD
 
 CANVAS_W, CANVAS_H = 1037, 1517
@@ -116,6 +118,14 @@ LOGO_CENTER_2 = (636, 1280)      # right circle (slot 2)
 LOGO_CENTER_SINGLE = (518, 1280) # a lone logo sits in the middle
 LOGO_BOX = 110                   # logo is fitted inside a LOGO_BOX x LOGO_BOX square
 
+# ── Background emblem/watermark (added via /bglogoadder, assigned via
+# /bglogoadd, positioned via /bglogofixer). Fitted inside this box, kept
+# centered on BOTH axes (unlike the foreground, which anchors to the
+# bottom), preserving its aspect ratio — it is scaled by ONE factor for
+# both width and height, so it never comes out stretched/squashed. Covers
+# the whole photo area above the bottom stats strip by default. ──
+BG_LOGO_BOX = {"x": 0, "y": 0, "w": CANVAS_W, "h": 1146}
+
 
 def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
     try:
@@ -171,6 +181,26 @@ def _fit_foreground(
     return fg_resized, (paste_x, paste_y)
 
 
+def _fit_centered(
+    img: Image.Image, box: dict, dx: int, dy: int, scale_pct: int = 100
+) -> tuple[Image.Image, tuple[int, int]]:
+    """Scale `img` to fit inside `box`, centered on BOTH axes (unlike
+    _fit_foreground, which anchors to the box's bottom). Used for the
+    background emblem/logo. Exactly ONE scale factor is applied to both
+    width and height — min(box_w/img.w, box_h/img.h) — so the image is
+    always resized proportionally and never stretched/squashed out of
+    shape, no matter what size the box or the per-card scale_pct is.
+    """
+    box_w, box_h = box["w"], box["h"]
+    base_scale = min(box_w / img.width, box_h / img.height)
+    scale = base_scale * (scale_pct / 100)
+    new_w, new_h = max(1, int(img.width * scale)), max(1, int(img.height * scale))
+    resized = img.resize((new_w, new_h), Image.LANCZOS)
+    paste_x = box["x"] + (box_w - new_w) // 2 + dx
+    paste_y = box["y"] + (box_h - new_h) // 2 + dy
+    return resized, (paste_x, paste_y)
+
+
 def _col(row, key, default=None):
     """Read a column from a sqlite3.Row, falling back if it is missing/NULL."""
     try:
@@ -211,6 +241,21 @@ def _load_country_logo(country) -> Image.Image | None:
     """Load the logo added for this country via /countrylogoadder; None if
     there isn't one or it can't be read (card just renders without it)."""
     row = get_country_logo(country)
+    if row is None:
+        return None
+    try:
+        return Image.open(row["local_path"]).convert("RGBA")
+    except Exception:
+        return None
+
+
+def _load_bg_logo(override_pathname) -> Image.Image | None:
+    """Load this card's background emblem: its own override if it has one
+    and the file still exists, else the universal logo (if any is set),
+    else None (card renders with no emblem)."""
+    row = get_bg_logo(override_pathname) if override_pathname else None
+    if row is None:
+        row = get_universal_bg_logo()
     if row is None:
         return None
     try:
@@ -287,6 +332,21 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
     background = _cover_to_canvas(background)
 
     canvas = background.copy()
+
+    # ── Background emblem/logo — drawn right on top of the background,
+    # BEFORE the foreground cutout and before any text, so it always sits
+    # BEHIND everything else on the card (behind the player AND the name).
+    # Uses this card's own override if it has one, else the universal logo
+    # (if one is set via /bglogoadd universal:True), else nothing.
+    bg_logo_img = _load_bg_logo(_col(card_row, "bg_logo"))
+    if bg_logo_img is not None:
+        bglogo_resized, bglogo_pos = _fit_centered(
+            bg_logo_img, BG_LOGO_BOX,
+            _col(card_row, "bglogo_dx", 0),
+            _col(card_row, "bglogo_dy", 0),
+            _col(card_row, "bglogo_scale", 100),
+        )
+        canvas.alpha_composite(bglogo_resized, dest=bglogo_pos)
 
     # ── Layout offsets from /cardlayout (0 / default for cards that never
     # used it, so old cards render exactly as before). ─────────────────

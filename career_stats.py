@@ -1,7 +1,22 @@
 """Per-card career stats.
 
-Stats are saved once per innings (when the innings ends) and read back by
-`csview`. Stored in economy.db so they live next to the squads.
+Two separate tables are kept:
+
+  • card_career           — ALL-TIME, ALL-OWNERS totals for a card (every
+    innings ever played with that card, no matter who owned it at the
+    time). This is the "universal" view, shown by `csdata` and gated to
+    premium members only.
+
+  • card_career_personal  — totals for ONE user with ONE card
+    (user_id, player_key). This is what `csview` shows: only the stats
+    *this* user racked up with the card. Selling the card does NOT clear
+    this row — the numbers stay in the table so they're exactly where
+    they were if the user buys the card back later. `csview` itself just
+    refuses to show them (for anyone, including the seller) while the
+    user doesn't currently own the card.
+
+Stats are saved once per innings (when the innings ends).
+Stored in economy.db so they live next to the squads.
 """
 from __future__ import annotations
 
@@ -35,6 +50,33 @@ CREATE TABLE IF NOT EXISTS card_career (
 )
 """
 
+_PERSONAL_SCHEMA = """
+CREATE TABLE IF NOT EXISTS card_career_personal (
+    user_id        TEXT NOT NULL,
+    player_key     TEXT NOT NULL,
+    bat_inns       INTEGER NOT NULL DEFAULT 0,
+    runs           INTEGER NOT NULL DEFAULT 0,
+    balls          INTEGER NOT NULL DEFAULT 0,
+    fours          INTEGER NOT NULL DEFAULT 0,
+    sixes          INTEGER NOT NULL DEFAULT 0,
+    not_outs       INTEGER NOT NULL DEFAULT 0,
+    ducks          INTEGER NOT NULL DEFAULT 0,
+    fifties        INTEGER NOT NULL DEFAULT 0,
+    hundreds       INTEGER NOT NULL DEFAULT 0,
+    highest        INTEGER NOT NULL DEFAULT 0,
+    bowl_inns      INTEGER NOT NULL DEFAULT 0,
+    balls_bowled   INTEGER NOT NULL DEFAULT 0,
+    runs_conceded  INTEGER NOT NULL DEFAULT 0,
+    wickets        INTEGER NOT NULL DEFAULT 0,
+    maidens        INTEGER NOT NULL DEFAULT 0,
+    three_fers     INTEGER NOT NULL DEFAULT 0,
+    five_fers      INTEGER NOT NULL DEFAULT 0,
+    best_w         INTEGER NOT NULL DEFAULT 0,
+    best_r         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, player_key)
+)
+"""
+
 _ZERO = {
     "bat_inns": 0, "runs": 0, "balls": 0, "fours": 0, "sixes": 0,
     "not_outs": 0, "ducks": 0, "fifties": 0, "hundreds": 0, "highest": 0,
@@ -45,6 +87,51 @@ _ZERO = {
 
 def _ensure_table(conn: sqlite3.Connection) -> None:
     conn.execute(_SCHEMA)
+    conn.execute(_PERSONAL_SCHEMA)
+
+
+def _save_personal_rows(conn: sqlite3.Connection, user_id, rows: dict[str, dict]) -> None:
+    """Upsert one side's (bat or bowl) per-innings figures into the
+    per-user personal table. `rows` is keyed by player_key, same shape as
+    the global bat_rows/bowl_rows dicts in save_innings()."""
+    if not user_id or not rows:
+        return
+    uid = str(user_id)
+    for key, d in rows.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO card_career_personal (user_id, player_key) VALUES (?, ?)",
+            (uid, key),
+        )
+        cur = conn.execute(
+            "SELECT best_w, best_r, highest FROM card_career_personal "
+            "WHERE user_id = ? AND player_key = ?",
+            (uid, key),
+        ).fetchone()
+        best_w, best_r = cur["best_w"], cur["best_r"]
+        if d["best_w"] > best_w or (d["best_w"] == best_w and d["best_w"] > 0 and d["best_r"] < best_r):
+            best_w, best_r = d["best_w"], d["best_r"]
+        highest = max(cur["highest"], d["highest"])
+        conn.execute(
+            """
+            UPDATE card_career_personal SET
+                bat_inns = bat_inns + ?, runs = runs + ?, balls = balls + ?,
+                fours = fours + ?, sixes = sixes + ?, not_outs = not_outs + ?,
+                ducks = ducks + ?, fifties = fifties + ?, hundreds = hundreds + ?,
+                highest = ?,
+                bowl_inns = bowl_inns + ?, balls_bowled = balls_bowled + ?,
+                runs_conceded = runs_conceded + ?, wickets = wickets + ?,
+                maidens = maidens + ?, three_fers = three_fers + ?,
+                five_fers = five_fers + ?, best_w = ?, best_r = ?
+            WHERE user_id = ? AND player_key = ?
+            """,
+            (
+                d["bat_inns"], d["runs"], d["balls"], d["fours"], d["sixes"],
+                d["not_outs"], d["ducks"], d["fifties"], d["hundreds"], highest,
+                d["bowl_inns"], d["balls_bowled"], d["runs_conceded"], d["wickets"],
+                d["maidens"], d["three_fers"], d["five_fers"], best_w, best_r,
+                uid, key,
+            ),
+        )
 
 
 def _key_for(name: str) -> str | None:
@@ -56,8 +143,20 @@ def _key_for(name: str) -> str | None:
     return card["playername_key"] if card else None
 
 
-def save_innings(game, is_final: bool = False) -> None:
+def save_innings(
+    game,
+    is_final: bool = False,
+    batting_user_id=None,
+    bowling_user_id=None,
+) -> None:
     """Add this innings' batting and bowling figures to each card's career.
+
+    Updates the global all-owners `card_career` table (for `csdata`), and —
+    when the caller tells us who was batting/bowling this innings — also
+    updates each of those users' personal `card_career_personal` row for
+    the cards they used (for `csview`). One innings always has exactly one
+    side batting and one side bowling, so batting_user_id owns every key in
+    bat_rows and bowling_user_id owns every key in bowl_rows below.
 
     Safe to call more than once for the same innings: it only saves once.
     """
@@ -153,14 +252,33 @@ def save_innings(game, is_final: bool = False) -> None:
                     w["maidens"], w["three_fers"], w["five_fers"], best_w, best_r, key,
                 ),
             )
+        _save_personal_rows(conn, batting_user_id, bat_rows)
+        _save_personal_rows(conn, bowling_user_id, bowl_rows)
 
 
 def get_career(player_key: str) -> dict:
-    """Career totals for one card (all zeros if it has never played)."""
+    """ALL-TIME, ALL-OWNERS totals for one card (all zeros if it has never
+    played). This is the "universal" view — used by `csdata`, premium only."""
     with economy._tx() as conn:
         _ensure_table(conn)
         row = conn.execute(
             "SELECT * FROM card_career WHERE player_key = ?", (player_key,)
+        ).fetchone()
+    if row is None:
+        return dict(_ZERO)
+    return {k: row[k] for k in _ZERO}
+
+
+def get_career_personal(user_id, player_key: str) -> dict:
+    """Totals for ONE user with ONE card (all zeros if that user has never
+    played an innings with it). This is what `csview` shows. The row is not
+    cleared when the card is sold, so it's unchanged if the user buys the
+    same card back later — `csview` just won't show it meanwhile."""
+    with economy._tx() as conn:
+        _ensure_table(conn)
+        row = conn.execute(
+            "SELECT * FROM card_career_personal WHERE user_id = ? AND player_key = ?",
+            (str(user_id), player_key),
         ).fetchone()
     if row is None:
         return dict(_ZERO)

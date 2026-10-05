@@ -378,12 +378,68 @@ class SquadCog(commands.Cog, name="Squad"):
         embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
         await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
-    # -- player stats card -----------------------------------------------
+    # -- player stats card (personal — only your own cards) --------------
     @commands.command(name="csview")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def csview(self, ctx: commands.Context, *, player: str):
-        """Show a player's card with career batting and bowling stats."""
+        """Show a card you own, with YOUR career batting/bowling stats on it."""
+        from career_stats import get_career_personal, batting_figures, bowling_figures
+
+        card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
+        if card is None:
+            await ctx.send(f"❌ {err}")
+            return
+
+        # csview is for cards you currently own only. Selling a card doesn't
+        # erase your stats with it (they're kept in case you buy it back) —
+        # it just means csview won't show them to anyone while you don't
+        # own it.
+        owns_it = await asyncio.to_thread(economy.owns, ctx.author.id, card["playername_key"])
+        if not owns_it:
+            await ctx.send(
+                f"❌ You don't own **{esc(card['playername'])}**, so `csview` can't show it. "
+                f"(Only cards you currently own can be viewed here.)"
+            )
+            return
+
+        career = await asyncio.to_thread(get_career_personal, ctx.author.id, card["playername_key"])
+        bat = batting_figures(career)
+        bowl = bowling_figures(career)
+
+        width = 24
+        rows = ["Batting".ljust(width) + "Bowling"]
+        for (bl, bv), (wl, wv) in zip(bat, bowl):
+            rows.append(f"{bl}: {bv}".ljust(width) + f"{wl}: {wv}")
+        table = "\n".join(rows)
+
+        header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
+        lines = [header]
+        lines.append(f"Owner: {esc(ctx.author.display_name)}")
+        lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
+        styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
+        if styles:   # only cards that have a playstyle/narrative
+            lines.append("Playstyle: " + " · ".join(styles))
+        embed = discord.Embed(
+            title=f"Player Stats: {esc(card['playername'])}",
+            description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Your personal stats with this card.")
+        await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
+
+    # -- player stats card (universal — premium only) ---------------------
+    @commands.command(name="csdata")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def csdata(self, ctx: commands.Context, *, player: str):
+        """Premium-only: a player's ALL-TIME stats across every owner ever."""
         from career_stats import get_career, batting_figures, bowling_figures
+
+        if not _is_premium(ctx.author):
+            await ctx.send(
+                "❌ `csdata` (universal, all-owners stats) is a premium-only command. "
+                "Use `csview <player>` for your own cards instead."
+            )
+            return
 
         card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
         if card is None:
@@ -415,16 +471,17 @@ class SquadCog(commands.Cog, name="Squad"):
         header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
         lines = [header]
         if owner:
-            lines.append(f"Owner: {esc(owner)}")
+            lines.append(f"Current owner: {esc(owner)}")
         lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
         styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
         if styles:   # only cards that have a playstyle/narrative
             lines.append("Playstyle: " + " · ".join(styles))
         embed = discord.Embed(
-            title=f"Player Stats: {esc(card['playername'])}",
+            title=f"Universal Stats: {esc(card['playername'])}",
             description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
-            color=discord.Color.blurple(),
+            color=discord.Color.gold(),
         )
+        embed.set_footer(text="All-time stats across every owner (premium).")
         await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
     # -- XI --------------------------------------------------------------
@@ -572,7 +629,8 @@ class SquadCog(commands.Cog, name="Squad"):
         ), inline=False)
         embed.add_field(name="Squad", value=(
             "`cssquad` `csshow <player>` `csxi` `csautoxi`\n"
-            "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`"
+            "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`\n"
+            "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)"
         ), inline=False)
         embed.add_field(name="Economy", value=(
             "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"

@@ -294,9 +294,19 @@ from career_stats import save_innings as _save_innings
 
 
 def save_game_innings_stats(game, batting_user_id=None, bowling_user_id=None, is_final=False):
-    """Persist per-card stats for the innings that just ended."""
+    """Persist per-card stats for the innings that just ended.
+
+    batting_user_id/bowling_user_id identify who was batting/bowling this
+    innings, so the personal (per-user) card stats used by `csview` get
+    credited to the right person, not just the shared all-owners totals.
+    """
     try:
-        _save_innings(game, is_final=is_final)
+        _save_innings(
+            game,
+            is_final=is_final,
+            batting_user_id=batting_user_id,
+            bowling_user_id=bowling_user_id,
+        )
     except Exception as e:
         print(f"[career_stats] save failed: {type(e).__name__}: {e}")
 

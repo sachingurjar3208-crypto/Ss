@@ -14,6 +14,10 @@
     /paneladder     add a new stats-panel overlay image (sits IN FRONT of the foreground)
     /panelremover   remove a stats-panel overlay from the panel list
     /panelfixer     move / resize a card's stats-panel overlay
+    /bglogoadder    add a background emblem/logo to the list (sits BEHIND the foreground AND the name)
+    /bglogoadd      put a background logo on one card, or make it the universal default on every card
+    /bglogofixer    move / resize a card's background logo
+    /bglogoremover  remove a background logo from the list
 
 Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 """
@@ -39,7 +43,10 @@ from card_db import (
     panel_exists, get_panel, add_panel, list_panels, remove_panel,
     update_panel_layout, set_card_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
-    GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
+    bg_logo_exists, get_bg_logo, add_bg_logo, list_bg_logos, remove_bg_logo,
+    get_universal_bg_logo, set_universal_bg_logo, clear_universal_bg_logo,
+    set_card_bg_logo, update_bg_logo_layout,
+    GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR, BG_LOGOS_DIR,
 )
 from card_image import generate_card_image
 import card_cache
@@ -97,6 +104,12 @@ async def background_autocomplete(interaction: discord.Interaction, current: str
 async def panel_autocomplete(interaction: discord.Interaction, current: str):
     current_l = current.lower()
     names = [n for n in list_panels() if current_l in n.lower()]
+    return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+
+async def bglogo_autocomplete(interaction: discord.Interaction, current: str):
+    current_l = current.lower()
+    names = [n for n in list_bg_logos() if current_l in n.lower()]
     return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
 
@@ -918,6 +931,215 @@ class CardMakerCog(commands.Cog):
             )
         except Exception as e:
             await interaction.followup.send(f"⚠️ Panel position/size saved, but image regeneration failed: `{e}`")
+
+    # ── /bglogoadder ─────────────────────────────────────────────────
+    @app_commands.command(
+        name="bglogoadder",
+        description="Add a background emblem/logo to the list (drawn BEHIND the foreground and the name)",
+    )
+    @app_commands.describe(
+        url="Direct link to the logo image (transparent PNG works best)",
+        pathname="Name to pick this logo by in /bglogoadd",
+    )
+    @is_owner()
+    async def bglogoadder(self, interaction: discord.Interaction, url: str, pathname: str):
+        await interaction.response.defer()
+
+        if bg_logo_exists(pathname):
+            await interaction.followup.send(f"❌ A background logo named `{pathname}` already exists — pick a different name.")
+            return
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                    resp.raise_for_status()
+                    data = await resp.read()
+            if len(data) > 15_000_000:
+                raise ValueError("image is bigger than 15 MB")
+            # Decode it now so a link that isn't a real image fails here, not later on a card.
+            logo = Image.open(io.BytesIO(data)).convert("RGBA")
+        except Exception as e:
+            await interaction.followup.send(f"❌ Couldn't download that link as an image: `{e}`")
+            return
+
+        local_path = BG_LOGOS_DIR / f"{pathname.strip().lower().replace(' ', '_')}.png"
+        logo.save(local_path, format="PNG")
+
+        add_bg_logo(pathname, url, str(local_path), interaction.user.id)
+        await interaction.followup.send(
+            f"✅ Background logo **{pathname}** added. Put it on cards with `/bglogoadd pathname:{pathname}` — "
+            f"either `playername:<card>` to put it on just that one, or `universal:True` to make it the "
+            f"default on EVERY card.\n"
+            f"ℹ️ It always renders BEHIND the foreground cutout and behind the name — and it's never "
+            f"stretched: it keeps its original width/height ratio no matter what size you set with "
+            f"`/bglogofixer`."
+        )
+
+    # ── /bglogoadd ───────────────────────────────────────────────────
+    @app_commands.command(
+        name="bglogoadd",
+        description="Put a background logo on one card, or make it the universal default on every card",
+    )
+    @app_commands.describe(
+        pathname="Which background logo (from /bglogoadder) — or 'none' to clear",
+        playername="Card to put it on (not needed if universal:True)",
+        universal="True = this logo becomes the default on EVERY card that has no override of its own",
+    )
+    @app_commands.autocomplete(pathname=bglogo_autocomplete, playername=playername_autocomplete)
+    @is_owner()
+    async def bglogoadd(
+        self,
+        interaction: discord.Interaction,
+        pathname: str,
+        playername: str | None = None,
+        universal: bool = False,
+    ):
+        await interaction.response.defer()
+
+        clearing = pathname.strip().lower() == "none"
+
+        # ── universal:True — sets (or clears) the default logo for every card ──
+        if universal:
+            if clearing:
+                clear_universal_bg_logo()
+                await interaction.followup.send(
+                    "✅ Universal background logo cleared. Cards now show no background logo unless "
+                    "they have their own override set via `/bglogoadd universal:False`."
+                )
+                return
+            if not set_universal_bg_logo(pathname):
+                names = list_bg_logos()
+                hint = ", ".join(names) if names else "(none added yet — use `/bglogoadder` first)"
+                await interaction.followup.send(f"❌ Unknown background logo `{pathname}`.\nAvailable: {hint}")
+                return
+            await interaction.followup.send(
+                f"✅ **{pathname}** is now the universal background logo — it shows behind every card that "
+                f"doesn't have its own override (a card updates the next time it's regenerated, e.g. with "
+                f"`/bglogofixer` or `/editcard`). Fine-tune how it sits on one card with `/bglogofixer`."
+            )
+            return
+
+        # ── Per-card override ──────────────────────────────────────────
+        if not playername:
+            await interaction.followup.send(
+                "❌ Give a `playername` to put this logo on just that card, or set `universal:True` to "
+                "apply it to every card instead."
+            )
+            return
+        if not card_exists(playername):
+            names = list_playernames()
+            hint = ", ".join(names) if names else "(no cards yet)"
+            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
+            return
+
+        if clearing:
+            set_card_bg_logo(playername, None)
+            try:
+                await _regenerate_and_send(
+                    interaction, playername,
+                    "🗑️ Background logo override cleared (falls back to the universal logo, if any)",
+                )
+            except Exception as e:
+                await interaction.followup.send(f"⚠️ Cleared, but image regeneration failed: `{e}`")
+            return
+
+        row = get_bg_logo(pathname)
+        if row is None:
+            names = list_bg_logos()
+            hint = ", ".join(names) if names else "(none added yet — use `/bglogoadder` first)"
+            await interaction.followup.send(f"❌ Unknown background logo `{pathname}`.\nAvailable: {hint}")
+            return
+
+        set_card_bg_logo(playername, row["pathname"])
+        try:
+            await _regenerate_and_send(interaction, playername, f"🎯 Background logo **{row['pathname']}** set")
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Logo saved, but image regeneration failed: `{e}`")
+
+    # ── /bglogofixer ─────────────────────────────────────────────────
+    @app_commands.command(name="bglogofixer", description="Move and/or resize a card's background logo")
+    @app_commands.describe(
+        playername="Which card to adjust",
+        logoup="Pixels to move the logo up",
+        logodown="Pixels to move the logo down",
+        logoleft="Pixels to move the logo left",
+        logoright="Pixels to move the logo right",
+        logosizebig="Percent to make the logo bigger, e.g. 10 = +10% size",
+        logosizesmall="Percent to make the logo smaller, e.g. 10 = -10% size",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def bglogofixer(
+        self,
+        interaction: discord.Interaction,
+        playername: str,
+        logoup: app_commands.Range[int, 0, 2000] = 0,
+        logodown: app_commands.Range[int, 0, 2000] = 0,
+        logoleft: app_commands.Range[int, 0, 2000] = 0,
+        logoright: app_commands.Range[int, 0, 2000] = 0,
+        logosizebig: app_commands.Range[int, 0, 500] = 0,
+        logosizesmall: app_commands.Range[int, 0, 90] = 0,
+    ):
+        await interaction.response.defer()
+
+        card = get_card(playername)
+        if card is None:
+            names = list_playernames()
+            hint = ", ".join(names) if names else "(no cards yet)"
+            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
+            return
+
+        if not card["bg_logo"] and get_universal_bg_logo() is None:
+            await interaction.followup.send(
+                f"❌ **{card['playername']}** has no background logo showing yet — set one with "
+                f"`/bglogoadd pathname:<logo> playername:{card['playername']}`, or make one universal first."
+            )
+            return
+
+        new_dx = card["bglogo_dx"] - logoleft + logoright
+        new_dy = card["bglogo_dy"] - logoup + logodown
+        new_scale = card["bglogo_scale"] + logosizebig - logosizesmall
+        new_scale = max(MIN_SCALE_PCT, min(MAX_SCALE_PCT, new_scale))
+
+        update_bg_logo_layout(playername, new_dx, new_dy, new_scale)
+
+        try:
+            await _regenerate_and_send(
+                interaction, playername,
+                f"🔧 Background logo adjusted (x={new_dx}, y={new_dy}, size={new_scale}%)",
+            )
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Background logo position/size saved, but image regeneration failed: `{e}`")
+
+    # ── /bglogoremover ───────────────────────────────────────────────
+    @app_commands.command(name="bglogoremover", description="Remove a background logo from the list")
+    @app_commands.describe(pathname="Which background logo to remove")
+    @app_commands.autocomplete(pathname=bglogo_autocomplete)
+    @is_owner()
+    async def bglogoremover(self, interaction: discord.Interaction, pathname: str):
+        await interaction.response.defer()
+
+        removed = remove_bg_logo(pathname)
+        if removed is None:
+            names = list_bg_logos()
+            hint = ", ".join(names) if names else "(none added yet)"
+            await interaction.followup.send(f"❌ No background logo found named `{pathname}`.\nAvailable: {hint}")
+            return
+
+        # Best-effort cleanup of the local file — the DB rows are already
+        # gone either way, so a missing/locked file here is not an error.
+        try:
+            os.remove(removed["local_path"])
+        except OSError:
+            pass
+
+        note = ""
+        if removed["is_universal"]:
+            note = " It was the universal logo, so no card shows a background logo by default any more."
+        await interaction.followup.send(
+            f"🗑️ Removed background logo **{removed['pathname']}**.{note} "
+            f"Any cards that had it set directly now fall back to the universal logo (if any) or no logo."
+        )
 
     # ── /cardlayout ──────────────────────────────────────────────────
     @app_commands.command(
