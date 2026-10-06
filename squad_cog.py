@@ -158,18 +158,19 @@ def card_db_owner(player_key: str) -> int | None:
 
 
 def _apply_auto_xi(user_id: int) -> str | None:
-    """Pick and save the best XI from everything the user owns.
+    """Pick and save the best XI (up to 11) from everything the user owns.
     Returns None on success, otherwise a message explaining what went wrong."""
     cards = sl.owned_cards(user_id)
-    if len(cards) < economy.XI_SIZE:
-        return f"❌ You need at least {economy.XI_SIZE} players. Try `csstarterpack`."
+    if not cards:
+        return "❌ You don't own any players yet. Try `csstarterpack`."
+    # With fewer than 11 players ALL of them still go into the XI (best_xi
+    # returns every card when there are 11 or fewer); the XI just shows
+    # "x/11" until the squad grows.
     try:
         xi = sl.best_xi(cards)
     except Exception as e:
         print(f"[autoxi] best_xi failed for {user_id}: {type(e).__name__}: {e}")
         return "❌ Couldn't build your XI. Try again."
-    if len(xi) < economy.XI_SIZE:
-        return "❌ Couldn't fill all 11 spots. Try again."
     if not economy.set_full_xi(user_id, [c["playername_key"] for c in xi]):
         return "❌ Couldn't set your XI. Try again."
     return None
