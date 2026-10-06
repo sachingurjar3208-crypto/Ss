@@ -558,6 +558,10 @@ class GameState:
             self.partnership_history.append(self.current_partnership)
             self.current_partnership = None
 
+        # New batter comes in: start a fresh stand
+        self.partnership_runs = 0
+        self.partnership_balls = 0
+
     def rotate_strike(self) -> None:
         self.striker, self.non_striker = self.non_striker, self.striker
 
@@ -852,6 +856,8 @@ class GameState:
         self.last_wicket_dismissed_idx = -1
         self.last_over_bowler = None
         self.current_partnership = None
+        self.partnership_runs = 0
+        self.partnership_balls = 0
         self.timeline = []
         self.current_over_balls = 0
         self.current_over_runs = 0
