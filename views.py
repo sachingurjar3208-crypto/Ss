@@ -1110,7 +1110,9 @@ async def _process_delivery(
     # "This interaction failed" errors. We edit in-place to remove the view.
     try:
         await interaction.response.edit_message(view=None)
-    except discord.InteractionResponded:
+    except (discord.InteractionResponded, RuntimeError):
+        # RuntimeError: autoplay's stand-in interaction has no message to
+        # edit. This ack is cosmetic, so skip it and let the ball finish.
         pass
 
     channel      = interaction.channel
