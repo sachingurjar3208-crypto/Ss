@@ -73,14 +73,14 @@ def role_emoji(card) -> str:
 
 # Buy price by OVR (coins). Selling gives back (100 - SELL_CUT_PERCENT)% of this.
 BUY_PRICES = {
-    99: 9_000_000, 98: 7_000_000, 97: 5_500_000, 96: 4_000_000, 95: 3_000_000,
-    94: 2_100_000, 93: 1_800_000, 92: 1_250_000, 91: 900_000, 90: 690_000,
-    89: 500_000, 88: 350_000, 87: 200_000, 86: 100_000, 85: 60_000,
-    84: 40_000, 83: 20_000, 82: 10_000, 81: 7_800, 80: 5_000,
-    79: 3_000, 78: 2_500, 77: 2_000, 76: 1_500, 75: 1_000,
-    74: 900, 73: 800, 72: 700, 71: 650, 70: 600,
-    69: 300, 68: 270, 67: 240, 66: 200, 65: 160,
-    64: 120, 63: 90, 62: 60, 61: 50, 60: 40,
+    99: 28_000_000, 98: 21_000_000, 97: 16_000_000, 96: 12_000_000, 95: 9_000_000,
+    94: 7_000_000, 93: 5_500_000, 92: 4_000_000, 91: 3_000_000, 90: 2_100_000,
+    89: 1_800_000, 88: 1_250_000, 87: 900_000, 86: 690_000, 85: 500_000,
+    84: 350_000, 83: 200_000, 82: 100_000, 81: 60_000, 80: 40_000,
+    79: 20_000, 78: 10_000, 77: 7_800, 76: 5_000, 75: 3_000,
+    74: 2_500, 73: 2_000, 72: 1_500, 71: 1_000, 70: 900,
+    69: 800, 68: 700, 67: 650, 66: 600, 65: 300,
+    64: 270, 63: 240, 62: 200, 61: 160, 60: 120,
 }
 SELL_CUT_PERCENT = 40   # 40% is cut on selling (also used for duplicate refunds)
 
@@ -100,18 +100,45 @@ def sell_value(card) -> int:
 # ── Packs ────────────────────────────────────────────────────────────────────
 # Every pack gives exactly ONE player.
 #   "range"   = (min ovr, max ovr) of the player you can get
-#   "weights" = (optional) chance weight per ovr; without it every player in
-#               the range is equally likely.
+#   "weights" = chance of each ovr. Built with _loss_profit_weights() so that
+#               every pack gives a card CHEAPER than the pack price (a loss)
+#               70% of the time and a card worth the pack price or more
+#               (profit) 30% of the time. The ovr is picked first, then a random
+#               player of that ovr, so the odds do not depend on how many
+#               players each ovr has.
+PACK_LOSS_PERCENT = 70
+
+
+def _loss_profit_weights(lo: int, hi: int, price: int, relative: dict | None = None) -> dict:
+    """ovr -> weight so that P(card buy price < pack price) = PACK_LOSS_PERCENT %.
+    `relative` (optional) keeps some ovrs rarer than others inside each group."""
+    relative = relative or {}
+    loss   = [o for o in range(lo, hi + 1) if BUY_PRICES[o] < price]
+    profit = [o for o in range(lo, hi + 1) if BUY_PRICES[o] >= price]
+    out = {}
+    for group, share in ((loss, PACK_LOSS_PERCENT), (profit, 100 - PACK_LOSS_PERCENT)):
+        total = sum(relative.get(o, 1) for o in group)
+        for o in group:
+            out[o] = share * relative.get(o, 1) / total
+    return out
+
+
+_BRONZE_PRICE, _SILVER_PRICE, _GOLD_PRICE, _LEGEND_PRICE = 1_500, 60_000, 690_000, 4_000_000
+
 PACKS = {
-    "bronze": {"label": "Bronze Pack", "emoji": "🟤", "price": 10_000, "cards": 1,
-               "range": (60, 76)},
-    "silver": {"label": "Silver Pack", "emoji": "⚪", "price": 40_000, "cards": 1,
-               "range": (77, 83)},
-    "gold":   {"label": "Gold Pack",   "emoji": "🟡", "price": 150_000, "cards": 1,
-               "range": (84, 88)},
-    "legendary": {"label": "Legendary Pack", "emoji": "🔥", "price": 1_800_000, "cards": 1,
+    "bronze": {"label": "Bronze Pack", "emoji": "🟤", "price": _BRONZE_PRICE, "cards": 1,
+               "range": (60, 76),
+               "weights": _loss_profit_weights(60, 76, _BRONZE_PRICE)},
+    "silver": {"label": "Silver Pack", "emoji": "⚪", "price": _SILVER_PRICE, "cards": 1,
+               "range": (77, 83),
+               "weights": _loss_profit_weights(77, 83, _SILVER_PRICE)},
+    "gold":   {"label": "Gold Pack",   "emoji": "🟡", "price": _GOLD_PRICE, "cards": 1,
+               "range": (84, 88),
+               "weights": _loss_profit_weights(84, 88, _GOLD_PRICE)},
+    "legendary": {"label": "Legendary Pack", "emoji": "🔥", "price": _LEGEND_PRICE, "cards": 1,
                   "range": (90, 95),
-                  "weights": {90: 60, 91: 50, 92: 45, 93: 30, 94: 20, 95: 5}},
+                  "weights": _loss_profit_weights(90, 95, _LEGEND_PRICE,
+                                                  {90: 60, 91: 50, 92: 45, 93: 30, 94: 20, 95: 5})},
 }
 
 
