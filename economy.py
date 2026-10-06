@@ -372,19 +372,28 @@ def get_xi(user_id) -> dict[int, str]:
 
 
 def set_full_xi(user_id, keys: list[str]) -> bool:
-    """Replace the whole XI with `keys` (in batting order). All must be owned."""
+    """Replace the whole XI with `keys` (in batting order). All must be owned.
+    Keys are matched ignoring case/spaces, and the key actually stored in
+    `owned` is what goes into the XI."""
     uid = _uid(user_id)
-    if len(keys) > XI_SIZE or len(set(keys)) != len(keys):
+    norm = [str(k).strip().lower() for k in keys]
+    if len(keys) > XI_SIZE or len(set(norm)) != len(norm):
         return False
     with _tx() as conn:
-        for k in keys:
-            if conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, k)).fetchone() is None:
+        owned = {
+            str(r["player_key"]).strip().lower(): r["player_key"]
+            for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))
+        }
+        stored = []
+        for k in norm:
+            if k not in owned:
                 return False
+            stored.append(owned[k])
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
-        for slot, k in enumerate(keys, start=1):
+        for slot, k in enumerate(stored, start=1):
             conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, k))
         cap = conn.execute("SELECT captain_key FROM users WHERE user_id = ?", (uid,)).fetchone()
-        if cap is not None and cap["captain_key"] not in keys:
+        if cap is not None and cap["captain_key"] not in stored:
             conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ?", (uid,))
         return True
 

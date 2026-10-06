@@ -31,7 +31,7 @@ PAGE_SIZE = 10
 DEBUT_EMOJI = "<:24693:1554672842694729899>"
 
 # Only members with this role see the player emojis in csstarterpack.
-PREMIUM_ROLE_ID = 1554674148284829696
+PREMIUM_ROLE_ID = 1556957776415035423
 
 
 def _is_premium(member) -> bool:
@@ -157,6 +157,24 @@ def card_db_owner(player_key: str) -> int | None:
     return int(row[0]) if row else None
 
 
+def _apply_auto_xi(user_id: int) -> str | None:
+    """Pick and save the best XI from everything the user owns.
+    Returns None on success, otherwise a message explaining what went wrong."""
+    cards = sl.owned_cards(user_id)
+    if len(cards) < economy.XI_SIZE:
+        return f"❌ You need at least {economy.XI_SIZE} players. Try `csstarterpack`."
+    try:
+        xi = sl.best_xi(cards)
+    except Exception as e:
+        print(f"[autoxi] best_xi failed for {user_id}: {type(e).__name__}: {e}")
+        return "❌ Couldn't build your XI. Try again."
+    if len(xi) < economy.XI_SIZE:
+        return "❌ Couldn't fill all 11 spots. Try again."
+    if not economy.set_full_xi(user_id, [c["playername_key"] for c in xi]):
+        return "❌ Couldn't set your XI. Try again."
+    return None
+
+
 class AutoXiView(ui.View):
     """Button under your XI: one tap picks the best XI automatically."""
 
@@ -172,15 +190,9 @@ class AutoXiView(ui.View):
         if _in_match(interaction.client, self.owner_id):
             await interaction.response.send_message("❌ You can't change your XI during a match.", ephemeral=True)
             return
-        cards = sl.owned_cards(self.owner_id)
-        if len(cards) < economy.XI_SIZE:
-            await interaction.response.send_message(
-                f"❌ You need at least {economy.XI_SIZE} players. Try `csstarterpack`.", ephemeral=True
-            )
-            return
-        xi = sl.best_xi(cards)
-        if not economy.set_full_xi(self.owner_id, [c["playername_key"] for c in xi]):
-            await interaction.response.send_message("❌ Couldn't set your XI. Try again.", ephemeral=True)
+        err = _apply_auto_xi(self.owner_id)
+        if err:
+            await interaction.response.send_message(err, ephemeral=True)
             return
         await interaction.response.edit_message(
             embed=_xi_embed(interaction.user, economy.get_user(self.owner_id)), view=self
@@ -490,6 +502,9 @@ class SquadCog(commands.Cog, name="Squad"):
     async def csxi(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show your playing XI in batting order."""
         target = member or ctx.author
+        if target.id != ctx.author.id and not _is_premium(ctx.author):
+            await ctx.send("💎 Only **Premium members** can see another player's XI. You can still use `csxi` for your own XI.")
+            return
         user = economy.get_user(target.id)
         if user is None:
             await ctx.send(f"**{esc(target.display_name)}** hasn't debuted yet.")
@@ -506,15 +521,39 @@ class SquadCog(commands.Cog, name="Squad"):
         if _in_match(self.bot, ctx.author.id):
             await ctx.send("❌ You can't change your XI during a match.")
             return
-        cards = sl.owned_cards(ctx.author.id)
-        if len(cards) < economy.XI_SIZE:
-            await ctx.send(f"❌ You need at least {economy.XI_SIZE} players. Try `csstarterpack`.")
-            return
-        xi = sl.best_xi(cards)
-        if not economy.set_full_xi(ctx.author.id, [c["playername_key"] for c in xi]):
-            await ctx.send("❌ Couldn't set your XI. Try again.")
+        err = _apply_auto_xi(ctx.author.id)
+        if err:
+            await ctx.send(err)
             return
         await ctx.send(embed=_xi_embed(ctx.author, economy.get_user(ctx.author.id)))
+
+    # -- autoplay (premium) ----------------------------------------------
+    @commands.command(name="csautoplay")
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def csautoplay(self, ctx: commands.Context):
+        """(Premium) Let the bot play your side of the match for you. Type again to switch off."""
+        if not _is_premium(ctx.author):
+            await ctx.send("💎 `csautoplay` is for **Premium members** only.")
+            return
+        from views import active_games, autoplay_ids, autoplay_kick
+        game = active_games.get(ctx.channel.id)
+        players = {getattr(game, "challenger", None), getattr(game, "opponent", None)} if game else set()
+        if game is None or ctx.author.id not in {getattr(p, "id", None) for p in players}:
+            await ctx.send("❌ You are not playing a match in this channel.")
+            return
+        ids = autoplay_ids(game)
+        if ctx.author.id in ids:
+            ids.discard(ctx.author.id)
+            await ctx.send(f"🛑 Autoplay **OFF** for {ctx.author.mention}. You are back in control.")
+            return
+        ids.add(ctx.author.id)
+        both = all(getattr(p, "id", None) in ids for p in players if p is not None)
+        note = "Both sides are on autoplay — the match will run by itself." if both else "The other side still plays manually."
+        await ctx.send(
+            f"🤖 Autoplay **ON** for {ctx.author.mention}. Bowler, batter, deliveries and shots are chosen for you. "
+            f"{note}\nType `csautoplay` again to take control back."
+        )
+        autoplay_kick(game)
 
     # -- swap ------------------------------------------------------------
     @commands.command(name="csswap")
@@ -628,7 +667,7 @@ class SquadCog(commands.Cog, name="Squad"):
             "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player"
         ), inline=False)
         embed.add_field(name="Squad", value=(
-            "`cssquad` `csshow <player>` `csxi` `csautoxi`\n"
+            "`cssquad` `csshow <player>` `csxi` `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
             "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`\n"
             "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)"
         ), inline=False)

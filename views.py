@@ -374,6 +374,217 @@ VIEW_TIMEOUT = 300  # 5 minutes per action
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Autoplay (premium) — `csautoplay`
+# ─────────────────────────────────────────────────────────────────────────────
+# A premium player can type `csautoplay` during a match and the bot then makes
+# THEIR choices (bowler, batter, delivery, shot, toss, openers ...) on their
+# behalf. If only one side has it on, only that side is automatic; if both
+# sides have it on, the whole match runs by itself.
+
+AUTOPLAY_DELAY = 3.0   # seconds before the bot "clicks" for the player
+
+
+def autoplay_ids(game) -> set:
+    """Ids of the players in this match who have autoplay switched on."""
+    ids = getattr(game, "autoplay_ids", None)
+    if ids is None:
+        ids = set()
+        game.autoplay_ids = ids
+    return ids
+
+
+class _AutoResponse:
+    """Stands in for `interaction.response` when the bot clicks for a player."""
+
+    def __init__(self, owner):
+        self._owner = owner
+        self._done = False
+
+    def is_done(self) -> bool:
+        return self._done
+
+    async def send_message(self, *args, **kwargs):
+        # Only ever warnings meant for a human ("not your turn" ...). Skip.
+        self._done = True
+
+    async def defer(self, *args, **kwargs):
+        self._done = True
+
+    async def edit_message(self, **kwargs):
+        msg = self._owner.message
+        if msg is None or self._done:
+            # Callers already fall back to posting a fresh message.
+            raise RuntimeError("autoplay: nothing to edit")
+        self._done = True
+        await msg.edit(**kwargs)
+
+
+class _AutoInteraction:
+    """Just enough of discord.Interaction for the match views to run."""
+
+    def __init__(self, user, channel, message, values=None):
+        self.user = user
+        self.channel = channel
+        self.channel_id = channel.id
+        self.message = message
+        self.data = {"values": list(values or [])}
+        self.response = _AutoResponse(self)
+
+    async def edit_original_response(self, **kwargs):
+        if self.message is None:
+            raise RuntimeError("autoplay: nothing to edit")
+        await self.message.edit(**kwargs)
+
+
+def _first_select(view):
+    return next((c for c in view.children if isinstance(c, ui.Select)), None)
+
+
+async def _auto_pick_from_select(view, make, n: int = 1) -> None:
+    select = _first_select(view)
+    if select is None:
+        return
+    values = [o.value for o in select.options][:n]
+    if not values or values[0] == "none":
+        return
+    await select.callback(make(values))
+
+
+async def _auto_toss(view, make):
+    btns = [c for c in view.children if isinstance(c, ui.Button)]
+    if btns:
+        await random.choice(btns).callback(make())
+
+
+async def _auto_bat_bowl(view, make):
+    await view._choose(make(), bat=True)
+
+
+async def _auto_openers(view, make):
+    await _auto_pick_from_select(view, make, n=2)
+
+
+async def _auto_striker(view, make):
+    btns = [c for c in view.children if isinstance(c, ui.Button)]
+    if btns:
+        await btns[0].callback(make())
+
+
+async def _auto_select_one(view, make):
+    await _auto_pick_from_select(view, make, n=1)
+
+
+async def _auto_fast_bowl(view, make):
+    await random.choice(view._stage1_btns).callback(make())
+    await random.choice(view._stage2_btns).callback(make())
+
+
+async def _auto_spin_bowl(view, make):
+    btns = [c for c in view.children if isinstance(c, ui.Button)]
+    if btns:
+        await random.choice(btns).callback(make())
+
+
+async def _auto_bat(view, make):
+    btns = [c for c in view.children if isinstance(c, ui.Button)]
+    good = [b for b in btns if b.label in (view.recommended or [])]
+    pool = good or [b for b in btns if b.label not in ("Leave", "Scoop")] or btns
+    if pool:
+        await random.choice(pool).callback(make())
+
+
+_AUTOPLAY_HANDLERS = {
+    "TossView": _auto_toss,
+    "BatBowlView": _auto_bat_bowl,
+    "OpenerSelectView": _auto_openers,
+    "StrikerDesignateView": _auto_striker,
+    "BowlerSelectView": _auto_select_one,
+    "NextBowlerView": _auto_select_one,
+    "NextBatsmanView": _auto_select_one,
+    "FastBowlStage1View": _auto_fast_bowl,
+    "BowlingView": _auto_spin_bowl,
+    "BattingView": _auto_bat,
+}
+
+
+def _autoplay_member(game, uid: int):
+    for who in (getattr(game, "challenger", None), getattr(game, "opponent", None)):
+        if who is not None and getattr(who, "id", None) == uid:
+            return who
+    return None
+
+
+def autoplay_schedule(view) -> None:
+    """Called for every new match view: if the player who has to act has
+    autoplay on, click for them after a short pause."""
+    game = getattr(view, "game", None)
+    if game is None:
+        return
+    game.__dict__["_live_view"] = view
+    if type(view).__name__ not in _AUTOPLAY_HANDLERS:
+        return
+    try:
+        uid = view._get_leaver_id(game)
+    except Exception:
+        return
+    if uid is None or uid not in autoplay_ids(game):
+        return
+    if view.__dict__.get("_autoplay_pending"):
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    view.__dict__["_autoplay_pending"] = True
+    loop.create_task(_autoplay_act(view, uid))
+
+
+async def _autoplay_boot(view) -> None:
+    await asyncio.sleep(0)
+    try:
+        autoplay_schedule(view)
+    except Exception as e:
+        print(f"[autoplay] schedule failed ({type(e).__name__}: {e})")
+
+
+def autoplay_kick(game) -> None:
+    """Right after `csautoplay` is switched on: handle the prompt that is
+    already on screen."""
+    view = game.__dict__.get("_live_view")
+    if view is not None and not view.is_finished():
+        autoplay_schedule(view)
+
+
+async def _autoplay_act(view, uid: int) -> None:
+    try:
+        await asyncio.sleep(AUTOPLAY_DELAY)
+        game = view.game
+        message = getattr(view, "message", None)
+        channel = getattr(view, "_channel", None) or getattr(message, "channel", None)
+        if channel is None or view.is_finished():
+            return
+        if active_games.get(channel.id) is not game:
+            return
+        if uid not in autoplay_ids(game) or view._get_leaver_id(game) != uid:
+            return
+        member = _autoplay_member(game, uid)
+        handler = _AUTOPLAY_HANDLERS.get(type(view).__name__)
+        if member is None or handler is None:
+            return
+
+        def make(values=None):
+            return _AutoInteraction(member, channel, message, values)
+
+        await handler(view, make)
+    except Exception as e:
+        print(f"[autoplay] failed ({type(e).__name__}: {e})")
+        import traceback
+        traceback.print_exc()
+    finally:
+        view.__dict__["_autoplay_pending"] = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Timeout mixin
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -384,6 +595,17 @@ class _TimeoutMixin:
     Call self.stop() in every successful callback so the timer cancels.
     """
     _channel: discord.TextChannel | None = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Premium `csautoplay`: if the player who must act has it on, the bot
+        # makes the choice for them.
+        # (self.game etc. are set by the subclass AFTER this runs, so look at
+        # the view on the next event-loop tick, not right now.)
+        try:
+            asyncio.get_running_loop().create_task(_autoplay_boot(self))
+        except RuntimeError:
+            pass
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Block every button/select on this view once the match is no
