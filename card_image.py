@@ -23,13 +23,15 @@ never in front.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import aiohttp
 from PIL import Image, ImageDraw, ImageFont
 
-from card_db import get_playstyle_logo, get_panel, get_country_logo
+from card_db import get_playstyle_logo, get_panel, get_country_logo, FOREGROUNDS_DIR
 from card_narratives import ROLE_CARD_WORD, HAND_CARD_WORD
 
 CANVAS_W, CANVAS_H = 1037, 1517
@@ -136,12 +138,36 @@ def _draw_centered(draw: ImageDraw.ImageDraw, xy, text: str, font, fill):
     draw.text((xy[0] - w / 2, xy[1] - h / 2), text, font=font, fill=fill)
 
 
+def _foreground_file(url: str) -> Path:
+    """Permanent local copy of a foreground link. Discord CDN links carry
+    expiring ?ex=&is=&hm= tokens, so those are ignored: the same attachment
+    always maps to the same file."""
+    parts = urlsplit(url.strip())
+    key = f"{parts.netloc}{parts.path}" if "discordapp" in parts.netloc else url.strip()
+    return FOREGROUNDS_DIR / f"{hashlib.sha1(key.encode('utf-8')).hexdigest()}.png"
+
+
 async def _download_image(url: str) -> Image.Image:
+    """Load the foreground from the permanent local folder if we already have
+    it; otherwise download it once, save it forever, and use that."""
+    local = _foreground_file(url)
+    if local.exists():
+        try:
+            return Image.open(local).convert("RGBA")
+        except Exception:
+            local.unlink(missing_ok=True)   # damaged copy: fetch again
     async with aiohttp.ClientSession() as session:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
             resp.raise_for_status()
             data = await resp.read()
-    return Image.open(io.BytesIO(data)).convert("RGBA")
+    img = Image.open(io.BytesIO(data)).convert("RGBA")
+    try:
+        tmp = local.with_suffix(".tmp")
+        img.save(tmp, format="PNG")
+        tmp.replace(local)
+    except Exception as e:
+        print(f"[card_image] could not save foreground copy: {e}")
+    return img
 
 
 def _fit_foreground(

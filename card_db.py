@@ -19,12 +19,16 @@ GENERATED_DIR = Path(__file__).parent / "generated"
 LOGOS_DIR = Path(__file__).parent / "playstyle_logos"
 PANELS_DIR = Path(__file__).parent / "panels"
 COUNTRY_LOGOS_DIR = Path(__file__).parent / "country_logos"
+# Every foreground cutout is saved here the first time its link is used, so
+# cards keep working after Discord CDN links expire.
+FOREGROUNDS_DIR = Path(__file__).parent / "foregrounds"
 
 BACKGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
 GENERATED_DIR.mkdir(parents=True, exist_ok=True)
 LOGOS_DIR.mkdir(parents=True, exist_ok=True)
 PANELS_DIR.mkdir(parents=True, exist_ok=True)
 COUNTRY_LOGOS_DIR.mkdir(parents=True, exist_ok=True)
+FOREGROUNDS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Narratives of each card, cached briefly because the match engine asks once per ball.
 _NARRATIVE_CACHE: dict[str, tuple[float, list[str]]] = {}
