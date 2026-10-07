@@ -25,12 +25,13 @@ from discord.ext import commands
 
 import data
 import media
+import security
 from cardmaker_cog import OWNER_ID
 
 
 def is_owner():
     async def predicate(interaction: discord.Interaction) -> bool:
-        return interaction.user.id == OWNER_ID
+        return interaction.user.id == OWNER_ID or security.has_full_admin_role(interaction.user)
     return app_commands.check(predicate)
 
 
@@ -237,7 +238,7 @@ class StadiumCog(commands.Cog):
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CheckFailure):
-            msg = "🔒 Only the bot owner can use this command."
+            msg = "🔒 Only the bot owner or an admin can use this command."
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)
             else:

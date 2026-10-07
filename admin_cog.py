@@ -16,13 +16,13 @@ import security
 import squad_logic as sl
 from security import esc
 
-ADMIN_ROLE_ID = 1556267277249155156
+ADMIN_ROLE_IDS = {1556267277249155156, *security.FULL_ADMIN_ROLE_IDS}
 
 
 def _has_admin_role(ctx: commands.Context) -> bool:
     if ctx.guild is None or not isinstance(ctx.author, discord.Member):
         return False
-    return any(r.id == ADMIN_ROLE_ID for r in ctx.author.roles)
+    return any(r.id in ADMIN_ROLE_IDS for r in ctx.author.roles)
 
 
 def admin_only():

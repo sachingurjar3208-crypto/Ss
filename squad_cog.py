@@ -681,7 +681,7 @@ class SquadCog(commands.Cog, name="Squad"):
 
     # ── Owner-only tools ─────────────────────────────────────────────────
     @commands.command(name="csban")
-    @commands.is_owner()
+    @security.owner_or_admin_role()
     async def csban(self, ctx: commands.Context, member: discord.User, *, reason: str = "No reason"):
         """(Owner) Ban someone from using the bot."""
         if member.id == ctx.author.id or member.bot:
@@ -691,14 +691,14 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(f"🚫 Banned **{esc(member.display_name)}**.")
 
     @commands.command(name="csunban")
-    @commands.is_owner()
+    @security.owner_or_admin_role()
     async def csunban(self, ctx: commands.Context, member: discord.User):
         """(Owner) Let someone use the bot again."""
         security.unban_user(member.id)
         await ctx.send(f"✅ Unbanned **{esc(member.display_name)}**.")
 
     @commands.command(name="csgivecoins")
-    @commands.is_owner()
+    @security.owner_or_admin_role()
     async def csgivecoins(self, ctx: commands.Context, member: discord.Member, amount: int):
         """(Owner) Give (or take with a negative number) coins."""
         if not economy.user_exists(member.id):
@@ -711,7 +711,7 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(f"✅ {esc(member.display_name)} now has **{economy.fmt_coins(bal)}**.")
 
     @commands.command(name="csgivecard")
-    @commands.is_owner()
+    @security.owner_or_admin_role()
     async def csgivecard(self, ctx: commands.Context, member: discord.Member, *, player: str):
         """(Owner) Give someone a player card."""
         card, err = sl.resolve_any(security.clean_input(player))

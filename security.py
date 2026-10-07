@@ -38,6 +38,25 @@ import economy
 # @here or role mentions.
 SAFE_MENTIONS = discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=False)
 
+# Roles that get FULL admin access (every owner/admin command: csban, csunban,
+# csgivecoins, csgivecard, /cardmaker, /stadium ... and the `admin` commands).
+FULL_ADMIN_ROLE_IDS = {1556644558929010769}
+
+
+def has_full_admin_role(user) -> bool:
+    roles = getattr(user, "roles", None) or []
+    return any(r.id in FULL_ADMIN_ROLE_IDS for r in roles)
+
+
+def owner_or_admin_role():
+    """Prefix-command check: bot owner OR a member with a full-admin role."""
+    async def predicate(ctx: commands.Context) -> bool:
+        if await ctx.bot.is_owner(ctx.author) or has_full_admin_role(ctx.author):
+            return True
+        raise commands.NotOwner("Only the bot owner or an admin can use this.")
+    return commands.check(predicate)
+
+
 # ── Tunable limits ───────────────────────────────────────────────────────────
 RATE_MAX_COMMANDS = 6        # commands allowed ...
 RATE_WINDOW       = 10.0     # ... per this many seconds
@@ -145,6 +164,8 @@ async def global_check(ctx: commands.Context) -> bool:
         raise UserBanned()
     if await ctx.bot.is_owner(ctx.author):
         return True  # the owner is never rate limited
+    if has_full_admin_role(ctx.author):
+        return True  # full admins aren't rate limited either
     _check_rate(uid)
     return True
 

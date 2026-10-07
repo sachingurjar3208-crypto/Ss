@@ -50,6 +50,7 @@ import card_cache
 from card_narratives import NARRATIVES, NARRATIVE_NAMES, ROLES, HANDS, BOWLING_TYPES
 
 import aiohttp
+import security
 
 OWNER_ID = 1317288099075850243
 MAX_STAT = 150
@@ -59,7 +60,7 @@ MAX_SCALE_PCT = 400
 
 def is_owner():
     async def predicate(interaction: discord.Interaction) -> bool:
-        return interaction.user.id == OWNER_ID
+        return interaction.user.id == OWNER_ID or security.has_full_admin_role(interaction.user)
     return app_commands.check(predicate)
 
 
@@ -192,7 +193,7 @@ class CardMakerCog(commands.Cog):
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
         if isinstance(error, app_commands.CheckFailure):
-            msg = "❌ Only the bot owner can use this command."
+            msg = "❌ Only the bot owner or an admin can use this command."
         else:
             msg = f"⚠️ Something went wrong: `{error}`"
         if interaction.response.is_done():
