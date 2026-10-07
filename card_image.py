@@ -170,6 +170,23 @@ async def _download_image(url: str) -> Image.Image:
     return img
 
 
+async def cache_all_foregrounds(cards) -> tuple[int, int, list[str]]:
+    """Save every card's foreground into the permanent folder. Cards that are
+    already saved cost nothing. Returns (newly_saved, already_saved, failed_names)."""
+    new = have = 0
+    failed: list[str] = []
+    for card in cards:
+        try:
+            if _foreground_file(card["foreground_link"]).exists():
+                have += 1
+                continue
+            await _download_image(card["foreground_link"])
+            new += 1
+        except Exception:
+            failed.append(card["playername"])
+    return new, have, failed
+
+
 def _fit_foreground(
     fg: Image.Image, box: dict, offset_x: int, offset_y: int, scale_pct: int = 100
 ) -> tuple[Image.Image, tuple[int, int]]:

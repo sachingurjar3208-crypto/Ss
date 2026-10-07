@@ -21,6 +21,7 @@ Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 import shutil
@@ -45,12 +46,11 @@ from card_db import (
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
-from card_image import generate_card_image
+from card_image import generate_card_image, cache_all_foregrounds
 import card_cache
 from card_narratives import NARRATIVES, NARRATIVE_NAMES, ROLES, HANDS, BOWLING_TYPES
 
 import aiohttp
-import security
 
 OWNER_ID = 1317288099075850243
 MAX_STAT = 150
@@ -60,7 +60,7 @@ MAX_SCALE_PCT = 400
 
 def is_owner():
     async def predicate(interaction: discord.Interaction) -> bool:
-        return interaction.user.id == OWNER_ID or security.has_full_admin_role(interaction.user)
+        return interaction.user.id == OWNER_ID
     return app_commands.check(predicate)
 
 
@@ -189,11 +189,24 @@ class CardMakerCog(commands.Cog):
         self.bot = bot
         init_card_db()
 
+    async def cog_load(self) -> None:
+        # On every start, quietly save any foreground that isn't in the
+        # permanent folder yet (e.g. cards made before this feature existed).
+        async def _warm():
+            try:
+                new, have, failed = await cache_all_foregrounds(list_all_cards())
+                print(f"[foregrounds] saved {new} new, {have} already saved, {len(failed)} failed")
+                if failed:
+                    print("[foregrounds] dead links for: " + ", ".join(failed))
+            except Exception as e:
+                print(f"[foregrounds] startup save failed: {e}")
+        asyncio.get_running_loop().create_task(_warm())
+
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
         if isinstance(error, app_commands.CheckFailure):
-            msg = "❌ Only the bot owner or an admin can use this command."
+            msg = "❌ Only the bot owner can use this command."
         else:
             msg = f"⚠️ Something went wrong: `{error}`"
         if interaction.response.is_done():
@@ -646,6 +659,21 @@ class CardMakerCog(commands.Cog):
             f"🗑️ Removed panel **{removed['pathname']}**. "
             f"Any cards that had it set now render without a panel overlay."
         )
+
+    # ── /foregroundsaveall ───────────────────────────────────────────
+    @app_commands.command(
+        name="foregroundsaveall",
+        description="Save every card's foreground image permanently (use once for older cards)",
+    )
+    @is_owner()
+    async def foregroundsaveall(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        new, have, failed = await cache_all_foregrounds(list_all_cards())
+        msg = f"✅ Saved **{new}** new foreground(s). **{have}** were already saved."
+        if failed:
+            msg += (f"\n⚠️ {len(failed)} have a dead link and could not be saved — fix them with "
+                    f"`/editcard`: " + ", ".join(f"`{n}`" for n in failed[:40]))
+        await interaction.followup.send(msg, ephemeral=True)
 
     # ── /foregroundfix ───────────────────────────────────────────────
     @app_commands.command(name="foregroundfix", description="Nudge position and/or resize a card's foreground cutout")
