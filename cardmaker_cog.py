@@ -479,15 +479,23 @@ class CardMakerCog(commands.Cog):
             except Exception as e:
                 failed.append(f"{name} (`{e}`)")
 
-        lines = [f"🖼️ Background set to `{bg['pathname']}` for **{len(updated)}** card(s)."]
-        if updated:
-            lines.append("✅ " + ", ".join(updated))
+        summary = [f"🖼️ Background set to `{bg['pathname']}` for **{len(updated)}** card(s)."]
         if failed:
-            lines.append("⚠️ Image regeneration failed for: " + ", ".join(failed))
+            summary.append(f"⚠️ Image regeneration failed for **{len(failed)}**: " + ", ".join(failed)[:800])
         if missing:
-            lines.append("❌ No card found for: " + ", ".join(missing))
+            summary.append(f"❌ No card found for **{len(missing)}**: " + ", ".join(missing)[:800])
 
-        await interaction.followup.send("\n".join(lines))
+        # Discord message content is capped at 2000 chars. With many cards the
+        # "updated" list alone can blow past that, so keep the summary short
+        # and attach the full name list as a text file instead of inlining it.
+        full_list = "\n".join(updated) if updated else "(none)"
+        file = discord.File(io.BytesIO(full_list.encode()), filename="updated_cards.txt")
+
+        text = "\n".join(summary)
+        if len(text) > 1900:
+            text = text[:1900] + "…"
+
+        await interaction.followup.send(content=text, file=file)
 
     # ── /bgadder ─────────────────────────────────────────────────────
     @app_commands.command(name="bgadder", description="Add a new card background template")
