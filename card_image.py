@@ -67,7 +67,7 @@ DISPLAYNAME_SIZE = 120
 STAT_LEFT_CENTER = (150, 1290)   # left hexagon number
 STAT_RIGHT_CENTER = (890, 1290)  # right hexagon number
 STAT_NUMBER_SIZE = 70
-STAT_LABEL_SIZE = 24
+STAT_LABEL_SIZE = 30
 STAT_LABEL_OFFSET_Y = 55         # label sits this many px below the number
 
 ROLE_CENTER = (518, 1200)        # role word (BATTER / BOWLER / WICKETKEEPER...) alone in the top centre strip
