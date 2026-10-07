@@ -6,6 +6,7 @@
     /foregroundfix  nudge position and/or resize a card's foreground cutout
     /removecard     delete a player card
     /logoadderofplaystyle  add a playstyle logo to the logo list
+    /playstylelogoremover  remove a playstyle logo from the logo list (then re-add with /logoadderofplaystyle)
     /setplaystylelogo      put up to 2 playstyle logos on a card
     /logofixer             move / resize a card's playstyle logos
     /countrylogoadder      add (or replace) a country's logo - shown just above the country name
@@ -32,10 +33,11 @@ from card_countries import CRICKET_COUNTRIES, resolve_country
 from card_db import (
     init_card_db,
     card_exists, get_card, create_card, update_card, update_card_offset,
-    set_card_image_path, list_playernames, delete_card,
+    set_card_image_path, list_playernames, list_all_cards, delete_card,
     background_exists, get_background, add_background, list_backgrounds,
     set_playstyles, update_logo_layout, update_card_layout,
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
+    remove_playstyle_logo, cards_using_playstyle_logo,
     panel_exists, get_panel, add_panel, list_panels, remove_panel,
     update_panel_layout, set_card_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
@@ -110,6 +112,24 @@ async def playername_autocomplete(interaction: discord.Interaction, current: str
     current_l = current.lower()
     names = [n for n in list_playernames() if current_l in n.lower()]
     return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+
+async def _regenerate_silently(playername: str) -> bool:
+    """Redraw a card's image without posting anything. True on success."""
+    try:
+        card = get_card(playername)
+        bg = get_background(card["background"]) if card else None
+        if bg is None:
+            return False
+        buf = await generate_card_image(card, bg["local_path"])
+        out_path = GENERATED_DIR / f"{playername.strip().lower().replace(' ', '_')}.png"
+        with open(out_path, "wb") as f:
+            f.write(buf.getvalue())
+        set_card_image_path(playername, str(out_path))
+        await card_cache.warm(str(out_path))
+        return True
+    except Exception:
+        return False
 
 
 async def _regenerate_and_send(interaction: discord.Interaction, playername: str, verb: str) -> None:
@@ -497,6 +517,41 @@ class CardMakerCog(commands.Cog):
 
         await interaction.followup.send(content=text, file=file)
 
+    # ── /csrarity ────────────────────────────────────────────────────
+    @app_commands.command(
+        name="csrarity",
+        description="See which cards have been added at each OVR so far (only visible to you)",
+    )
+    async def csrarity(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+
+        cards = list_all_cards()
+        if not cards:
+            await interaction.followup.send("No cards have been added yet.", ephemeral=True)
+            return
+
+        # Group by OVR, highest first. list_all_cards() is already sorted
+        # by ovr DESC, playername, so cards within a group arrive in order.
+        groups: dict[int, list[str]] = {}
+        for c in cards:
+            groups.setdefault(c["ovr"], []).append(c["playername"])
+
+        embed = discord.Embed(
+            title="🃏 Cards added, by OVR",
+            description=f"**{len(cards)}** card(s) total across **{len(groups)}** OVR rating(s).",
+            color=discord.Color.gold(),
+        )
+        for ovr in sorted(groups.keys(), reverse=True):
+            names = groups[ovr]
+            value = ", ".join(names)
+            if len(value) > 1024:
+                value = value[:1000] + f"… (+{len(names)} total)"
+            embed.add_field(name=f"{ovr} OVR  ·  {len(names)} card(s)", value=value, inline=False)
+            if len(embed.fields) >= 25:
+                break  # Discord embeds cap out at 25 fields
+
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     # ── /bgadder ─────────────────────────────────────────────────────
     @app_commands.command(name="bgadder", description="Add a new card background template")
     @app_commands.describe(
@@ -675,6 +730,53 @@ class CardMakerCog(commands.Cog):
         await interaction.followup.send(
             f"✅ Playstyle logo **{pathname}** added. Pick it with `/setplaystylelogo`."
         )
+
+    # ── /playstylelogoremover ────────────────────────────────────────
+    @app_commands.command(
+        name="playstylelogoremover",
+        description="Remove a playstyle logo from the logo list (add it again with /logoadderofplaystyle)",
+    )
+    @app_commands.describe(pathname="Which playstyle logo to remove")
+    @app_commands.autocomplete(pathname=logo_autocomplete)
+    @is_owner()
+    async def playstylelogoremover(self, interaction: discord.Interaction, pathname: str):
+        await interaction.response.defer()
+
+        # Cards that carry this logo right now (read BEFORE removing, for the refresh below).
+        affected = cards_using_playstyle_logo(pathname)
+
+        removed = remove_playstyle_logo(pathname)
+        if removed is None:
+            names = list_playstyle_logos()
+            hint = ", ".join(names) if names else "(none added yet)"
+            await interaction.followup.send(f"❌ No playstyle logo found named `{pathname}`.\nAvailable: {hint}")
+            return
+
+        # Best-effort cleanup of the local file — the DB row is already gone either way.
+        try:
+            os.remove(removed["local_path"])
+        except OSError:
+            pass
+
+        # Redraw the cards that used it so they stop showing the old logo right away.
+        refreshed = 0
+        for name in affected:
+            if await _regenerate_silently(name):
+                refreshed += 1
+
+        msg = f"🗑️ Removed playstyle logo **{removed['pathname']}**."
+        if affected:
+            msg += (
+                f"\n🔄 Redrew {refreshed}/{len(affected)} card(s) that used it: "
+                + ", ".join(f"**{n}**" for n in affected[:15])
+                + (" …" if len(affected) > 15 else "")
+                + "\nℹ️ These cards keep the playstyle itself (its match effect stays); only the logo is gone."
+            )
+        msg += (
+            f"\n➕ To put a new logo, run `/logoadderofplaystyle` with the name `{removed['pathname']}`. "
+            f"To take the playstyle off a card completely, use `/editcard` and pick **None (remove)**."
+        )
+        await interaction.followup.send(msg)
 
     # ── /setplaystylelogo ────────────────────────────────────────────
     @app_commands.command(name="setplaystylelogo", description="Put up to 2 playstyle logos on a player card")
