@@ -27,6 +27,12 @@ NARRATIVES: dict[str, str] = {
     ),
     "Cover Drive Specialist": "On the Drive shot: +40% fours, +10% 1-2-3 runs, -20% wicket chance.",
     "Chase Master": "Thrives when chasing: +15% scoring in the 2nd innings.",
+    "Early Breaker": "Bowler who strikes early: +30% wickets in the first overs of the match.",
+    "Googly Master": "Leg-spin wizard: +35% wickets on Googly and Leg Break deliveries.",
+    "Mr360": "360-degree batter: +25% fours, +15% sixes, -10% wicket chance on Sweep, Reverse-Sweep, Flick and Lofted shots.",
+    "Mystery": "Mystery bowler: +30% wickets and -8% boundaries on Mystery-button deliveries.",
+    "Spell Finisher": "Bowler who saves his best for his last over(s): +25% wickets, -10% runs (last 1 over, last 2 if he bowls 4).",
+    "Mind Games": "Trickster bowler: +25% wickets when the delivery type changes from the previous ball.",
 }
 
 NARRATIVE_NAMES: list[str] = list(NARRATIVES)

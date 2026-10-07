@@ -6,6 +6,7 @@
     /foregroundfix  nudge position and/or resize a card's foreground cutout
     /removecard     delete a player card
     /logoadderofplaystyle  add a playstyle logo to the logo list
+    /playstylelogoremover  remove a playstyle logo from the logo list (then re-add with /logoadderofplaystyle)
     /setplaystylelogo      put up to 2 playstyle logos on a card
     /logofixer             move / resize a card's playstyle logos
     /countrylogoadder      add (or replace) a country's logo - shown just above the country name
@@ -36,6 +37,7 @@ from card_db import (
     background_exists, get_background, add_background, list_backgrounds,
     set_playstyles, update_logo_layout, update_card_layout,
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
+    remove_playstyle_logo, cards_using_playstyle_logo,
     panel_exists, get_panel, add_panel, list_panels, remove_panel,
     update_panel_layout, set_card_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
@@ -110,6 +112,24 @@ async def playername_autocomplete(interaction: discord.Interaction, current: str
     current_l = current.lower()
     names = [n for n in list_playernames() if current_l in n.lower()]
     return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+
+async def _regenerate_silently(playername: str) -> bool:
+    """Redraw a card's image without posting anything. True on success."""
+    try:
+        card = get_card(playername)
+        bg = get_background(card["background"]) if card else None
+        if bg is None:
+            return False
+        buf = await generate_card_image(card, bg["local_path"])
+        out_path = GENERATED_DIR / f"{playername.strip().lower().replace(' ', '_')}.png"
+        with open(out_path, "wb") as f:
+            f.write(buf.getvalue())
+        set_card_image_path(playername, str(out_path))
+        await card_cache.warm(str(out_path))
+        return True
+    except Exception:
+        return False
 
 
 async def _regenerate_and_send(interaction: discord.Interaction, playername: str, verb: str) -> None:
@@ -593,6 +613,53 @@ class CardMakerCog(commands.Cog):
         await interaction.followup.send(
             f"✅ Playstyle logo **{pathname}** added. Pick it with `/setplaystylelogo`."
         )
+
+    # ── /playstylelogoremover ────────────────────────────────────────
+    @app_commands.command(
+        name="playstylelogoremover",
+        description="Remove a playstyle logo from the logo list (add it again with /logoadderofplaystyle)",
+    )
+    @app_commands.describe(pathname="Which playstyle logo to remove")
+    @app_commands.autocomplete(pathname=logo_autocomplete)
+    @is_owner()
+    async def playstylelogoremover(self, interaction: discord.Interaction, pathname: str):
+        await interaction.response.defer()
+
+        # Cards that carry this logo right now (read BEFORE removing, for the refresh below).
+        affected = cards_using_playstyle_logo(pathname)
+
+        removed = remove_playstyle_logo(pathname)
+        if removed is None:
+            names = list_playstyle_logos()
+            hint = ", ".join(names) if names else "(none added yet)"
+            await interaction.followup.send(f"❌ No playstyle logo found named `{pathname}`.\nAvailable: {hint}")
+            return
+
+        # Best-effort cleanup of the local file — the DB row is already gone either way.
+        try:
+            os.remove(removed["local_path"])
+        except OSError:
+            pass
+
+        # Redraw the cards that used it so they stop showing the old logo right away.
+        refreshed = 0
+        for name in affected:
+            if await _regenerate_silently(name):
+                refreshed += 1
+
+        msg = f"🗑️ Removed playstyle logo **{removed['pathname']}**."
+        if affected:
+            msg += (
+                f"\n🔄 Redrew {refreshed}/{len(affected)} card(s) that used it: "
+                + ", ".join(f"**{n}**" for n in affected[:15])
+                + (" …" if len(affected) > 15 else "")
+                + "\nℹ️ These cards keep the playstyle itself (its match effect stays); only the logo is gone."
+            )
+        msg += (
+            f"\n➕ To put a new logo, run `/logoadderofplaystyle` with the name `{removed['pathname']}`. "
+            f"To take the playstyle off a card completely, use `/editcard` and pick **None (remove)**."
+        )
+        await interaction.followup.send(msg)
 
     # ── /setplaystylelogo ────────────────────────────────────────────
     @app_commands.command(name="setplaystylelogo", description="Put up to 2 playstyle logos on a player card")

@@ -631,6 +631,33 @@ def list_playstyle_logos() -> list[str]:
         return [r["pathname"] for r in rows]
 
 
+def remove_playstyle_logo(pathname: str) -> sqlite3.Row | None:
+    """Delete a playstyle logo from the logo list (used by /playstylelogoremover)
+    and return the deleted row (or None if it didn't exist) so the caller can
+    also remove its local file. Cards keep their playstyle NAME (the match
+    effect stays); they just draw no logo until a logo with that name is added
+    again with /logoadderofplaystyle."""
+    row = get_playstyle_logo(pathname)
+    if row is None:
+        return None
+    with _conn() as conn:
+        conn.execute("DELETE FROM playstyle_logos WHERE pathname_key = ?", (pathname.strip().lower(),))
+        conn.commit()
+    return row
+
+
+def cards_using_playstyle_logo(pathname: str) -> list[str]:
+    """Playernames of the cards that currently carry this playstyle logo."""
+    key = pathname.strip().lower()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT playername FROM cards "
+            "WHERE LOWER(COALESCE(playstyle1, '')) = ? OR LOWER(COALESCE(playstyle2, '')) = ?",
+            (key, key),
+        ).fetchall()
+        return [r["playername"] for r in rows]
+
+
 # ── Country logos (one image per country, shown above the country name) ───
 
 def get_country_logo(country: str) -> sqlite3.Row | None:

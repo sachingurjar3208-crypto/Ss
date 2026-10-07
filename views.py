@@ -959,7 +959,13 @@ async def _process_delivery(
             guide_entry_exists=guide_entry_exists,
             total_overs=game.overs,
             ground_type=getattr(game, "pitch_type", None),
+            delivery_button=delivery_button,
+            prev_delivery=getattr(game, "last_delivery_internal", None),
+            bowler_balls_done=game.bowler_ball_count.get(bname, 0),
+            bowler_max_balls=game.max_bowler_balls(),
         )
+    # Remember this delivery type for the next ball ("Mind Games" playstyle).
+    game.last_delivery_internal = delivery_internal
 
     # ── Free-hit: batsman cannot be dismissed (except run out) ───────────
     # If the previous delivery was a no-ball, this is a free-hit.

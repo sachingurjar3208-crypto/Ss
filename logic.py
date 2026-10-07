@@ -216,6 +216,17 @@ ATTR_EFFECTS = {
                                "four_mult":    1.40,
                                "wkt_reduce":   0.30,   # wickets very unlikely
                                "six_cap_mult": 2.6},   # lifts the six-weight cap (normally 2.0)
+    # ── New playstyles ───────────────────────────────────────────────────────
+    "Early Breaker":   {"early_wkt_mult":   1.30},  # +30% wickets in the first overs of the match
+    "Googly Master":   {"googly_wkt_mult":  1.35},  # +35% wickets on Googly and Leg Break
+    "Mr360":           {"four_mult":        1.25,   # +25% fours on 360-style shots
+                        "six_mult":         1.15,   # +15% sixes on 360-style shots
+                        "wkt_reduce":       0.90},  # -10% wicket chance on those shots
+    "Mystery":         {"wkt_mult":         1.30,   # +30% wickets on Mystery-button deliveries
+                        "boundary_reduce":  0.92},  # -8% fours/sixes against them
+    "Spell Finisher":  {"wkt_mult":         1.25,   # +25% wickets in the bowler's final over(s)
+                        "run_reduce":       0.90},  # -10% runs in the bowler's final over(s)
+    "Mind Games":      {"wkt_mult":         1.25},  # +25% wickets when the delivery type changes
 }
 
 # Names a card can carry that the engine knows under another name.
@@ -231,6 +242,8 @@ _YORKER_DELIVERIES = {"Yorker", "Yorker Full Toss"}
 _PACE_DELIVERIES   = {"Swing", "Good Length", "Fast", "Bouncer", "Full", "Yorker"}
 _BOUNCER_DELIVERIES = {"Bouncer", "Short Ball"}
 _SEAM_DELIVERIES   = {"Swing", "In Swinger", "Out Swinger", "Good Length", "Full"}
+_GOOGLY_DELIVERIES = {"Googly", "Leg Break"}
+_SHOTS_360         = {"Sweep", "Reverse-Sweep", "Flick", "Lofted"}
 
 # ── Phase modifiers ──────────────────────────────────────────────────────────
 # Each phase tweaks boundary/wicket/six weights independently.
@@ -271,6 +284,10 @@ def calculate_outcome(
     guide_entry_exists: bool = False,
     total_overs: int = 20,
     ground_type: str | None = None,
+    delivery_button: str | None = None,
+    prev_delivery: str | None = None,
+    bowler_balls_done: int = 0,
+    bowler_max_balls: int = 0,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -281,6 +298,10 @@ def calculate_outcome(
       partnership_runs  – runs in current partnership; ≥30 = momentum boost
       total_overs       – match length; used to scale phase boundaries so that
                           short matches (e.g. 5-over) still have a death phase.
+      delivery_button   – button the bowler pressed (e.g. "Mystery")
+      prev_delivery     – internal delivery type of the previous ball (None at start)
+      bowler_balls_done – legal balls this bowler has already bowled
+      bowler_max_balls  – this bowler's max balls in the match (overs/5 rule)
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
@@ -452,6 +473,13 @@ def calculate_outcome(
         w["6"] = w["6"] * lb["six_mult"]
         for k in ("1", "2", "3"): w[k] = w[k] * lb["rotate_mult"]
 
+    # MR360: better outcomes on Sweep / Reverse-Sweep / Flick / Lofted shots
+    if "Mr360" in batsman_attrs and shot_internal in _SHOTS_360:
+        m360 = ATTR_EFFECTS["Mr360"]
+        w["4"] = w["4"] * m360["four_mult"]
+        w["6"] = w["6"] * m360["six_mult"]
+        w["W"] = w["W"] * m360["wkt_reduce"]
+
     # ── Bowler attribute effects ─────────────────────────────────────────────
 
     # WICKET HUNTER: +wickets always
@@ -498,6 +526,43 @@ def calculate_outcome(
         lp = ATTR_EFFECTS["Lethal Pace"]
         w["W"] = w["W"] * lp["pace_wkt_mult"]
         for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * lp["pace_run_reduce"]
+
+    # EARLY BREAKER: +wickets in the first overs of the match
+    # (first 3 overs of a 20-over game; scaled down for shorter matches)
+    _early_end = max(1, min(3, round(total_overs * 0.15)))
+    if "Early Breaker" in bowler_attrs and current_over < _early_end:
+        w["W"] = w["W"] * ATTR_EFFECTS["Early Breaker"]["early_wkt_mult"]
+
+    # GOOGLY MASTER: +wickets on Googly and Leg Break
+    if "Googly Master" in bowler_attrs and delivery_internal in _GOOGLY_DELIVERIES:
+        w["W"] = w["W"] * ATTR_EFFECTS["Googly Master"]["googly_wkt_mult"]
+
+    # MYSTERY: +wickets (and slightly fewer boundaries) when the Mystery button is used
+    if "Mystery" in bowler_attrs and delivery_button == "Mystery":
+        my = ATTR_EFFECTS["Mystery"]
+        w["W"] = w["W"] * my["wkt_mult"]
+        w["4"] = w["4"] * my["boundary_reduce"]
+        w["6"] = w["6"] * my["boundary_reduce"]
+
+    # MIND GAMES: +wickets when this delivery type differs from the previous ball
+    if (
+        "Mind Games" in bowler_attrs
+        and prev_delivery
+        and delivery_internal != prev_delivery
+    ):
+        w["W"] = w["W"] * ATTR_EFFECTS["Mind Games"]["wkt_mult"]
+
+    # SPELL FINISHER: better bowling in the bowler's own last over(s).
+    #   max 1 over  -> that over | max 2 overs -> last 1 | max 3 overs -> last 1
+    #   max 4 overs -> last 2    (first overs of the spell stay normal)
+    if "Spell Finisher" in bowler_attrs and bowler_max_balls > 0:
+        _quota_overs = max(1, bowler_max_balls // 6)
+        _final_overs = 2 if _quota_overs >= 4 else 1
+        _bowler_over = bowler_balls_done // 6          # 0-based over of this spell
+        if _bowler_over >= _quota_overs - _final_overs:
+            sf = ATTR_EFFECTS["Spell Finisher"]
+            w["W"] = w["W"] * sf["wkt_mult"]
+            for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * sf["run_reduce"]
 
     # LOW BOWLING QUALITY: sixes/fours are easy, wickets very unlikely
     _six_cap_mult = 2.0

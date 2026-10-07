@@ -234,7 +234,13 @@ async def _practice_process_delivery_inner(
         balls_since_wicket = game.balls_since_wicket,
         partnership_runs   = game.partnership_runs,
         is_recommended_shot= is_recommended_shot,
+        delivery_button    = delivery_button,
+        prev_delivery      = getattr(game, "last_delivery_internal", None),
+        bowler_balls_done  = game.bowler_ball_count.get(bname, 0),
+        bowler_max_balls   = game.max_bowler_balls(),
     )
+    # Remember this delivery type for the next ball ("Mind Games" playstyle).
+    game.last_delivery_internal = delivery_internal
 
     # Free-hit protection
     this_ball_is_free_hit = getattr(game, "pending_free_hit", False)

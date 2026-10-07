@@ -219,6 +219,8 @@ class GameState:
         self.bowler_ball_count: dict[str, int] = {}
         self.bowler_maidens: dict[str, int] = {}
         self.last_over_bowler: str | None = None
+        # Internal type of the previous delivery (used by the "Mind Games" playstyle)
+        self.last_delivery_internal: str | None = None
 
         # Cached card stats (inst_pk -> CricketerCardStats)
         self._card_stats_cache: dict[int, Any] = {}
@@ -850,6 +852,7 @@ class GameState:
         self.bowler_maidens = {}
         self.bowler_stats = {}
         self.batsman_stats = {}
+        self.last_delivery_internal = None
         self._over_ended_flag = False
         self.last_ball_was_wicket = False
         self.last_wicket_dismissed_name = ""
