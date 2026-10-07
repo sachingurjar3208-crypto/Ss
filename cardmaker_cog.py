@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 
 import discord
 from discord import app_commands
@@ -34,6 +35,7 @@ from card_db import (
     init_card_db,
     card_exists, get_card, create_card, update_card, update_card_offset,
     set_card_image_path, list_playernames, list_all_cards, delete_card,
+    cards_using_background, reassign_cards_background, delete_background,
     background_exists, get_background, add_background, list_backgrounds,
     set_playstyles, update_logo_layout, update_card_layout,
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
@@ -435,88 +437,6 @@ class CardMakerCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"⚠️ Card updated in the database, but image regeneration failed: `{e}`")
 
-    # ── /bulkbackground ─────────────────────────────────────────────
-    @app_commands.command(
-        name="bulkbackground",
-        description="Set the background for many cards at once",
-    )
-    @app_commands.describe(
-        pathname="Background template to apply (added via /bgadder)",
-        universal="True = apply to every card. False = only the cards listed in playername",
-        playername="Comma-separated list of cards (ignored if universal is True)",
-    )
-    @app_commands.autocomplete(pathname=background_autocomplete)
-    @is_owner()
-    async def bulkbackground(
-        self,
-        interaction: discord.Interaction,
-        pathname: str,
-        universal: bool,
-        playername: str | None = None,
-    ):
-        await interaction.response.defer()
-
-        bg = get_background(pathname)
-        if bg is None:
-            names = list_backgrounds()
-            hint = ", ".join(names) if names else "(none added yet)"
-            await interaction.followup.send(f"❌ Unknown background `{pathname}`.\nAvailable: {hint}")
-            return
-
-        if universal:
-            targets = list_playernames()
-        else:
-            if not playername:
-                await interaction.followup.send(
-                    "❌ `playername` is required when `universal` is False — "
-                    "give a comma-separated list, e.g. `Virat Kohli, Glenn Maxwell`."
-                )
-                return
-            targets = [p.strip() for p in playername.split(",") if p.strip()]
-
-        if not targets:
-            await interaction.followup.send("❌ No cards to update.")
-            return
-
-        updated: list[str] = []
-        missing: list[str] = []
-        failed: list[str] = []
-
-        for name in targets:
-            if not card_exists(name):
-                missing.append(name)
-                continue
-            update_card(name, background=bg["pathname"])
-            try:
-                card = get_card(name)
-                buf = await generate_card_image(card, bg["local_path"])
-                out_path = GENERATED_DIR / f"{name.strip().lower().replace(' ', '_')}.png"
-                with open(out_path, "wb") as f:
-                    f.write(buf.getvalue())
-                set_card_image_path(name, str(out_path))
-                await card_cache.warm(str(out_path))
-                updated.append(card["playername"])
-            except Exception as e:
-                failed.append(f"{name} (`{e}`)")
-
-        summary = [f"🖼️ Background set to `{bg['pathname']}` for **{len(updated)}** card(s)."]
-        if failed:
-            summary.append(f"⚠️ Image regeneration failed for **{len(failed)}**: " + ", ".join(failed)[:800])
-        if missing:
-            summary.append(f"❌ No card found for **{len(missing)}**: " + ", ".join(missing)[:800])
-
-        # Discord message content is capped at 2000 chars. With many cards the
-        # "updated" list alone can blow past that, so keep the summary short
-        # and attach the full name list as a text file instead of inlining it.
-        full_list = "\n".join(updated) if updated else "(none)"
-        file = discord.File(io.BytesIO(full_list.encode()), filename="updated_cards.txt")
-
-        text = "\n".join(summary)
-        if len(text) > 1900:
-            text = text[:1900] + "…"
-
-        await interaction.followup.send(content=text, file=file)
-
     # ── /csrarity ────────────────────────────────────────────────────
     @app_commands.command(
         name="csrarity",
@@ -551,6 +471,83 @@ class CardMakerCog(commands.Cog):
                 break  # Discord embeds cap out at 25 fields
 
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ── /bgmerge ─────────────────────────────────────────────────────
+    @app_commands.command(
+        name="bgmerge",
+        description="Move a background's artwork onto another pathname, then retire the first one",
+    )
+    @app_commands.describe(
+        keep="Pathname that survives (e.g. csbase) — every card ends up using this name",
+        replace_with="Pathname whose artwork takes over `keep`'s slot, then gets deleted (e.g. tester)",
+    )
+    @app_commands.autocomplete(keep=background_autocomplete, replace_with=background_autocomplete)
+    @is_owner()
+    async def bgmerge(self, interaction: discord.Interaction, keep: str, replace_with: str):
+        await interaction.response.defer()
+
+        if keep.strip().lower() == replace_with.strip().lower():
+            await interaction.followup.send("❌ `keep` and `replace_with` can't be the same pathname.")
+            return
+
+        keep_bg = get_background(keep)
+        new_bg = get_background(replace_with)
+        if keep_bg is None or new_bg is None:
+            names = list_backgrounds()
+            hint = ", ".join(names) if names else "(none added yet)"
+            missing = keep if keep_bg is None else replace_with
+            await interaction.followup.send(f"❌ Unknown background `{missing}`.\nAvailable: {hint}")
+            return
+
+        # Cards already on `keep` (will be redrawn with the new art) and cards
+        # on `replace_with` (will be switched over to `keep`'s name).
+        already_on_keep = cards_using_background(keep_bg["pathname"])
+
+        # 1) Physically overwrite keep's template file with replace_with's artwork,
+        #    so the `keep` pathname now points at the new design permanently.
+        try:
+            shutil.copyfile(new_bg["local_path"], keep_bg["local_path"])
+        except OSError as e:
+            await interaction.followup.send(f"❌ Could not copy artwork onto `{keep_bg['pathname']}`: `{e}`")
+            return
+
+        # 2) Point every card that was on replace_with at keep instead.
+        moved_count = reassign_cards_background(new_bg["pathname"], keep_bg["pathname"])
+
+        # 3) Retire replace_with — its art now lives under `keep`.
+        delete_background(new_bg["pathname"])
+        try:
+            os.remove(new_bg["local_path"])
+        except OSError:
+            pass
+
+        # 4) Redraw every card now sitting on `keep` so their generated PNG
+        #    picks up the new artwork. Cards with a dead foreground link will
+        #    fail silently here — that's a separate, pre-existing problem.
+        affected = sorted(set(already_on_keep) | set(cards_using_background(keep_bg["pathname"])))
+        refreshed, skipped = [], []
+        for name in affected:
+            if await _regenerate_silently(name):
+                refreshed.append(name)
+            else:
+                skipped.append(name)
+
+        summary = [
+            f"🔀 `{new_bg['pathname']}` merged into `{keep_bg['pathname']}` and removed.",
+            f"📇 {moved_count} card(s) switched from `{new_bg['pathname']}` to `{keep_bg['pathname']}`.",
+            f"🔄 Redrew {len(refreshed)}/{len(affected)} card(s) using `{keep_bg['pathname']}`.",
+        ]
+        if skipped:
+            summary.append(
+                f"⚠️ Skipped {len(skipped)} (likely a dead `foregroundlink` — fix with `/editcard` then "
+                f"it'll pick up the new background automatically): " + ", ".join(skipped)[:800]
+            )
+
+        text = "\n".join(summary)
+        if len(text) > 1900:
+            text = text[:1900] + "…"
+        file = discord.File(io.BytesIO("\n".join(affected).encode() or b"(none)"), filename="affected_cards.txt")
+        await interaction.followup.send(content=text, file=file)
 
     # ── /bgadder ─────────────────────────────────────────────────────
     @app_commands.command(name="bgadder", description="Add a new card background template")

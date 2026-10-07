@@ -537,6 +537,40 @@ def list_backgrounds() -> list[str]:
         return [r["pathname"] for r in rows]
 
 
+def cards_using_background(pathname: str) -> list[str]:
+    """Playernames of the cards currently set to this background."""
+    key = pathname.strip().lower()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT playername FROM cards WHERE LOWER(background) = ?", (key,)
+        ).fetchall()
+        return [r["playername"] for r in rows]
+
+
+def reassign_cards_background(old_pathname: str, new_pathname: str) -> int:
+    """Point every card using old_pathname at new_pathname instead. Returns how many rows changed."""
+    old_key = old_pathname.strip().lower()
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE cards SET background = ?, updated_at = ? WHERE LOWER(background) = ?",
+            (new_pathname.strip(), time.time(), old_key),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
+def delete_background(pathname: str) -> sqlite3.Row | None:
+    """Remove a background template from the library and return the deleted row
+    (or None if it didn't exist) so the caller can also remove its local file."""
+    row = get_background(pathname)
+    if row is None:
+        return None
+    with _conn() as conn:
+        conn.execute("DELETE FROM backgrounds WHERE pathname_key = ?", (pathname.strip().lower(),))
+        conn.commit()
+    return row
+
+
 # ── Panels (stats-panel overlay images, added via /paneladder) ────────────
 
 def panel_exists(pathname: str) -> bool:
