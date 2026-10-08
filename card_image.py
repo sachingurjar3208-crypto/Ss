@@ -50,8 +50,11 @@ def _find_font(name: str) -> Path:
 FONT_DIR = _HERE / "fonts"
 # Drop bold display TTFs in cardmaker/fonts/ with these exact names, or the
 # code falls back to Pillow's built-in font (works, but looks plain).
-FONT_DISPLAY_BOLD = _find_font("display_bold.ttf")     # big gold name / stat numbers
+FONT_DISPLAY_BOLD = _find_font("display_bold.ttf")     # stat numbers / OVR (Bebas Neue)
 FONT_LABEL = _find_font("label.ttf")                   # small caps labels
+# Display name (top-left) ONLY: Montserrat ExtraBold. Put Montserrat-ExtraBold.ttf in the
+# repo root renamed to name_font.ttf. If the file is missing the name falls back to display_bold.ttf.
+FONT_NAME = _find_font("name_font.ttf")
 
 GOLD = (222, 180, 90, 255)
 WHITE = (240, 240, 245, 255)
@@ -61,8 +64,14 @@ WHITE = (240, 240, 245, 255)
 # per-card offset_x/offset_y (from /foregroundfixer) is applied on top. ──
 FG_BOX = {"x": 90, "y": 230, "w": 860, "h": 980}
 
-DISPLAYNAME_POS = (55, 130)     # top-left corner, baseline-ish
-DISPLAYNAME_SIZE = 120
+DISPLAYNAME_POS = (55, 168)     # left edge x, BASELINE y of the name (was 238, moved 70px up)
+DISPLAYNAME_SIZE = 120          # per-card size from /cardlayout is stored relative to this
+# Montserrat is much wider than Bebas Neue, so the stored size (default 120) is scaled down.
+# /cardlayout namesizebig / namesizesmall still work (they change the stored size).
+NAME_FONT_SCALE = 0.75
+NAME_COLOR = WHITE
+NAME_MAX_W = CANVAS_W - 2 * 55  # the name is shrunk automatically if it is wider than this
+NAME_MIN_SIZE = 30
 
 STAT_LEFT_CENTER = (150, 1290)   # left hexagon number
 STAT_RIGHT_CENTER = (890, 1290)  # right hexagon number
@@ -381,10 +390,17 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
 
     draw = ImageDraw.Draw(canvas)
 
-    # ── Display name (top-left corner, big gold) ──────────────────────
-    name_font = _font(FONT_DISPLAY_BOLD, name_size)
+    # ── Display name (top-left corner, big white Montserrat) ──────────────────────
+    name_text = card_row["displayname"].upper()
+    name_path = FONT_NAME if FONT_NAME.is_file() else FONT_DISPLAY_BOLD
+    name_px = max(NAME_MIN_SIZE, round(name_size * NAME_FONT_SCALE))
+    name_font = _font(name_path, name_px)
+    # Auto-fit: long names shrink until they fit between the card edges.
+    while name_px > NAME_MIN_SIZE and draw.textlength(name_text, font=name_font) > NAME_MAX_W - name_dx:
+        name_px -= 2
+        name_font = _font(name_path, name_px)
     name_pos = (DISPLAYNAME_POS[0] + name_dx, DISPLAYNAME_POS[1] + name_dy)
-    draw.text(name_pos, card_row["displayname"].upper(), font=name_font, fill=GOLD)
+    draw.text(name_pos, name_text, font=name_font, fill=NAME_COLOR, anchor="ls")
 
     # ── Role + side ordering ───────────────────────────────────────────
     # Higher stat becomes the "primary" side (shown on the LEFT), matching

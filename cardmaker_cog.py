@@ -5,6 +5,7 @@
     /bgadder        add a new background template
     /foregroundfix  nudge position and/or resize a card's foreground cutout
     /removecard     delete a player card
+    /refreshcards   redraw EVERY card image with the latest code/data (optionally put one panel on all cards)
     /logoadderofplaystyle  add a playstyle logo to the logo list
     /playstylelogoremover  remove a playstyle logo from the logo list (then re-add with /logoadderofplaystyle)
     /setplaystylelogo      put up to 2 playstyle logos on a card
@@ -193,6 +194,7 @@ def _missing_logo_note(names) -> str:
 class CardMakerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self._refresh_running = False
         init_card_db()
 
     async def cog_load(self) -> None:
@@ -1237,6 +1239,83 @@ class CardMakerCog(commands.Cog):
             )
         except Exception as e:
             await interaction.followup.send(f"⚠️ Layout saved, but image regeneration failed: `{e}`")
+
+    # ── /refreshcards ────────────────────────────────────────────────
+    # After the card design changes (new font, new element, new panel...) the old
+    # PNGs on disk are still the old look. Run this ONCE and every card is redrawn.
+    # Optional `panel`: also put that stats-panel overlay on every card first.
+    @app_commands.command(
+        name="refreshcards",
+        description="Redraw ALL cards with the latest design (optionally put one panel on every card)",
+    )
+    @app_commands.describe(
+        panel="(optional) put this stats panel on EVERY card before redrawing",
+    )
+    @app_commands.autocomplete(panel=panel_autocomplete)
+    @is_owner()
+    async def refreshcards(self, interaction: discord.Interaction, panel: str | None = None):
+        if self._refresh_running:
+            await interaction.response.send_message(
+                "⏳ A refresh is already running. Wait for it to finish.", ephemeral=True
+            )
+            return
+        if panel is not None and not panel_exists(panel):
+            names = list_panels()
+            hint = ", ".join(names) if names else "(no panels yet)"
+            await interaction.response.send_message(
+                f"❌ No panel named **{panel}**.\nExisting panels: {hint}", ephemeral=True
+            )
+            return
+
+        names = list_playernames()
+        if not names:
+            await interaction.response.send_message("❌ There are no cards to refresh.", ephemeral=True)
+            return
+
+        await interaction.response.defer()
+        self._refresh_running = True
+        total = len(names)
+        note = f" + panel **{panel}** on every card" if panel else ""
+        progress = await interaction.followup.send(f"⏳ Refreshing **{total}** cards{note}...", wait=True)
+        channel = interaction.channel
+
+        async def _job():
+            done, failed = 0, []
+            try:
+                for name in names:
+                    try:
+                        if panel is not None:
+                            set_card_panel(name, panel)
+                        ok = await _regenerate_silently(name)
+                    except Exception:
+                        ok = False
+                    if ok:
+                        done += 1
+                    else:
+                        failed.append(name)
+                    # Cards are redrawn ONE at a time (the VPS has 1GB RAM); this also lets
+                    # other commands run in between so the bot never freezes.
+                    await asyncio.sleep(0.2)
+                    if (done + len(failed)) % 10 == 0:
+                        try:
+                            await progress.edit(
+                                content=f"⏳ Refreshing cards... **{done + len(failed)}/{total}**"
+                            )
+                        except Exception:
+                            pass   # the interaction token may have expired, not important
+                msg = f"✅ Refreshed **{done}/{total}** cards{note}."
+                if failed:
+                    shown = ", ".join(failed[:15]) + (" ..." if len(failed) > 15 else "")
+                    msg += f"\n⚠️ Failed ({len(failed)}): {shown}\n(usually a missing background template or a dead foreground link)"
+                try:
+                    await progress.edit(content=msg)
+                except Exception:
+                    if channel is not None:
+                        await channel.send(msg)
+            finally:
+                self._refresh_running = False
+
+        asyncio.get_running_loop().create_task(_job())
 
     # ── /removecard ──────────────────────────────────────────────────
     @app_commands.command(name="removecard", description="Delete a player card from the database")
