@@ -26,13 +26,12 @@ from discord.ext import commands
 import data
 import media
 import security
-from cardmaker_cog import OWNER_ID
+from bot_guard import MaintenanceActive, OWNER_ID, admin_only
 
 
 def is_owner():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        return interaction.user.id == OWNER_ID or security.has_full_admin_role(interaction.user)
-    return app_commands.check(predicate)
+    """Admin-only command: hidden from normal members, main server only (see bot_guard.admin_only)."""
+    return admin_only()
 
 
 def normalize_gif_url(url: str) -> str | None:
@@ -237,6 +236,8 @@ class StadiumCog(commands.Cog):
         return embed
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, MaintenanceActive):
+            return   # the user was already told about maintenance
         if isinstance(error, app_commands.CheckFailure):
             msg = "🔒 Only the bot owner or an admin can use this command."
             if interaction.response.is_done():

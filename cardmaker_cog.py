@@ -53,22 +53,19 @@ from card_narratives import NARRATIVES, NARRATIVE_NAMES, ROLES, HANDS, BOWLING_T
 
 import aiohttp
 
-OWNER_ID = 1317288099075850243
-# Members with any of these roles can use every command in this file
+# Owner / admin role / server id now live in bot_guard.py (one place for the whole bot).
+# Members with the admin role can use every command in this file
 # (/cardmaker, /editcard, /bgadder, /foregroundfix ...), same as the owner.
-ALLOWED_ROLE_IDS = {1556644558929010769}
+from bot_guard import ADMIN_ROLE_IDS as ALLOWED_ROLE_IDS, MaintenanceActive, OWNER_ID, admin_only
 MAX_STAT = 150
 MIN_SCALE_PCT = 10
 MAX_SCALE_PCT = 400
 
 
 def is_owner():
-    async def predicate(interaction: discord.Interaction) -> bool:
-        if interaction.user.id == OWNER_ID:
-            return True
-        roles = getattr(interaction.user, "roles", None) or []
-        return any(r.id in ALLOWED_ROLE_IDS for r in roles)
-    return app_commands.check(predicate)
+    """Admin-only command: hidden from normal members, exists only in the main server,
+    and only the owner / admin role can run it (see bot_guard.admin_only)."""
+    return admin_only()
 
 
 ROLE_CHOICES = [app_commands.Choice(name=label, value=code) for code, label in ROLES.items()]
@@ -213,6 +210,8 @@ class CardMakerCog(commands.Cog):
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
     ) -> None:
+        if isinstance(error, MaintenanceActive):
+            return   # the user was already told about maintenance
         if isinstance(error, app_commands.CheckFailure):
             msg = "❌ Only the bot owner or an authorised role can use this command."
         else:

@@ -9,6 +9,7 @@ from discord.ext import commands
 
 # Import card_image early to trigger font startup checks
 import card_image as _card_image_startup_check
+from bot_guard import ADMIN_GUILD_ID, GuardedTree, MaintenancePrefixBlocked, maintenance_prefix_check
 
 # Bot setup
 intents = discord.Intents.default()
@@ -16,7 +17,9 @@ intents.message_content = True
 intents.guilds = True
 intents.dm_messages = True
 
-bot = commands.Bot(command_prefix="", intents=intents)
+# GuardedTree blocks every slash command during /maintenance; the check below does the same for text commands.
+bot = commands.Bot(command_prefix="", intents=intents, tree_cls=GuardedTree)
+bot.add_check(maintenance_prefix_check)
 
 COGS_DIR = Path(__file__).parent
 
@@ -34,17 +37,25 @@ async def on_ready():
     # newly added commands (e.g. /countrylogoadder) never appear. Runs once per start.
     if not _synced:
         _synced = True
+        # Admin commands exist ONLY in your server (bot_guard.ADMIN_GUILD_ID), so sync that server too.
         try:
-            guild_id = os.getenv("GUILD_ID")  # optional: your test server id -> commands appear instantly
-            if guild_id:
-                guild = discord.Object(id=int(guild_id))
-                bot.tree.copy_global_to(guild=guild)
-                synced = await bot.tree.sync(guild=guild)
-                print(f"✓ Synced {len(synced)} slash commands to server {guild_id}")
+            synced = await bot.tree.sync(guild=discord.Object(id=ADMIN_GUILD_ID))
+            print(f"✓ Synced {len(synced)} admin slash commands to server {ADMIN_GUILD_ID}")
+        except Exception as e:
+            print(f"✗ Admin slash command sync failed: {e}")
+        try:
             synced = await bot.tree.sync()  # global (can take a few minutes to show up everywhere)
             print(f"✓ Synced {len(synced)} global slash commands")
         except Exception as e:
-            print(f"✗ Slash command sync failed: {e}")
+            print(f"✗ Global slash command sync failed: {e}")
+
+
+@bot.event
+async def on_command_error(ctx: commands.Context, error: commands.CommandError):
+    """Text commands blocked by maintenance were already answered: stay quiet. Everything else = default."""
+    if isinstance(error, MaintenancePrefixBlocked):
+        return
+    await commands.Bot.on_command_error(bot, ctx, error)
 
 
 async def load_cogs():
@@ -56,6 +67,7 @@ async def load_cogs():
         "stadium_cog",
         "admin_cog",
         "stats_cog",
+        "maintenance_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:
