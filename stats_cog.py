@@ -6,6 +6,7 @@ file is deployed.
 """
 from __future__ import annotations
 
+import asyncio
 import time
 
 import discord
@@ -83,7 +84,7 @@ class StatsCog(commands.Cog, name="Stats"):
         if ctx.author.bot:
             return
         try:
-            _record(ctx.author.id)
+            await asyncio.to_thread(_record, ctx.author.id)
         except Exception as e:
             print(f"[stats] couldn't record command use: {type(e).__name__}: {e}")
 
@@ -101,7 +102,7 @@ class StatsCog(commands.Cog, name="Stats"):
         msg = await ctx.send("Checking...")
         api_ms = round((time.perf_counter() - t0) * 1000)
 
-        data = _collect()
+        data = await asyncio.to_thread(_collect)
 
         embed = discord.Embed(title="Bot Info", color=discord.Color.blue())
         embed.add_field(
