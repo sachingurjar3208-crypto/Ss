@@ -251,6 +251,8 @@ class SquadCog(commands.Cog, name="Squad"):
         for uid in (challenger.id, opponent.id):
             game.teams[uid] = sl.build_match_team(uid)
             game.team_pks[uid] = []
+            game.impact_subs_pool[uid] = sl.build_impact_subs_players(uid)
+            game.impact_used[uid] = False
 
         active_games[ctx.channel.id] = game
         conditions = random_match_conditions()
@@ -592,6 +594,87 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         await ctx.send(embed=_xi_embed(ctx.author, economy.get_user(ctx.author.id)))
 
+    # -- impact player subs ------------------------------------------------
+    @commands.command(name="cssubs", aliases=["csimpact"])
+    @commands.cooldown(1, 4, commands.BucketType.user)
+    async def cssubs(
+        self,
+        ctx: commands.Context,
+        action: Optional[str] = None,
+        *,
+        player: Optional[str] = None,
+    ):
+        """Manage your Impact Player subs (bench players, max 4).
+        `cssubs` to view, `cssubs add <player>`, `cssubs remove <player>`, `cssubs clear`."""
+        if not await _need_debut(ctx):
+            return
+        action = (action or "list").strip().lower()
+
+        if action in ("list", "show", "view"):
+            subs = economy.get_impact_subs(ctx.author.id)
+            if not subs:
+                await ctx.send(
+                    "🔁 You have no Impact Player subs set.\n"
+                    "Add one with `cssubs add <player name>` "
+                    f"(up to {economy.IMPACT_SUBS_MAX}, must be a bench player — not already in your XI)."
+                )
+                return
+            lines = []
+            for slot in sorted(subs):
+                card = card_db.get_card(subs[slot])
+                name = card["playername"] if card else subs[slot]
+                lines.append(f"**{slot}.** {esc(name)}")
+            await ctx.send("🔁 **Your Impact Player subs:**\n" + "\n".join(lines))
+            return
+
+        if action in ("add", "set"):
+            if _in_match(self.bot, ctx.author.id):
+                await ctx.send("❌ You can't change your subs during a match.")
+                return
+            if not player:
+                await ctx.send("Usage: `cssubs add <player name>`")
+                return
+            card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
+            if card is None:
+                await ctx.send(f"❌ {err}")
+                return
+            err = economy.add_impact_sub(ctx.author.id, card["playername_key"])
+            if err:
+                await ctx.send(f"❌ {err}")
+                return
+            await ctx.send(f"✅ **{esc(card['playername'])}** added to your Impact Player subs.")
+            return
+
+        if action in ("remove", "rem", "delete", "del"):
+            if _in_match(self.bot, ctx.author.id):
+                await ctx.send("❌ You can't change your subs during a match.")
+                return
+            if not player:
+                await ctx.send("Usage: `cssubs remove <player name>`")
+                return
+            card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
+            if card is None:
+                await ctx.send(f"❌ {err}")
+                return
+            err = economy.remove_impact_sub(ctx.author.id, card["playername_key"])
+            if err:
+                await ctx.send(f"❌ {err}")
+                return
+            await ctx.send(f"✅ **{esc(card['playername'])}** removed from your Impact Player subs.")
+            return
+
+        if action == "clear":
+            if _in_match(self.bot, ctx.author.id):
+                await ctx.send("❌ You can't change your subs during a match.")
+                return
+            economy.clear_impact_subs(ctx.author.id)
+            await ctx.send("✅ Your Impact Player subs list is now empty.")
+            return
+
+        await ctx.send(
+            "Usage: `cssubs` (view), `cssubs add <player>`, `cssubs remove <player>`, `cssubs clear`."
+        )
+
     # -- captain ---------------------------------------------------------
     @commands.command(name="cscaptain")
     @commands.cooldown(1, 5, commands.BucketType.user)
@@ -670,7 +753,8 @@ class SquadCog(commands.Cog, name="Squad"):
         embed.add_field(name="Squad", value=(
             "`cssquad` `csshow <player>` `csxi` `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
             "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`\n"
-            "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)"
+            "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)\n"
+            "`cssubs` view Impact Player subs · `cssubs add/remove <player>` · `cssubs clear`"
         ), inline=False)
         embed.add_field(name="Economy", value=(
             "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"

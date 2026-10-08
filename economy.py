@@ -43,6 +43,7 @@ MATCH_REWARD_DAILY_CAP   = 10   # rewarded matches per player per 24h
 MATCH_REWARD_PER_OPP_CAP = 3    # ... and against the same opponent per 24h (stops alt-account farming)
 MIN_SQUAD     = 11               # you can never sell below this many players
 XI_SIZE       = 11
+IMPACT_SUBS_MAX = 4              # how many bench players a team can nominate as Impact Player subs
 
 DAY = 86_400
 COOLDOWNS = {"daily": DAY, "weekly": 7 * DAY, "monthly": 30 * DAY}
@@ -159,10 +160,46 @@ def init_economy_db() -> None:
                 ts            REAL    NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_ledger_user ON ledger (user_id, ts);
+            CREATE TABLE IF NOT EXISTS impact_subs (
+                user_id    INTEGER NOT NULL,
+                slot       INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 4),
+                player_key TEXT    NOT NULL,
+                PRIMARY KEY (user_id, slot),
+                UNIQUE (user_id, player_key)
+            );
             """
         )
     finally:
         conn.close()
+
+
+def _ensure_impact_subs_table(conn: sqlite3.Connection) -> None:
+    """Defensive: create the table on first use too, in case
+    init_economy_db() wasn't run for this deployment."""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS impact_subs (
+            user_id    INTEGER NOT NULL,
+            slot       INTEGER NOT NULL CHECK (slot BETWEEN 1 AND 4),
+            player_key TEXT    NOT NULL,
+            PRIMARY KEY (user_id, slot),
+            UNIQUE (user_id, player_key)
+        )"""
+    )
+
+
+def _sync_impact_subs_with_xi(conn: sqlite3.Connection, uid: int) -> None:
+    """A player who just entered the XI can't still be a bench sub — drop
+    them from the Impact Player subs list if they're there."""
+    _ensure_impact_subs_table(conn)
+    xi = set(_xi_rows(conn, uid).values())
+    if not xi:
+        return
+    subs = conn.execute("SELECT player_key FROM impact_subs WHERE user_id = ?", (uid,)).fetchall()
+    for r in subs:
+        if r["player_key"] in xi:
+            conn.execute(
+                "DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, r["player_key"])
+            )
 
 
 # ── Users ───────────────────────────────────────────────────────────────────
@@ -395,6 +432,7 @@ def set_full_xi(user_id, keys: list[str]) -> bool:
         cap = conn.execute("SELECT captain_key FROM users WHERE user_id = ?", (uid,)).fetchone()
         if cap is not None and cap["captain_key"] not in stored:
             conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ?", (uid,))
+        _sync_impact_subs_with_xi(conn, uid)
         return True
 
 
@@ -429,6 +467,7 @@ def swap_players(user_id, key_a: str, key_b: str) -> str | None:
             new_xi = set(_xi_rows(conn, uid).values())
             if cap["captain_key"] not in new_xi:
                 conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ?", (uid,))
+        _sync_impact_subs_with_xi(conn, uid)
         return None
 
 
@@ -476,6 +515,8 @@ def sell_card(user_id, player_key: str, value: int, replacement_key: str | None)
         conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, player_key))
         conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, player_key))
         conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, player_key))
+        _ensure_impact_subs_table(conn)
+        conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, player_key))
         if slot_row is not None and replacement_key:
             ok = conn.execute(
                 "SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, replacement_key)
@@ -604,6 +645,8 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str) -> str | None:
             conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (u, out_k))
             conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (u, out_k))
             conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (u, out_k))
+            _ensure_impact_subs_table(conn)
+            conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (u, out_k))
             conn.execute(
                 "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (u, in_k, time.time())
             )
@@ -661,4 +704,66 @@ def reset_all_cards(user_id) -> int:
         conn.execute("DELETE FROM owned WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
         conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ?", (uid,))
+        _ensure_impact_subs_table(conn)
+        conn.execute("DELETE FROM impact_subs WHERE user_id = ?", (uid,))
         return int(n)
+
+
+# ── Impact Player subs (bench players nominated for in-match substitution) ──
+
+def get_impact_subs(user_id) -> dict[int, str]:
+    """{slot: player_key} for this user's nominated Impact Player subs (1..4)."""
+    conn = _conn()
+    try:
+        _ensure_impact_subs_table(conn)
+        rows = conn.execute(
+            "SELECT slot, player_key FROM impact_subs WHERE user_id = ?", (_uid(user_id),)
+        ).fetchall()
+        return {r["slot"]: r["player_key"] for r in rows}
+    finally:
+        conn.close()
+
+
+def add_impact_sub(user_id, player_key: str) -> str | None:
+    """Nominate an owned, bench (not in XI) player as an Impact Player sub.
+    Returns None on success or an error message."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_impact_subs_table(conn)
+        if conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, player_key)).fetchone() is None:
+            return "You don't own that player."
+        xi = set(_xi_rows(conn, uid).values())
+        if player_key in xi:
+            return "That player is in your playing XI — Impact subs must come from the bench."
+        existing = conn.execute(
+            "SELECT slot, player_key FROM impact_subs WHERE user_id = ?", (uid,)
+        ).fetchall()
+        if any(r["player_key"] == player_key for r in existing):
+            return "That player is already on your Impact subs list."
+        if len(existing) >= IMPACT_SUBS_MAX:
+            return f"You can only nominate {IMPACT_SUBS_MAX} subs — remove one first with `cssubs remove`."
+        taken_slots = {r["slot"] for r in existing}
+        slot = next(s for s in range(1, IMPACT_SUBS_MAX + 1) if s not in taken_slots)
+        conn.execute(
+            "INSERT INTO impact_subs (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, player_key)
+        )
+        return None
+
+
+def remove_impact_sub(user_id, player_key: str) -> str | None:
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_impact_subs_table(conn)
+        got = conn.execute(
+            "DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, player_key)
+        )
+        if got.rowcount == 0:
+            return "That player isn't on your Impact subs list."
+        return None
+
+
+def clear_impact_subs(user_id) -> None:
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_impact_subs_table(conn)
+        conn.execute("DELETE FROM impact_subs WHERE user_id = ?", (uid,))

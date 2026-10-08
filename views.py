@@ -595,6 +595,7 @@ class _TimeoutMixin:
     Call self.stop() in every successful callback so the timer cancels.
     """
     _channel: discord.TextChannel | None = None
+    _message: discord.Message | None = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -866,11 +867,31 @@ async def _send_next_bowler_prompt(channel: discord.TextChannel, game: GameState
     xi_embed = build_playing_xi_embed(game.get_bowling_team())
     nb_view  = NextBowlerView(game)
     nb_view._channel = channel
-    await channel.send(
+    msg = await channel.send(
         content=f"Over is up — choose your next bowler {game.bowling_user.mention}",
         embed=xi_embed,
         view=nb_view,
     )
+    nb_view._message = msg
+
+
+async def _send_next_batsman_prompt(
+    channel: discord.TextChannel, game: GameState, *, content: str | None = None
+):
+    """Prompt the batting captain to choose the next batter."""
+    try:
+        xi_embed = build_playing_xi_embed(game.get_batting_team())
+    except Exception as e:
+        print(f"[wicket] XI embed error: {e}")
+        xi_embed = None
+    nb_view = NextBatsmanView(game)
+    nb_view._channel = channel
+    msg = await channel.send(
+        content=content or f"Choose your next batter {game.batting_user.mention}",
+        embed=xi_embed,
+        view=nb_view,
+    )
+    nb_view._message = msg
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1247,18 +1268,8 @@ async def _handle_wicket_fall(channel, game: GameState):
     # add_wicket() only appends to dismissed[], it doesn't clear game.striker).
     game.striker = None
 
-    try:
-        xi_embed = build_playing_xi_embed(game.get_batting_team())
-    except Exception as e:
-        print(f"[wicket] XI embed error: {e}")
-        xi_embed = None
-
-    nb_view = NextBatsmanView(game)
-    nb_view._channel = channel
-    await channel.send(
-        content=f"Wicket! Choose your next batter {game.batting_user.mention}",
-        embed=xi_embed,
-        view=nb_view,
+    await _send_next_batsman_prompt(
+        channel, game, content=f"Wicket! Choose your next batter {game.batting_user.mention}"
     )
 
 
@@ -2196,11 +2207,171 @@ class DRSView(ui.View):
 # Next batsman
 # ─────────────────────────────────────────────────────────────────────────────
 
-class NextBatsmanView(_TimeoutMixin, ui.View):
+class _ImpactButtonMixin:
+    """Adds an optional Impact Player button next to a next-bowler / next-
+    batsman prompt. One tap opens an ephemeral ImpactPlayerSwapView; the
+    button goes grey and disabled the moment that team's one sub is used."""
+
+    def _add_impact_button(self, uid: int, kind: str):
+        game = self.game
+        used = game.impact_used.get(uid, False)
+        if not used and not game.impact_subs_pool.get(uid):
+            return  # team never nominated any subs — keep the UI clean
+        btn = ui.Button(
+            label="Impact Player used" if used else "🔁 Impact Player",
+            style=discord.ButtonStyle.secondary if used else discord.ButtonStyle.primary,
+            disabled=used,
+            row=1,
+        )
+
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != uid:
+                await interaction.response.send_message(
+                    "Only that team's captain can make this substitution!", ephemeral=True
+                )
+                return
+            if not game.impact_available(uid):
+                await interaction.response.send_message(
+                    "Your Impact Player sub has already been used this match.", ephemeral=True
+                )
+                return
+            swap_view = ImpactPlayerSwapView(game, uid, origin_view=self, origin_kind=kind)
+            await interaction.response.send_message(
+                content="🔁 **Impact Player** — choose your substitute.",
+                view=swap_view,
+                ephemeral=True,
+            )
+
+        btn.callback = callback
+        self.add_item(btn)
+
+
+class ImpactPlayerSwapView(ui.View):
+    """Ephemeral 2-step flow: pick the bench sub coming IN, then the XI
+    player going OUT. Only the captain who opened it can use it. Confirming
+    uses up that team's one Impact Player swap for the whole match."""
+
+    def __init__(self, game: GameState, uid: int, origin_view, origin_kind: str):
+        super().__init__(timeout=120)
+        self.game = game
+        self.uid = uid
+        self.origin_view = origin_view
+        self.origin_kind = origin_kind  # "bowler" or "batsman"
+        self.incoming: dict | None = None
+        self._add_incoming_select()
+
+    def _add_incoming_select(self):
+        pool = self.game.impact_subs_pool.get(self.uid, [])
+        options = [
+            discord.SelectOption(
+                label=_pname(p),
+                description=f"{p.get('role', '?')} | OVR:{p.get('ovr', '?')}",
+                value=_pname(p),
+            )
+            for p in pool[:25]
+        ]
+        if not options:
+            options = [discord.SelectOption(label="No subs available", value="none")]
+        select = ui.Select(placeholder="Choose your Impact Player substitute", options=options)
+        select.callback = self._incoming_callback
+        self.add_item(select)
+
+    async def _incoming_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("This isn't your substitution.", ephemeral=True)
+            return
+        name = interaction.data["values"][0]
+        if name == "none":
+            await interaction.response.send_message("You have no subs left to bring on.", ephemeral=True)
+            return
+        pool = self.game.impact_subs_pool.get(self.uid, [])
+        incoming = next((p for p in pool if _pname(p) == name), None)
+        if incoming is None:
+            await interaction.response.send_message("That sub is no longer available.", ephemeral=True)
+            return
+        self.incoming = incoming
+        self.clear_items()
+        self._add_outgoing_select()
+        await interaction.response.edit_message(
+            content=f"🔁 Bringing on **{name}** — who comes off?",
+            view=self,
+        )
+
+    def _add_outgoing_select(self):
+        team = self.game.teams.get(self.uid, {})
+        players = self.game._team_players(team)
+        on_field = {
+            _pname(self.game.striker),
+            _pname(self.game.non_striker),
+            _pname(self.game.current_bowler),
+        }
+        options = [
+            discord.SelectOption(
+                label=_pname(p),
+                description=f"{p.get('role', '?')} | OVR:{p.get('ovr', '?')}",
+                value=_pname(p),
+            )
+            for p in players
+            if _pname(p) and _pname(p) not in on_field
+        ][:25]
+        if not options:
+            options = [discord.SelectOption(label="No eligible player to replace", value="none")]
+        select = ui.Select(placeholder="Choose who comes off", options=options)
+        select.callback = self._outgoing_callback
+        self.add_item(select)
+
+    async def _outgoing_callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.uid:
+            await interaction.response.send_message("This isn't your substitution.", ephemeral=True)
+            return
+        outgoing_name = interaction.data["values"][0]
+        if outgoing_name == "none":
+            await interaction.response.send_message(
+                "No one on your team can be replaced right now.", ephemeral=True
+            )
+            return
+        ok = self.game.apply_impact_sub(self.uid, self.incoming, outgoing_name)
+        if not ok:
+            await interaction.response.send_message("That player couldn't be found — try again.", ephemeral=True)
+            return
+        self.stop()
+        incoming_name = _pname(self.incoming)
+        await interaction.response.edit_message(
+            content=f"✅ **{incoming_name}** is on in place of **{outgoing_name}**.",
+            view=None,
+        )
+
+        channel = interaction.channel
+        team_name = self.game.teams.get(self.uid, {}).get("name", "Team")
+        await channel.send(
+            f"🔁 **Impact Player!** {team_name} bring on **{incoming_name}** "
+            f"in place of **{outgoing_name}**."
+        )
+
+        # The original prompt's dropdown was built before this swap, so it
+        # won't offer the new player — retire it and send a fresh one.
+        old_view = self.origin_view
+        old_msg  = getattr(old_view, "_message", None)
+        if old_view is not None:
+            old_view.stop()
+        if old_msg is not None:
+            try:
+                await old_msg.edit(view=None)
+            except Exception:
+                pass
+
+        if self.origin_kind == "bowler":
+            await _send_next_bowler_prompt(channel, self.game)
+        else:
+            await _send_next_batsman_prompt(channel, self.game)
+
+
+class NextBatsmanView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
     def __init__(self, game: GameState):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.game = game
         self._add_dropdown()
+        self._add_impact_button(game.batting_user_id, "batsman")
 
     def _add_dropdown(self):
         available = sorted(self.game.get_available_batsmen(), key=lambda p: p.get("bat", 0), reverse=True)
@@ -2273,11 +2444,12 @@ class NextBatsmanView(_TimeoutMixin, ui.View):
 # Next bowler
 # ─────────────────────────────────────────────────────────────────────────────
 
-class NextBowlerView(_TimeoutMixin, ui.View):
+class NextBowlerView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
     def __init__(self, game: GameState):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.game = game
         self._add_dropdown()
+        self._add_impact_button(game.bowling_user_id, "bowler")
 
     def _add_dropdown(self):
         available = self.game.get_available_bowlers()

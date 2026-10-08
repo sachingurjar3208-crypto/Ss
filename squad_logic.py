@@ -402,6 +402,37 @@ def build_match_team(user_id) -> dict:
     }
 
 
+def impact_sub_cards(user_id) -> list:
+    """Card rows for this user's nominated Impact Player subs, in slot order."""
+    subs = economy.get_impact_subs(user_id)
+    out = []
+    for slot in sorted(subs):
+        card = card_db.get_card(subs[slot])
+        if card is not None:
+            out.append(card)
+    return out
+
+
+def build_impact_subs_players(user_id) -> list[dict]:
+    """Same per-player dict shape as build_match_team()'s players list, for
+    this user's nominated Impact Player subs. Used to fill the bench pool a
+    live match draws from when the Impact Player button is used."""
+    cards = impact_sub_cards(user_id)
+    return [
+        {
+            "name": c["playername"],
+            "country": c["country"],
+            "ovr": c["ovr"],
+            "bat": c["bat"],
+            "bowl": c["bowl"],
+            "bowling_type": card_db.effective_bowling_type(c),
+            "role": ENGINE_ROLE[card_db.effective_role(c)],
+            "card": card_emoji(c),
+        }
+        for c in cards
+    ]
+
+
 # ── Finding a player by what the user typed ──────────────────────────────────
 
 def resolve_owned(user_id, text: str):
