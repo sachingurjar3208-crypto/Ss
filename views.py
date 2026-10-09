@@ -312,7 +312,14 @@ def save_game_innings_stats(game, batting_user_id=None, bowling_user_id=None, is
 
 
 def get_career_stats(user_id, player_name):
-    return {}
+    """ALL-TIME career totals of this user's card (zeros if never played)."""
+    try:
+        from career_stats import _key_for, get_career_personal
+        key = _key_for(player_name)
+        return get_career_personal(user_id, key) if key else {}
+    except Exception as e:
+        print(f"[stats] career lookup failed: {type(e).__name__}: {e}")
+        return {}
 from match_records import record_match_result as _record_match_result
 
 
@@ -776,13 +783,12 @@ async def _get_card_image_bytes(player: dict) -> bytes | None:
         return None
 
 
-async def _bat_stats_file(user_id: int, player: dict) -> discord.File | None:
+async def _bat_stats_file(user_id: int, player: dict, status: str = "", filename: str = "bat_stats.png") -> discord.File | None:
     try:
-        name     = _pname(player)
-        stats    = get_career_stats(str(user_id), name)
-        card_img = await _get_card_image_bytes(player)
-        img      = generate_bat_card(name, stats, card_image_bytes=card_img)
-        return discord.File(fp=io.BytesIO(img), filename="bat_stats.png")
+        name  = _pname(player)
+        stats = get_career_stats(str(user_id), name)
+        img   = await asyncio.to_thread(generate_bat_card, name, stats, None, status)
+        return discord.File(fp=io.BytesIO(img), filename=filename)
     except Exception as e:
         print(f"[stats] bat card error: {e}")
         return None
@@ -790,10 +796,9 @@ async def _bat_stats_file(user_id: int, player: dict) -> discord.File | None:
 
 async def _bowl_stats_file(user_id: int, player: dict) -> discord.File | None:
     try:
-        name     = _pname(player)
-        stats    = get_career_stats(str(user_id), name)
-        card_img = await _get_card_image_bytes(player)
-        img      = generate_bowl_card(name, stats, card_image_bytes=card_img)
+        name  = _pname(player)
+        stats = get_career_stats(str(user_id), name)
+        img   = await asyncio.to_thread(generate_bowl_card, name, stats, None, "CURRENT BOWLER")
         return discord.File(fp=io.BytesIO(img), filename="bowl_stats.png")
     except Exception as e:
         print(f"[stats] bowl card error: {e}")
@@ -1670,8 +1675,8 @@ class StrikerDesignateView(_TimeoutMixin, ui.View):
 
             async def _send_openers_info():
                 f1, f2 = await asyncio.gather(
-                    _bat_stats_file(self.game.batting_user_id, striker),
-                    _bat_stats_file(self.game.batting_user_id, non_striker),
+                    _bat_stats_file(self.game.batting_user_id, striker, "ON STRIKE", "bat_striker.png"),
+                    _bat_stats_file(self.game.batting_user_id, non_striker, "NON-STRIKER", "bat_nonstriker.png"),
                 )
                 files = [f for f in (f1, f2) if f]
                 await channel.send(
@@ -2493,7 +2498,7 @@ class NextBatsmanView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
             pass  # cosmetic only
 
         async def _work():
-            bat_file = await _bat_stats_file(self.game.batting_user_id, player)
+            bat_file = await _bat_stats_file(self.game.batting_user_id, player, "NEW BATTER")
             files = [bat_file] if bat_file else []
             await channel.send(
                 content=f"**{name}** ({player.get('ovr','?')}) comes to the crease",
