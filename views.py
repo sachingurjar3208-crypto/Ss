@@ -594,8 +594,25 @@ class _TimeoutMixin:
     Set view._channel = channel after creating the view.
     Call self.stop() in every successful callback so the timer cancels.
     """
-    _channel: discord.TextChannel | None = None
     _message: discord.Message | None = None
+
+    # Every prompt sets `view._channel = channel` right after it is created. We
+    # use that moment to mark this view as the game's CURRENT prompt, so an
+    # older / leftover view that times out later can never abandon a match
+    # that has already moved on.
+    @property
+    def _channel(self):
+        return self.__dict__.get("_channel_val")
+
+    @_channel.setter
+    def _channel(self, ch):
+        self.__dict__["_channel_val"] = ch
+        g = getattr(self, "game", None)
+        if g is not None:
+            try:
+                g._live_view = self
+            except Exception:
+                pass
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -657,6 +674,11 @@ class _TimeoutMixin:
         if not ch or not game:
             return
         if active_games.get(ch.id) is not game:
+            return
+        # A view that is no longer the game's current prompt (already answered,
+        # replaced, or left over) must NEVER abandon the match or fine anyone.
+        live = game.__dict__.get("_live_view")
+        if live is not None and live is not self:
             return
         if game.__dict__.get("_afk_sent"):
             return
@@ -2207,10 +2229,39 @@ class DRSView(ui.View):
 # Next batsman
 # ─────────────────────────────────────────────────────────────────────────────
 
+async def _close_swap_views(swaps) -> None:
+    """Grey out / close Impact Player lists whose origin prompt is over."""
+    for sv in swaps:
+        if sv.is_finished():
+            continue            # already used (or timed out) - leave its message alone
+        sv.stop()
+        inter = getattr(sv, "_interaction", None)
+        if inter is not None:
+            try:
+                await inter.edit_original_response(
+                    content="⛔ Impact Player list closed — the selection was already made.",
+                    view=None,
+                )
+            except Exception:
+                pass
+
+
 class _ImpactButtonMixin:
     """Adds an optional Impact Player button next to a next-bowler / next-
     batsman prompt. One tap opens an ephemeral ImpactPlayerSwapView; the
     button goes grey and disabled the moment that team's one sub is used."""
+
+    def stop(self):
+        """When the normal bowler / batter list is answered (or replaced), the
+        Impact Player list that was opened from it is closed and greyed out, so
+        it can never pick a bowler / batter afterwards."""
+        super().stop()
+        swaps = list(self.__dict__.get("_swap_views", []))
+        if swaps:
+            try:
+                asyncio.get_running_loop().create_task(_close_swap_views(swaps))
+            except RuntimeError:
+                pass
 
     def _add_impact_button(self, uid: int, kind: str):
         game = self.game
@@ -2235,7 +2286,14 @@ class _ImpactButtonMixin:
                     "Your Impact Player sub has already been used this match.", ephemeral=True
                 )
                 return
+            if self.is_finished():
+                await interaction.response.send_message(
+                    "This selection is already done — Impact Player is closed for it.", ephemeral=True
+                )
+                return
             swap_view = ImpactPlayerSwapView(game, uid, origin_view=self, origin_kind=kind)
+            swap_view._interaction = interaction
+            self.__dict__.setdefault("_swap_views", []).append(swap_view)
             await interaction.response.send_message(
                 content="🔁 **Impact Player** — choose your substitute.",
                 view=swap_view,
@@ -2276,9 +2334,24 @@ class ImpactPlayerSwapView(ui.View):
         select.callback = self._incoming_callback
         self.add_item(select)
 
+    async def _origin_closed(self, interaction: discord.Interaction) -> bool:
+        """True (and the user is told) if the normal list this was opened from is already answered."""
+        if self.origin_view is not None and self.origin_view.is_finished():
+            self.stop()
+            try:
+                await interaction.response.edit_message(
+                    content="⛔ Impact Player list closed — the selection was already made.", view=None
+                )
+            except Exception:
+                pass
+            return True
+        return False
+
     async def _incoming_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.uid:
             await interaction.response.send_message("This isn't your substitution.", ephemeral=True)
+            return
+        if await self._origin_closed(interaction):
             return
         name = interaction.data["values"][0]
         if name == "none":
@@ -2323,6 +2396,8 @@ class ImpactPlayerSwapView(ui.View):
     async def _outgoing_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.uid:
             await interaction.response.send_message("This isn't your substitution.", ephemeral=True)
+            return
+        if await self._origin_closed(interaction):
             return
         outgoing_name = interaction.data["values"][0]
         if outgoing_name == "none":
