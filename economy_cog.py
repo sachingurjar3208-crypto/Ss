@@ -25,6 +25,7 @@ import economy
 import security
 import squad_logic as sl
 import card_cache
+import emojis
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
 from squad_cog import _card_line, _in_match, _is_premium, _need_debut
@@ -85,7 +86,7 @@ BUYSELL_TIMEOUT = 20.0
 
 
 def _plain_coins(n: int) -> str:
-    return f"{int(n):,} coins"
+    return emojis.coins(n)
 
 
 def _buysell_embed(card, text: str) -> discord.Embed:
@@ -202,12 +203,7 @@ class TradeView(OwnedView):
 
 # ── The cog ──────────────────────────────────────────────────────────────────
 
-# Custom emojis for the reward messages (developer-portal emojis).
-REWARD_EMOJI = {
-    "daily":   "<:Daily:1554697281855430666>",
-    "weekly":  "<:Weeklypack:1554697293092094065>",
-    "monthly": "<:Monthlypack:1554698034800099369>",
-}
+# Custom emojis for the reward messages live in emojis.py.
 
 
 class EconomyCog(commands.Cog, name="Economy"):
@@ -224,7 +220,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         packs = economy.get_packs(ctx.author.id)
         pack_txt = ", ".join(f"{sl.PACKS[t]['emoji']} {n}× {sl.PACKS[t]['label']}" for t, n in packs.items() if t in sl.PACKS)
         await ctx.send(
-            f"💰 Purse: **{economy.fmt_coins(economy.get_balance(ctx.author.id))}**"
+            f"{emojis.COIN} **Purse:** {economy.fmt_coins(economy.get_balance(ctx.author.id))}"
             + (f"\n📦 Unopened: {pack_txt}" if pack_txt else "")
         )
 
@@ -233,7 +229,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if not await _need_debut(ctx):
             return
         if kind == "weekly" and not _is_premium(ctx.author):
-            await ctx.send("💎 The weekly reward is for **Premium members** only.")
+            await ctx.send(f"{emojis.WEEKLY} The **Weekly** reward is for **Premium members** only.")
             return
         lo, hi = economy.REWARD_CARD_OVR[kind]
         pool = [c for c in card_db.list_all_cards() if lo <= int(c["ovr"]) <= hi]
@@ -245,23 +241,23 @@ class EconomyCog(commands.Cog, name="Economy"):
         if not res["ok"]:
             if res.get("locked"):
                 await ctx.send(
-                    f"🔒 The monthly reward unlocks **1 month after your debut**. "
+                    f"{emojis.MONTHLY} The **Monthly** reward unlocks **1 month after your debut**. "
                     f"Come back in **{fmt_wait(res['wait'])}**."
                 )
                 return
-            await ctx.send(f"⏳ You already claimed your {kind} reward. Come back in **{fmt_wait(res['wait'])}**.")
+            await ctx.send(f"⏳ You already claimed your {emojis.reward_label(kind)} reward. Come back in **{fmt_wait(res['wait'])}**.")
             return
-        lines = [f"{REWARD_EMOJI.get(kind, '🎁')} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**"]
+        lines = [f"{emojis.reward_label(kind)} reward: **+{economy.fmt_coins(res['coins'])}**"]
         if kind == "daily":
             streak = res["streak"]
             if res["bonus"]:
                 lines.append(
-                    f"🎉 Streak bonus: **+{economy.fmt_coins(res['bonus'])}** "
-                    f"(daily {economy.fmt_coins(res['base'])} + streak {economy.fmt_coins(res['bonus'])})"
+                    f"{emojis.STREAK} **Streak bonus:** +{economy.fmt_coins(res['bonus'])} "
+                    f"({emojis.DAILY} Daily {economy.fmt_coins(res['base'])} + {emojis.STREAK} Streak {economy.fmt_coins(res['bonus'])})"
                 )
             nxt = economy.STREAK_EVERY - streak % economy.STREAK_EVERY
             lines.append(
-                f"🔥 Streak: **{streak}** day(s) — next streak bonus in **{nxt}** day(s). "
+                f"{emojis.STREAK} **Streak:** {streak} day(s) — next streak bonus in **{nxt}** day(s). "
                 f"Miss a day and it restarts from 1!"
             )
         if res["card"]:
@@ -272,7 +268,7 @@ class EconomyCog(commands.Cog, name="Economy"):
                 lines.append(f"🎴 New player: {_card_line(card, '  🆕')}")
         else:
             lines.append(f"🎴 No player cards with rating {lo}-{hi} are available yet.")
-        lines.append(f"Balance: **{economy.fmt_coins(res['balance'])}**")
+        lines.append(f"{emojis.COIN} **Balance:** {economy.fmt_coins(res['balance'])}")
         await ctx.send("\n".join(lines))
 
     @commands.command(name="csdaily")
@@ -303,7 +299,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if pack is None:
             lines = []
             for key, spec in sl.PACKS.items():
-                lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · 1 player ({spec['range'][0]}-{spec['range'][1]} OVR)\n`cspack {key}`")
+                lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · 1 player ({emojis.OVR} {spec['range'][0]}-{spec['range'][1]})\n`cspack {key}`")
             embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines), color=discord.Color.gold())
             embed.set_footer(text="Buy with cspack <type>, then open with csopen <type>. Duplicates turn into coins.")
             await ctx.send(embed=embed)
@@ -369,9 +365,9 @@ class EconomyCog(commands.Cog, name="Economy"):
         lines = [_card_line(by_key[k], "  🆕") for k in result["new"]]
         lines += [_card_line(by_key[k], "  ♻️ duplicate") for k in result["dupes"]]
         spec = sl.PACKS[key]
-        embed = discord.Embed(title=f"{spec['emoji']} {spec['label']} opened!", description="\n".join(lines), color=discord.Color.gold())
         if result["refund"]:
-            embed.set_footer(text=f"Duplicates gave you back {result['refund']:,} coins")
+            lines.append(f"\n♻️ Duplicates gave you back {economy.fmt_coins(result['refund'])}")
+        embed = discord.Embed(title=f"{spec['emoji']} {spec['label']} opened!", description="\n".join(lines), color=discord.Color.gold())
         await ctx.send(embed=embed)
 
     # -- buy / sell ------------------------------------------------------
@@ -400,8 +396,8 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         await _send_buysell(
             ctx, card,
-            f"Buy {esc(card['playername'])} ({card['ovr']} OVR) for {_plain_coins(price)}?\n"
-            f"Your coins: {_plain_coins(economy.get_balance(uid))}",
+            f"Buy {esc(card['playername'])} ({emojis.ovr(card['ovr'])}) for {_plain_coins(price)}?\n"
+            f"{emojis.COIN} Your coins: {_plain_coins(economy.get_balance(uid))}",
             do_buy,
         )
 
@@ -434,7 +430,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         await _send_buysell(
             ctx, card,
-            f"Sell {esc(card['playername'])} ({card['ovr']} OVR) for {_plain_coins(value)}?",
+            f"Sell {esc(card['playername'])} ({emojis.ovr(card['ovr'])}) for {_plain_coins(value)}?",
             do_sell,
         )
 
@@ -504,7 +500,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if board == "coins":
             for u in sorted(users, key=lambda u: -u["purse"])[:10]:
                 rows.append((u["team_name"], economy.fmt_coins(u["purse"])))
-            title = "💰 Richest teams"
+            title = f"{emojis.COIN} Richest teams"
         else:
             scored = []
             for u in users:
@@ -512,7 +508,7 @@ class EconomyCog(commands.Cog, name="Economy"):
                 if len(cards) == economy.XI_SIZE:
                     scored.append((sl.average_ovr(cards), u["team_name"]))
             for ovr, name in sorted(scored, reverse=True)[:10]:
-                rows.append((name, f"OVR {ovr}"))
+                rows.append((name, emojis.ovr(ovr)))
             title = "🏆 Strongest XIs"
         if not rows:
             await ctx.send("No teams on the leaderboard yet.")
