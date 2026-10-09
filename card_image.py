@@ -50,7 +50,7 @@ def _find_font(name: str) -> Path:
 FONT_DIR = _HERE / "fonts"
 # Drop bold display TTFs in cardmaker/fonts/ with these exact names, or the
 # code falls back to Pillow's built-in font (works, but looks plain).
-FONT_DISPLAY_BOLD = _find_font("display_bold.ttf")     # stat numbers / OVR (Bebas Neue)
+FONT_DISPLAY_BOLD = _find_font("display_bold.ttf")     # stat numbers / OVR (Jersey M54)
 FONT_LABEL = _find_font("label.ttf")                   # small caps labels
 # Display name (top-left) ONLY: Montserrat ExtraBold. Put Montserrat-ExtraBold.ttf in the
 # repo root renamed to name_font.ttf. If the file is missing the name falls back to display_bold.ttf.
@@ -75,9 +75,9 @@ NAME_MIN_SIZE = 30
 
 STAT_LEFT_CENTER = (150, 1290)   # left hexagon number
 STAT_RIGHT_CENTER = (890, 1290)  # right hexagon number
-STAT_NUMBER_SIZE = 70
-STAT_LABEL_SIZE = 30
-STAT_LABEL_OFFSET_Y = 55         # label sits this many px below the number
+STAT_NUMBER_SIZE = 160
+STAT_LABEL_SIZE = 40
+STAT_LABEL_OFFSET_Y = 105         # label sits this many px below the number
 
 ROLE_CENTER = (518, 1200)        # role word (BATTER / BOWLER / WICKETKEEPER...) alone in the top centre strip
 ROLE_SIZE = 26
