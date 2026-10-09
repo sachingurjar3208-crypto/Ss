@@ -204,9 +204,9 @@ class TradeView(OwnedView):
 
 # Custom emojis for the reward messages (developer-portal emojis).
 REWARD_EMOJI = {
-    "daily":   "<:Daily:1554697281855430666>",
-    "weekly":  "<:Weeklypack:1554697293092094065>",
-    "monthly": "<:Monthlypack:1554698034800099369>",
+    "daily":   "<:Dailypack:1558139740786528368>",
+    "weekly":  "<:Weeklypack:1558138384675905536>",
+    "monthly": "<:Monthlypack:1558138440208486440>",
 }
 
 
@@ -224,7 +224,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         packs = economy.get_packs(ctx.author.id)
         pack_txt = ", ".join(f"{sl.PACKS[t]['emoji']} {n}× {sl.PACKS[t]['label']}" for t, n in packs.items() if t in sl.PACKS)
         await ctx.send(
-            f"💰 Purse: **{economy.fmt_coins(economy.get_balance(ctx.author.id))}**"
+            f"Purse: **{economy.fmt_coins(economy.get_balance(ctx.author.id))}**"
             + (f"\n📦 Unopened: {pack_txt}" if pack_txt else "")
         )
 
@@ -261,7 +261,7 @@ class EconomyCog(commands.Cog, name="Economy"):
                 )
             nxt = economy.STREAK_EVERY - streak % economy.STREAK_EVERY
             lines.append(
-                f"🔥 Streak: **{streak}** day(s) — next streak bonus in **{nxt}** day(s). "
+                f"<:Streak:1558139736617390292> Streak: **{streak}** day(s) — next streak bonus in **{nxt}** day(s). "
                 f"Miss a day and it restarts from 1!"
             )
         if res["card"]:
@@ -504,7 +504,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if board == "coins":
             for u in sorted(users, key=lambda u: -u["purse"])[:10]:
                 rows.append((u["team_name"], economy.fmt_coins(u["purse"])))
-            title = "💰 Richest teams"
+            title = "<:CSCoin:1558139683702055062> Richest teams"
         else:
             scored = []
             for u in users:
@@ -513,7 +513,7 @@ class EconomyCog(commands.Cog, name="Economy"):
                     scored.append((sl.average_ovr(cards), u["team_name"]))
             for ovr, name in sorted(scored, reverse=True)[:10]:
                 rows.append((name, f"OVR {ovr}"))
-            title = "🏆 Strongest XIs"
+            title = "<:OVR:1558139691482751066> Strongest XIs"
         if not rows:
             await ctx.send("No teams on the leaderboard yet.")
             return

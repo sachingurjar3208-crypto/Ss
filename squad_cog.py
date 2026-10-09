@@ -81,7 +81,7 @@ def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
         if card is None:
             lines.append(f"`{slot:>2}.` — empty —")
             continue
-        badge = " ©️" if card["playername_key"] == cap_key else ""
+        badge = " <:Captain:1558139695177932951>" if card["playername_key"] == cap_key else ""
         lines.append(
             f"`{slot:>2}.` {sl.card_emoji(card)} **{esc(card['playername'])}** · "
             f"{card['ovr']} · {ROLES.get(card_db.effective_role(card), '?')}{badge}"
@@ -120,7 +120,7 @@ class SquadView(OwnedView):
             for c in chunk
         ] or ["No players yet."]
         embed = discord.Embed(
-            title=f"📋 {esc(self.owner_name)} — Squad ({len(self.cards)} players)",
+            title=f"<:Squademoji:1558139700156571801> {esc(self.owner_name)} — Squad ({len(self.cards)} players)",
             description="\n".join(lines),
             color=discord.Color.green(),
         )
@@ -389,7 +389,7 @@ class SquadCog(commands.Cog, name="Squad"):
             desc += "\n\n**Playstyles**\n" + "\n".join(
                 f"• **{esc(s)}** — {esc(NARRATIVES.get(s, ''))}" for s in styles
             )
-        desc += f"\n\n💰 Buy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
+        desc += f"\n\nBuy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
         embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
         await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
@@ -693,7 +693,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if err:
             await ctx.send(f"❌ {err}")
             return
-        await ctx.send(f"©️ **{esc(card['playername'])}** is now your captain.")
+        await ctx.send(f"<:Captain:1558139695177932951> **{esc(card['playername'])}** is now your captain.")
 
     # -- team name -------------------------------------------------------
     @commands.command(name="csteamname")
@@ -730,14 +730,17 @@ class SquadCog(commands.Cog, name="Squad"):
         except Exception:
             form = []
         wins = sum(1 for m in form if m["won"])
-        form_txt = " ".join("🟩" if m["won"] else "🟥" for m in form) or "No matches yet"
+        form_txt = " ".join(
+            "<:Wonprofile:1558139744008020088>" if m["won"] else "<:Lossprofile:1558139747275243643>"
+            for m in form
+        ) or "No matches yet"
         embed = discord.Embed(title=f"👤 {esc(user['team_name'])}", color=discord.Color.blurple())
         embed.set_author(name=esc(target.display_name), icon_url=target.display_avatar.url)
-        embed.add_field(name="💰 Purse", value=economy.fmt_coins(user["purse"]))
-        embed.add_field(name="📊 XI OVR", value=str(sl.average_ovr(cards)))
-        embed.add_field(name="©️ Captain", value=esc(cap["playername"]) if cap else "Not set")
-        embed.add_field(name="🃏 Players", value=str(len(economy.owned_keys(target.id))))
-        embed.add_field(name="🔥 Daily streak", value=str(user["daily_streak"]))
+        embed.add_field(name="Purse", value=economy.fmt_coins(user["purse"]))
+        embed.add_field(name="<:OVR:1558139691482751066> XI OVR", value=str(sl.average_ovr(cards)))
+        embed.add_field(name="<:Captain:1558139695177932951> Captain", value=esc(cap["playername"]) if cap else "Not set")
+        embed.add_field(name="<:Squad:1558139688231903322> Players", value=str(len(economy.owned_keys(target.id))))
+        embed.add_field(name="<:Streak:1558139736617390292> Daily streak", value=str(user["daily_streak"]))
         embed.add_field(name=f"Form (last {len(form)})", value=f"{form_txt}\n{wins} win(s)" if form else form_txt)
         await ctx.send(embed=embed)
 

@@ -66,7 +66,7 @@ def streak_bonus(streak: int) -> int:
 
 
 def fmt_coins(n: int) -> str:
-    return f"{int(n):,} 🪙"
+    return f"{int(n):,} <:CSCoin:1558139683702055062>"
 
 
 # ── Connection / transaction helpers ────────────────────────────────────────
