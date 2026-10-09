@@ -612,6 +612,31 @@ def list_panels() -> list[str]:
         return [r["pathname"] for r in rows]
 
 
+def cards_using_panel(pathname: str) -> list[str]:
+    """Playernames of the cards currently set to this panel overlay."""
+    key = pathname.strip().lower()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT playername FROM cards WHERE LOWER(panel_image) = ?", (key,)
+        ).fetchall()
+        return [r["playername"] for r in rows]
+
+
+def reassign_cards_panel(old_pathname: str, new_pathname: str) -> int:
+    """Point every card using old_pathname's panel at new_pathname instead.
+    Returns how many rows changed. Position/size offsets are left as-is,
+    same as reassign_cards_background, since the artwork underneath keeps
+    the same shape (it's physically copied onto new_pathname's file)."""
+    old_key = old_pathname.strip().lower()
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE cards SET panel_image = ?, updated_at = ? WHERE LOWER(panel_image) = ?",
+            (new_pathname.strip(), time.time(), old_key),
+        )
+        conn.commit()
+        return cur.rowcount
+
+
 def remove_panel(pathname: str) -> sqlite3.Row | None:
     """Delete a panel asset (used by /panelremover) and return the row that
     was deleted (or None if it didn't exist), so the caller can also clean

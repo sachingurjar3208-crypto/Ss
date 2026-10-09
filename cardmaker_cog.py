@@ -16,6 +16,7 @@
     /paneladder     add a new stats-panel overlay image (sits IN FRONT of the foreground)
     /panelremover   remove a stats-panel overlay from the panel list
     /panelfixer     move / resize a card's stats-panel overlay
+    /panelmerge     move a panel's artwork onto another pathname, then retire the first one (same as /bgmerge)
 
 Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 """
@@ -44,6 +45,7 @@ from card_db import (
     remove_playstyle_logo, cards_using_playstyle_logo,
     panel_exists, get_panel, add_panel, list_panels, remove_panel,
     update_panel_layout, set_card_panel,
+    cards_using_panel, reassign_cards_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
@@ -599,6 +601,83 @@ class CardMakerCog(commands.Cog):
 
         add_background(pathname, link, str(local_path), interaction.user.id)
         await interaction.followup.send(f"✅ Background **{pathname}** added. Pick it in `/cardmaker`'s `background` option.")
+
+    # ── /panelmerge ──────────────────────────────────────────────────
+    @app_commands.command(
+        name="panelmerge",
+        description="Move a panel's artwork onto another pathname, then retire the first one",
+    )
+    @app_commands.describe(
+        keep="Pathname that survives (e.g. csbase) — every card ends up using this name",
+        replace_with="Pathname whose artwork takes over `keep`'s slot, then gets deleted (e.g. tester)",
+    )
+    @app_commands.autocomplete(keep=panel_autocomplete, replace_with=panel_autocomplete)
+    @is_owner()
+    async def panelmerge(self, interaction: discord.Interaction, keep: str, replace_with: str):
+        await interaction.response.defer()
+
+        if keep.strip().lower() == replace_with.strip().lower():
+            await interaction.followup.send("❌ `keep` and `replace_with` can't be the same pathname.")
+            return
+
+        keep_panel = get_panel(keep)
+        new_panel = get_panel(replace_with)
+        if keep_panel is None or new_panel is None:
+            names = list_panels()
+            hint = ", ".join(names) if names else "(none added yet)"
+            missing = keep if keep_panel is None else replace_with
+            await interaction.followup.send(f"❌ Unknown panel `{missing}`.\nAvailable: {hint}")
+            return
+
+        # Cards already on `keep` (will be redrawn with the new art) and cards
+        # on `replace_with` (will be switched over to `keep`'s name).
+        already_on_keep = cards_using_panel(keep_panel["pathname"])
+
+        # 1) Physically overwrite keep's panel file with replace_with's artwork,
+        #    so the `keep` pathname now points at the new design permanently.
+        try:
+            shutil.copyfile(new_panel["local_path"], keep_panel["local_path"])
+        except OSError as e:
+            await interaction.followup.send(f"❌ Could not copy artwork onto `{keep_panel['pathname']}`: `{e}`")
+            return
+
+        # 2) Point every card that was on replace_with at keep instead.
+        moved_count = reassign_cards_panel(new_panel["pathname"], keep_panel["pathname"])
+
+        # 3) Retire replace_with — its art now lives under `keep`.
+        remove_panel(new_panel["pathname"])
+        try:
+            os.remove(new_panel["local_path"])
+        except OSError:
+            pass
+
+        # 4) Redraw every card now sitting on `keep` so their generated PNG
+        #    picks up the new artwork. Cards with a dead foreground link will
+        #    fail silently here — that's a separate, pre-existing problem.
+        affected = sorted(set(already_on_keep) | set(cards_using_panel(keep_panel["pathname"])))
+        refreshed, skipped = [], []
+        for name in affected:
+            if await _regenerate_silently(name):
+                refreshed.append(name)
+            else:
+                skipped.append(name)
+
+        summary = [
+            f"🔀 `{new_panel['pathname']}` merged into `{keep_panel['pathname']}` and removed.",
+            f"📇 {moved_count} card(s) switched from `{new_panel['pathname']}` to `{keep_panel['pathname']}`.",
+            f"🔄 Redrew {len(refreshed)}/{len(affected)} card(s) using `{keep_panel['pathname']}`.",
+        ]
+        if skipped:
+            summary.append(
+                f"⚠️ Skipped {len(skipped)} (likely a dead `foregroundlink` — fix with `/editcard` then "
+                f"it'll pick up the new panel automatically): " + ", ".join(skipped)[:800]
+            )
+
+        text = "\n".join(summary)
+        if len(text) > 1900:
+            text = text[:1900] + "…"
+        file = discord.File(io.BytesIO("\n".join(affected).encode() or b"(none)"), filename="affected_cards.txt")
+        await interaction.followup.send(content=text, file=file)
 
     # ── /paneladder ──────────────────────────────────────────────────
     @app_commands.command(
