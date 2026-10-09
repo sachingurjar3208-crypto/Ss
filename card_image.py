@@ -122,11 +122,17 @@ COUNTRY_LOGO_OFFSET_Y = -44      # logo centre is this many px above the country
 # default since a "stats panel" graphic usually spans the card. ──
 PANEL_BOX = {"x": 0, "y": 1080, "w": CANVAS_W, "h": CANVAS_H - 1080}
 
-# ── Playstyle logos: two circles in the centre band, below the role word. ──
-LOGO_CENTER_1 = (400, 1280)      # left circle  (used for slot 1 when there are 2 logos)
-LOGO_CENTER_2 = (636, 1280)      # right circle (slot 2)
-LOGO_CENTER_SINGLE = (518, 1280) # a lone logo sits in the middle
+# ── Playstyle logos (Narrative 1 / Narrative 2). ──
+# Old spots were (400, 1280) and (636, 1280). New permanent default spots:
+#   Narrative 1: 65px up, 150px left  -> (400-150, 1280-65) = (250, 1215)
+#   Narrative 2: 65px up, 150px right -> (636+150, 1280-65) = (786, 1215)
+# Narrative 1 ALWAYS uses its own spot and Narrative 2 ALWAYS uses its own spot
+# (even when a card has only one logo). Every refresh / edit redraws them here.
+# /logofixer still works on top of this (its dx/dy/size is added to these defaults).
+LOGO_CENTER_1 = (250, 1215)      # Narrative 1 logo
+LOGO_CENTER_2 = (786, 1215)      # Narrative 2 logo
 LOGO_BOX = 110                   # logo is fitted inside a LOGO_BOX x LOGO_BOX square
+LOGO_BASE_SCALE_PCT = 75         # both logos 25% smaller than before (100 -> 75)
 
 
 def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -464,22 +470,20 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
         hand_center = (HAND_CENTER[0] + hand_dx, HAND_CENTER[1] + hand_dy)
         _draw_centered(draw, hand_center, hand_word, _font(FONT_LABEL, hand_size), WHITE)
 
-    # ── Playstyle logos (max 2): one sits in the middle, two fill the circles ──
+    # ── Playstyle logos (max 2): Narrative 1 left spot, Narrative 2 right spot ──
     slots = []
     for slot in (1, 2):
         logo = _load_logo(_col(card_row, f"playstyle{slot}"))
         if logo is not None:
             slots.append((slot, logo))
-    if len(slots) == 2:
-        centers = {1: LOGO_CENTER_1, 2: LOGO_CENTER_2}
-    else:
-        centers = {s: LOGO_CENTER_SINGLE for s, _ in slots}
+    # Slot 1 always sits at LOGO_CENTER_1, slot 2 always at LOGO_CENTER_2.
+    centers = {1: LOGO_CENTER_1, 2: LOGO_CENTER_2}
     for slot, logo in slots:
         _draw_logo(
             canvas, logo, centers[slot],
             _col(card_row, f"logo{slot}_dx", 0),
             _col(card_row, f"logo{slot}_dy", 0),
-            _col(card_row, f"logo{slot}_scale", 100),
+            _col(card_row, f"logo{slot}_scale", 100) * LOGO_BASE_SCALE_PCT / 100,
         )
 
     # ── Country (emoji glyphs don't render via truetype fonts in Pillow,
