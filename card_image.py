@@ -123,16 +123,21 @@ COUNTRY_LOGO_OFFSET_Y = -44      # logo centre is this many px above the country
 PANEL_BOX = {"x": 0, "y": 1080, "w": CANVAS_W, "h": CANVAS_H - 1080}
 
 # ── Playstyle logos (Narrative 1 / Narrative 2). ──
-# Old spots were (400, 1280) and (636, 1280). New permanent default spots:
-#   Narrative 1: 65px up, 150px left  -> (400-150, 1280-65) = (250, 1215)
-#   Narrative 2: 65px up, 150px right -> (636+150, 1280-65) = (786, 1215)
-# Narrative 1 ALWAYS uses its own spot and Narrative 2 ALWAYS uses its own spot
-# (even when a card has only one logo). Every refresh / edit redraws them here.
-# /logofixer still works on top of this (its dx/dy/size is added to these defaults).
-LOGO_CENTER_1 = (250, 1215)      # Narrative 1 logo
-LOGO_CENTER_2 = (786, 1215)      # Narrative 2 logo
+# Taken from the AB De Villiers card's manual values (logo1 x+70 y-1 size 90%,
+# logo2 x-85 y0 size 97% on the old spots 400/636,1280) with the requested change:
+#   Narrative 1: 65 up, 150 left, 25 smaller  -> centre (320, 1214), size 65%
+#   Narrative 2: 65 up, 150 right, 25 smaller -> centre (701, 1215), size 72%
+# Size is in % of LOGO_BOX (110px): 65% = ~72px, 72% = ~79px (longest side).
+# Narrative 1 ALWAYS uses spot 1 and Narrative 2 ALWAYS spot 2, even with one logo.
+LOGO_CENTER_1 = (320, 1214)
+LOGO_CENTER_2 = (701, 1215)
+LOGO_SCALE_1 = 65
+LOGO_SCALE_2 = 72
 LOGO_BOX = 110                   # logo is fitted inside a LOGO_BOX x LOGO_BOX square
-LOGO_BASE_SCALE_PCT = 75         # both logos 25% smaller than before (100 -> 75)
+# False = every card (refresh / edit / new) ALWAYS puts both logos exactly at the spots above,
+# the old per-card /logofixer values saved in the database are ignored.
+# True  = /logofixer values are added on top of these spots again.
+LOGO_USE_MANUAL_FIXER = False
 
 
 def _font(path: Path, size: int) -> ImageFont.FreeTypeFont:
@@ -478,13 +483,15 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
             slots.append((slot, logo))
     # Slot 1 always sits at LOGO_CENTER_1, slot 2 always at LOGO_CENTER_2.
     centers = {1: LOGO_CENTER_1, 2: LOGO_CENTER_2}
+    base_scale = {1: LOGO_SCALE_1, 2: LOGO_SCALE_2}
     for slot, logo in slots:
-        _draw_logo(
-            canvas, logo, centers[slot],
-            _col(card_row, f"logo{slot}_dx", 0),
-            _col(card_row, f"logo{slot}_dy", 0),
-            _col(card_row, f"logo{slot}_scale", 100) * LOGO_BASE_SCALE_PCT / 100,
-        )
+        if LOGO_USE_MANUAL_FIXER:
+            ldx = _col(card_row, f"logo{slot}_dx", 0)
+            ldy = _col(card_row, f"logo{slot}_dy", 0)
+            lsc = base_scale[slot] * _col(card_row, f"logo{slot}_scale", 100) / 100
+        else:
+            ldx, ldy, lsc = 0, 0, base_scale[slot]
+        _draw_logo(canvas, logo, centers[slot], ldx, ldy, lsc)
 
     # ── Country (emoji glyphs don't render via truetype fonts in Pillow,
     # so we draw the country name; the emoji is still stored in the DB and
