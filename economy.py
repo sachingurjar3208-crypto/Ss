@@ -66,7 +66,7 @@ def streak_bonus(streak: int) -> int:
 
 
 def fmt_coins(n: int) -> str:
-    return emojis.coins(n)
+    return f"{int(n):,} 🪙"
 
 
 # ── Connection / transaction helpers ────────────────────────────────────────

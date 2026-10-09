@@ -19,7 +19,6 @@ from discord.ext import commands
 
 import card_cache
 import card_db
-import emojis
 import economy
 import security
 import squad_logic as sl
@@ -82,22 +81,22 @@ def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
         if card is None:
             lines.append(f"`{slot:>2}.` — empty —")
             continue
-        badge = f" {emojis.CAPTAIN}" if card["playername_key"] == cap_key else ""
+        badge = " ©️" if card["playername_key"] == cap_key else ""
         lines.append(
             f"`{slot:>2}.` {sl.card_emoji(card)} **{esc(card['playername'])}** · "
             f"{card['ovr']} · {ROLES.get(card_db.effective_role(card), '?')}{badge}"
         )
     cards = sl.xi_cards(member.id)
     embed = discord.Embed(
-        title=f"{emojis.SQUAD_GROUP} {esc(user_row['team_name'])} — Playing XI",
+        title=f"🏏 {esc(user_row['team_name'])} — Playing XI",
         description="\n".join(lines),
         color=discord.Color.blue(),
     )
     problem = sl.xi_problem(member.id)
-    embed.description += (
-        f"\n\n{emojis.OVR} **Team OVR {sl.average_ovr(cards)}**"
+    embed.set_footer(text=(
+        f"Team OVR {sl.average_ovr(cards)}"
         + (f" • ⚠️ {problem}" if problem else " • ✅ Ready to play")
-    )
+    ))
     return embed
 
 
@@ -121,7 +120,7 @@ class SquadView(OwnedView):
             for c in chunk
         ] or ["No players yet."]
         embed = discord.Embed(
-            title=f"{emojis.SQUAD} {esc(self.owner_name)} — Squad ({len(self.cards)} players)",
+            title=f"📋 {esc(self.owner_name)} — Squad ({len(self.cards)} players)",
             description="\n".join(lines),
             color=discord.Color.green(),
         )
@@ -315,7 +314,7 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         await ctx.send(
             f"{DEBUT_EMOJI} Welcome, **{esc(ctx.author.display_name)}**! Your team **{esc(default)}** is created "
-            f"with {emojis.COIN} **{economy.fmt_coins(economy.START_PURSE)}**.\n"
+            f"with **{economy.fmt_coins(economy.START_PURSE)}**.\n"
             f"Next: `csstarterpack` to get your first players, then `csxi` to see your XI.\n"
             f"Change your team name with `csteamname <name>`."
         )
@@ -380,7 +379,7 @@ class SquadCog(commands.Cog, name="Squad"):
         from card_narratives import NARRATIVES
         styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
         desc = (
-            f"{emojis.OVR} **OVR {card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
+            f"{sl.card_emoji(card)} OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
             f"{ROLES.get(card_db.effective_role(card), '?')}"
             + (f" · {HANDS.get(card['batting_hand'], '')} bat" if card["batting_hand"] else "")
             + (f" · {card_db.effective_bowling_type(card)}" if card_db.effective_bowling_type(card) else "")
@@ -390,7 +389,7 @@ class SquadCog(commands.Cog, name="Squad"):
             desc += "\n\n**Playstyles**\n" + "\n".join(
                 f"• **{esc(s)}** — {esc(NARRATIVES.get(s, ''))}" for s in styles
             )
-        desc += f"\n\n{emojis.COIN} Buy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
+        desc += f"\n\n💰 Buy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
         embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
         await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
@@ -428,16 +427,16 @@ class SquadCog(commands.Cog, name="Squad"):
             rows.append(f"{bl}: {bv}".ljust(width) + f"{wl}: {wv}")
         table = "\n".join(rows)
 
-        header = f"{emojis.OVR} **OVR {card['ovr']}**  ·  BAT **{card['bat']}**  ·  BOWL **{card['bowl']}**"
+        header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
         lines = [header]
-        lines.append(f"Owner: **{esc(ctx.author.display_name)}**")
-        lines.append(f"{emojis.COIN} Value: **{economy.fmt_coins(sl.sell_value(card))}**")
+        lines.append(f"Owner: {esc(ctx.author.display_name)}")
+        lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
         styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
         if styles:   # only cards that have a playstyle/narrative
-            lines.append("Playstyle: **" + " · ".join(styles) + "**")
+            lines.append("Playstyle: " + " · ".join(styles))
         embed = discord.Embed(
             title=f"Player Stats: {esc(card['playername'])}",
-            description="\n".join(lines) + "\n\n```\n" + table + "\n```",
+            description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
             color=discord.Color.blurple(),
         )
         embed.set_footer(text="Your personal stats with this card.")
@@ -484,17 +483,17 @@ class SquadCog(commands.Cog, name="Squad"):
                 except discord.HTTPException:
                     owner = "Unknown"
 
-        header = f"{emojis.OVR} **OVR {card['ovr']}**  ·  BAT **{card['bat']}**  ·  BOWL **{card['bowl']}**"
+        header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
         lines = [header]
         if owner:
-            lines.append(f"Current owner: **{esc(owner)}**")
-        lines.append(f"{emojis.COIN} Value: **{economy.fmt_coins(sl.sell_value(card))}**")
+            lines.append(f"Current owner: {esc(owner)}")
+        lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
         styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
         if styles:   # only cards that have a playstyle/narrative
-            lines.append("Playstyle: **" + " · ".join(styles) + "**")
+            lines.append("Playstyle: " + " · ".join(styles))
         embed = discord.Embed(
             title=f"Universal Stats: {esc(card['playername'])}",
-            description="\n".join(lines) + "\n\n```\n" + table + "\n```",
+            description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
             color=discord.Color.gold(),
         )
         embed.set_footer(text="All-time stats across every owner (premium).")
@@ -694,7 +693,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if err:
             await ctx.send(f"❌ {err}")
             return
-        await ctx.send(f"{emojis.CAPTAIN} **{esc(card['playername'])}** is now your **Captain**.")
+        await ctx.send(f"©️ **{esc(card['playername'])}** is now your captain.")
 
     # -- team name -------------------------------------------------------
     @commands.command(name="csteamname")
@@ -731,15 +730,14 @@ class SquadCog(commands.Cog, name="Squad"):
         except Exception:
             form = []
         wins = sum(1 for m in form if m["won"])
-        # W / L emojis are used ONLY here, in the profile.
-        form_txt = " ".join(emojis.WON_PROFILE if m["won"] else emojis.LOSS_PROFILE for m in form) or "No matches yet"
-        embed = discord.Embed(title=f"{emojis.SQUAD_GROUP} {esc(user['team_name'])}", color=discord.Color.blurple())
+        form_txt = " ".join("🟩" if m["won"] else "🟥" for m in form) or "No matches yet"
+        embed = discord.Embed(title=f"👤 {esc(user['team_name'])}", color=discord.Color.blurple())
         embed.set_author(name=esc(target.display_name), icon_url=target.display_avatar.url)
-        embed.add_field(name=f"{emojis.COIN} Purse", value=economy.fmt_coins(user["purse"]))
-        embed.add_field(name=f"{emojis.OVR} XI OVR", value=str(sl.average_ovr(cards)))
-        embed.add_field(name=f"{emojis.CAPTAIN} Captain", value=esc(cap["playername"]) if cap else "Not set")
-        embed.add_field(name=f"{emojis.SQUAD} Players", value=str(len(economy.owned_keys(target.id))))
-        embed.add_field(name=f"{emojis.STREAK} Daily streak", value=str(user["daily_streak"]))
+        embed.add_field(name="💰 Purse", value=economy.fmt_coins(user["purse"]))
+        embed.add_field(name="📊 XI OVR", value=str(sl.average_ovr(cards)))
+        embed.add_field(name="©️ Captain", value=esc(cap["playername"]) if cap else "Not set")
+        embed.add_field(name="🃏 Players", value=str(len(economy.owned_keys(target.id))))
+        embed.add_field(name="🔥 Daily streak", value=str(user["daily_streak"]))
         embed.add_field(name=f"Form (last {len(form)})", value=f"{form_txt}\n{wins} win(s)" if form else form_txt)
         await ctx.send(embed=embed)
 
@@ -750,17 +748,16 @@ class SquadCog(commands.Cog, name="Squad"):
         """List the commands."""
         embed = discord.Embed(title="🏏 CricStar Help", color=discord.Color.orange())
         embed.add_field(name="Start", value=(
-            f"`csdebut` create team\n`csstarterpack` first players\n"
-            f"{emojis.DAILY} `csdaily` · {emojis.WEEKLY} `csweekly` (Premium) · {emojis.MONTHLY} `csmonthly` — free {emojis.COIN} coins + player"
+            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player"
         ), inline=False)
-        embed.add_field(name=f"{emojis.SQUAD} Squad", value=(
-            f"`cssquad` `csshow <player>` `csxi` `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
-            f"`csswap 3 5` or `csswap A | B`\n{emojis.CAPTAIN} `cscaptain <player>` `csteamname <name>` `csprofile`\n"
+        embed.add_field(name="Squad", value=(
+            "`cssquad` `csshow <player>` `csxi` `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
+            "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`\n"
             "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)\n"
             "`cssubs` view Impact Player subs · `cssubs add/remove <player>` · `cssubs clear`"
         ), inline=False)
-        embed.add_field(name=f"{emojis.COIN} Economy", value=(
-            "`csbal` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"
+        embed.add_field(name="Economy", value=(
+            "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"
             "`cstrade @user my player | their player` `csleaderboard`"
         ), inline=False)
         embed.add_field(name="Play", value="`csmp @user <overs>` challenge • `cscancel` cancel match", inline=False)

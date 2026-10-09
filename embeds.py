@@ -1,6 +1,5 @@
 import os
 import discord
-import emojis
 from game import GameState, _pname
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "cricstar_logo.png")
@@ -59,7 +58,7 @@ def build_playing_xi_embed(team: dict) -> discord.Embed:
     ovr  = team.get("ovr", 80)
     embed = discord.Embed(
         title=team.get("name", "Team"),
-        description=f"{emojis.OVR} **{ovr}** • CHEM **{chem}**",
+        description=f"OVR:**{ovr}** • CHEM:**{chem}**",
         color=discord.Color.dark_blue(),
     )
 
