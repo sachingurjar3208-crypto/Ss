@@ -75,9 +75,9 @@ NAME_MIN_SIZE = 30
 
 STAT_LEFT_CENTER = (150, 1290)   # left hexagon number
 STAT_RIGHT_CENTER = (890, 1290)  # right hexagon number
-STAT_NUMBER_SIZE = 160
+STAT_NUMBER_SIZE = 260
 STAT_LABEL_SIZE = 40
-STAT_LABEL_OFFSET_Y = 105         # label sits this many px below the number
+STAT_LABEL_OFFSET_Y = 65         # label sits this many px below the number (BATTING/BOWLING, moved up 40px)
 
 ROLE_CENTER = (518, 1200)        # role word (BATTER / BOWLER / WICKETKEEPER...) alone in the top centre strip
 ROLE_SIZE = 26
@@ -88,6 +88,7 @@ ROLE_SIZE = 26
 OVR_CENTER = (518, 1320)         # OVR number centre (fixed px for every card)
 OVR_SIZE = STAT_NUMBER_SIZE      # same size as the BAT / BOWL numbers
 OVR_LABEL_TEXT = "OVR"
+OVR_LABEL_OFFSET_Y = 40          # OVR word sits this many px below the number (moved up 65px)
 
 COUNTRY_CENTER = (518, 1465)     # bottom strip: "🇮🇳 India" (moved 10px down)
 COUNTRY_SIZE = 30
@@ -453,7 +454,7 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
     _draw_centered(draw, ovr_center, str(card_row["ovr"]), ovr_font, GOLD)
     _draw_centered(
         draw,
-        (ovr_center[0], ovr_center[1] + STAT_LABEL_OFFSET_Y),
+        (ovr_center[0], ovr_center[1] + OVR_LABEL_OFFSET_Y),
         OVR_LABEL_TEXT, label_font, WHITE,
     )
 
