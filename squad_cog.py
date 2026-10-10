@@ -527,6 +527,37 @@ class SquadCog(commands.Cog, name="Squad"):
         view = AutoXiView(ctx.author.id) if target.id == ctx.author.id else None
         await ctx.send(embed=_xi_embed(target, user), view=view)
 
+    # -- XI image + team OVR ----------------------------------------------
+    @commands.command(name="csovr")
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def csovr(self, ctx: commands.Context):
+        """Your real playing XI as an image, with the team OVR."""
+        if not await _need_debut(ctx):
+            return
+        user = economy.get_user(ctx.author.id)
+        cards = await asyncio.to_thread(sl.xi_cards, ctx.author.id)   # batting order, current card images
+        if not cards:
+            await ctx.send("❌ Your XI is empty. Use `csstarterpack` for your first players, or `csautoxi`.")
+            return
+        team_ovr = sl.average_ovr(cards)
+        problem = sl.xi_problem(ctx.author.id)
+        embed = discord.Embed(
+            title="🏏 Playing XI",
+            description=f"Team **{esc(user['team_name'])}** · Team OVR **{team_ovr}** · {len(cards)} players",
+            color=discord.Color.blue(),
+        )
+        embed.set_footer(text=(f"⚠️ {problem}" if problem else "✅ Ready to play") + " • Edit XI: csswap • csautoxi")
+        buf = None
+        try:
+            buf = await asyncio.to_thread(build_team_image, cards, user["team_name"], team_ovr)
+        except Exception as e:
+            print(f"[csovr] collage failed: {e}")
+        if buf is not None:
+            embed.set_image(url=f"attachment://{TEAM_IMG_NAME}")
+            await ctx.send(embed=embed, file=discord.File(buf, filename=TEAM_IMG_NAME))
+        else:   # image failed -> show the normal text XI instead
+            await ctx.send(embed=_xi_embed(ctx.author, user))
+
     @commands.command(name="csautoxi")
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def csautoxi(self, ctx: commands.Context):
@@ -766,7 +797,7 @@ class SquadCog(commands.Cog, name="Squad"):
             "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player"
         ), inline=False)
         embed.add_field(name="Squad", value=(
-            "`cssquad` `csshow <player>` `csxi` `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
+            "`cssquad` `csshow <player>` `csxi` `csovr` XI image + OVR · `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
             "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`\n"
             "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)\n"
             "`cssubs` view Impact Player subs · `cssubs add/remove <player>` · `cssubs clear`"
