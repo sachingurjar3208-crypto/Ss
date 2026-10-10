@@ -1,0 +1,13 @@
+*.db
+*.db-wal
+*.db-shm
+.env
+venv/
+__pycache__/
+*.pyc
+maintenance.json
+backgrounds/
+foregrounds/
+generated/
+panels/
+playstyle_logos/
