@@ -216,6 +216,8 @@ class GameState:
         self.batsman_stats: dict[str, dict] = {}
         self.bowler_stats: dict[str, dict] = {}
         self.dismissed: list[str] = []
+        self.inn1_snapshot: dict | None = None
+        self.match_record_id: int | None = None
         self.bowler_ball_count: dict[str, int] = {}
         self.bowler_maidens: dict[str, int] = {}
         self.last_over_bowler: str | None = None
@@ -868,6 +870,16 @@ class GameState:
         return False
 
     def start_second_innings(self) -> None:
+        # Keep innings-1 stats for the end-of-match summary card (they are reset below).
+        import copy as _copy
+        self.inn1_snapshot = {
+            "batsman_stats": _copy.deepcopy(self.batsman_stats),
+            "bowler_stats": _copy.deepcopy(self.bowler_stats),
+            "bowler_ball_count": dict(self.bowler_ball_count),
+            "maidens": dict(self.bowler_maidens),
+            "dismissed": list(self.dismissed),
+            "overs": self.overs_str(),
+        }
         self.batting_user_id, self.bowling_user_id = (
             self.bowling_user_id,
             self.batting_user_id,

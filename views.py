@@ -212,6 +212,7 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
         else:
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
+            await _send_match_summary(channel, game)
             active_games.pop(channel.id, None)
         return True
 
@@ -341,7 +342,7 @@ def _save_match_record(game):
         winner_id, loser_id = inn1_uid, inn2_uid
         winner_score, loser_score = t1, t2
     try:
-        _record_match_result(winner_id, loser_id, winner_score, loser_score, game.overs)
+        game.match_record_id = _record_match_result(winner_id, loser_id, winner_score, loser_score, game.overs)
     except Exception as e:
         print(f"[match_records] Failed to save result: {e}")
     # Economy: reward winner and loser with coins
@@ -771,6 +772,16 @@ def _drs_overturn_chance(delivery_internal: str, shot_internal: str) -> float:
     if key in HIGH_RISK: return 0.15
     if key in LOW_RISK:  return 0.60
     return 0.40
+
+
+async def _send_match_summary(channel, game) -> None:
+    """Last message of a finished match: the Cricket Star SUMMARY card (never breaks the match end)."""
+    try:
+        from match_summary import build_summary_png
+        png = await asyncio.to_thread(build_summary_png, game)
+        await channel.send(file=discord.File(io.BytesIO(png), filename="match_summary.png"))
+    except Exception as e:
+        print(f"[summary] card failed: {type(e).__name__}: {e}")
 
 
 async def _get_card_image_bytes(player: dict) -> bytes | None:
@@ -1222,6 +1233,7 @@ async def _process_delivery(
                 await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
+                await _send_match_summary(channel, game)
                 active_games.pop(channel.id, None)
             return
 

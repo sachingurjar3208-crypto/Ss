@@ -98,6 +98,7 @@ def record_match_result(
     )
     conn.commit()
     conn.close()
+    return match_id
 
 
 # ── Queries ───────────────────────────────────────────────────────────────────

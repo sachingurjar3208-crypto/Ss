@@ -116,7 +116,8 @@ def generate_summary_card(data: dict) -> bytes:
         _shadow(d, (430, 98), venue, _fit(d, venue, _LAB, 30, 340), SOFT, anchor="mm")
     mid = f"MATCH #{data.get('match_id', '')}"
     _shadow(d, (1105, 58), mid, _fit(d, mid, _NAME, 44, 330), WHITE, anchor="mm")
-    fmt = f"{t1.get('max_overs', '20')} OVERS MATCH"
+    mo = str(t1.get('max_overs', '20'))
+    fmt = f"{mo} {'OVER' if mo == '1' else 'OVERS'} MATCH"
     _shadow(d, (1105, 98), fmt, _f(_LAB, 30), SOFT, anchor="mm")
 
     # section 1 (team1 batting, blue) + section 2 (team2 batting, red)
