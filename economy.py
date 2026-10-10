@@ -910,6 +910,48 @@ def reset_all_cards(user_id) -> int:
         return int(n)
 
 
+def reset_everything(user_id) -> dict:
+    """(Admin) Full wipe of a user's economy and collection: coins set to 0,
+    every card and pack removed, XI / captain / impact subs / pending cards cleared.
+    Team name and ban state are kept. Returns {"cards": n, "coins": old_purse}."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
+        old = int(row["purse"]) if row else 0
+        n = conn.execute("SELECT COUNT(*) FROM owned WHERE user_id = ?", (uid,)).fetchone()[0]
+        conn.execute("DELETE FROM owned WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
+        _ensure_impact_subs_table(conn)
+        conn.execute("DELETE FROM impact_subs WHERE user_id = ?", (uid,))
+        _ensure_pending_table(conn)
+        conn.execute("DELETE FROM pending_cards WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM packs WHERE user_id = ?", (uid,))
+        conn.execute("UPDATE users SET purse = 0, captain_key = NULL WHERE user_id = ?", (uid,))
+        if old:
+            conn.execute(
+                "INSERT INTO ledger (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, 0, ?)",
+                (uid, -old, "Admin full reset", time.time()),
+            )
+        return {"cards": int(n), "coins": old}
+
+
+def top_users(limit: int = 20, by: str = "coins") -> list[dict]:
+    """(Admin) Top users with their purse and card count.
+    by = "coins" or "cards". Each row: user_id, team_name, purse, cards."""
+    order = "cards DESC, u.purse DESC" if by == "cards" else "u.purse DESC, cards DESC"
+    conn = _conn()
+    try:
+        rows = conn.execute(
+            "SELECT u.user_id, u.team_name, u.purse, "
+            "(SELECT COUNT(*) FROM owned o WHERE o.user_id = u.user_id) AS cards "
+            f"FROM users u ORDER BY {order} LIMIT ?",
+            (int(limit),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # ── Impact Player subs (bench players nominated for in-match substitution) ──
 
 def get_impact_subs(user_id) -> dict[int, str]:

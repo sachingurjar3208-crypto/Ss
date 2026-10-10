@@ -3,7 +3,9 @@
     admin card give @user <card name>
     admin coin give @user <coins>
     admin coin remove @user <coins>
-    admin player reset @user all
+    admin player reset @user all      (cards only)
+    admin reset all @user             (coins -> 0 AND all cards removed)
+    admin user top [20-50] [coins|cards]   (owner / admin role only)
 """
 from __future__ import annotations
 
@@ -29,6 +31,15 @@ def admin_only():
     return commands.check(_has_admin_role)
 
 
+def owner_or_admin():
+    """Bot owner OR a member with an admin role."""
+    async def predicate(ctx: commands.Context) -> bool:
+        if await ctx.bot.is_owner(ctx.author) or _has_admin_role(ctx):
+            return True
+        raise commands.NotOwner("Only the bot owner or an admin can use this.")
+    return commands.check(predicate)
+
+
 class AdminCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -40,7 +51,9 @@ class AdminCog(commands.Cog):
             "`admin card give @user <card name>`\n"
             "`admin coin give @user <coins>`\n"
             "`admin coin remove @user <coins>`\n"
-            "`admin player reset @user all`"
+            "`admin player reset @user all`\n"
+            "`admin reset all @user`\n"
+            "`admin user top [20-50] [coins|cards]`"
         )
 
     # -- cards -----------------------------------------------------------
@@ -120,6 +133,61 @@ class AdminCog(commands.Cog):
             f"✅ Removed **{removed}** card(s) from {esc(member.display_name)}. "
             "Their XI and captain were cleared too."
         )
+
+    # -- full reset ------------------------------------------------------
+    @admin.group(name="reset", invoke_without_command=True)
+    @owner_or_admin()
+    async def reset(self, ctx: commands.Context):
+        await ctx.send("Usage: `admin reset all @user`")
+
+    @reset.command(name="all")
+    @owner_or_admin()
+    async def reset_all(self, ctx: commands.Context, member: discord.Member):
+        if member.bot:
+            await ctx.send("❌ Bots don't have an economy.")
+            return
+        if not economy.user_exists(member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        res = economy.reset_everything(member.id)
+        await ctx.send(
+            f"✅ Full reset for {esc(member.display_name)}: removed **{res['cards']}** card(s) "
+            f"and **{economy.fmt_coins(res['coins'])}**. Their packs, XI and captain were cleared too."
+        )
+
+    # -- user stats ------------------------------------------------------
+    @admin.group(name="user", invoke_without_command=True)
+    @owner_or_admin()
+    async def user(self, ctx: commands.Context):
+        await ctx.send("Usage: `admin user top [20-50] [coins|cards]`")
+
+    @user.command(name="top")
+    @owner_or_admin()
+    async def user_top(self, ctx: commands.Context, count: int = 20, by: str = "coins"):
+        by = by.lower()
+        if by not in ("coins", "cards"):
+            await ctx.send("Usage: `admin user top [20-50] [coins|cards]`")
+            return
+        count = max(1, min(50, count))
+        rows = economy.top_users(count, by)
+        if not rows:
+            await ctx.send("No users yet.")
+            return
+        lines = []
+        for i, r in enumerate(rows, 1):
+            lines.append(
+                f"`{i:>2}.` <@{r['user_id']}> · **{esc(r['team_name'])}**\n"
+                f"      🃏 **{r['cards']}** cards · {economy.fmt_coins(r['purse'])}"
+            )
+        title = f"Top {len(rows)} users by {by}"
+        # 25 users per embed keeps us well under Discord's 4096-char limit.
+        for start in range(0, len(lines), 25):
+            embed = discord.Embed(
+                title=title if start == 0 else f"{title} (cont.)",
+                description="\n".join(lines[start:start + 25]),
+                color=discord.Color.gold(),
+            )
+            await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
 
 async def setup(bot: commands.Bot):
