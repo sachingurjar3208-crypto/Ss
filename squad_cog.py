@@ -22,6 +22,7 @@ import card_db
 import economy
 import security
 import squad_logic as sl
+from squad_image import build_team_image, FILENAME as TEAM_IMG_NAME
 from card_narratives import ROLES, HANDS
 from security import OwnedView, esc
 
@@ -341,14 +342,25 @@ class SquadCog(commands.Cog, name="Squad"):
         if err:
             await ctx.send(f"❌ {err}")
             return
-        show_emoji = _is_premium(ctx.author)   # premium role only
-        lines = [_card_line(c, emojis=show_emoji) for c in xi]
-        bench = [c for c in squad if c not in xi]
-        embed = discord.Embed(title="🎁 Starter Pack opened!", description="\n".join(lines), color=discord.Color.gold())
-        if bench:
-            embed.add_field(name="Bench", value="\n".join(_card_line(c, emojis=show_emoji) for c in bench), inline=False)
+        team_ovr = sl.average_ovr(xi)
+        embed = discord.Embed(
+            title="🎁 Starter Pack opened!",
+            description=f"Team **{esc(user['team_name'])}** · Team OVR **{team_ovr}** · {len(xi)} players",
+            color=discord.Color.gold(),
+        )
         embed.set_footer(text="See your team: csxi • Get coins: csdaily • Buy packs: cspack")
-        await ctx.send(embed=embed)
+        buf = None
+        try:
+            buf = await asyncio.to_thread(build_team_image, xi, user["team_name"], team_ovr)
+        except Exception as e:
+            print(f"[csstarterpack] collage failed: {e}")
+        if buf is not None:
+            embed.set_image(url=f"attachment://{TEAM_IMG_NAME}")
+            await ctx.send(embed=embed, file=discord.File(buf, filename=TEAM_IMG_NAME))
+        else:   # image failed -> still show the players as text
+            show_emoji = _is_premium(ctx.author)   # premium role only
+            embed.description += "\n\n" + "\n".join(_card_line(c, emojis=show_emoji) for c in xi)
+            await ctx.send(embed=embed)
 
     # -- squad list ------------------------------------------------------
     @commands.command(name="cssquad")

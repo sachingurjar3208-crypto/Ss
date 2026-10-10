@@ -68,6 +68,7 @@ async def load_cogs():
         "admin_cog",
         "stats_cog",
         "maintenance_cog",
+        "cooldown_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:

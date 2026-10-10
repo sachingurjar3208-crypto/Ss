@@ -257,24 +257,24 @@ def best_xi(cards: list) -> list:
 
 
 def pick_starter_squad() -> list | None:
-    """13 modest cards (no top stars): 5 batters, 1 keeper, 2 all-rounders,
-    5 bowlers. Falls back to any cards if the pool is small. None if there
-    aren't even 11 cards in the game yet."""
+    """Exactly 11 modest cards (no top stars) that already form a legal XI:
+    1 keeper, 4 batters, 2 all-rounders, 4 bowlers. Falls back to any cards
+    if the pool is small. None if there aren't even 11 cards in the game yet."""
     cards = card_db.list_all_cards()
     if len(cards) < economy.XI_SIZE:
         return None
     modest = [c for c in cards if c["ovr"] <= 82] or list(cards)
-    want = {"BAT": 5, "WK": 1, "AR": 2, "BOWL": 5}
+    want = {"BAT": 4, "WK": 1, "AR": 2, "BOWL": 4}
     chosen: list = []
     for role, n in want.items():
         pool = [c for c in modest if card_db.effective_role(c) == role and c not in chosen]
         _rng.shuffle(pool)
         chosen.extend(pool[:n])
-    if len(chosen) < 13:
+    if len(chosen) < economy.XI_SIZE:
         rest = [c for c in cards if c not in chosen]
         rest.sort(key=lambda c: (abs(c["ovr"] - 72), _rng.random()))
-        chosen.extend(rest[: 13 - len(chosen)])
-    return chosen[:13] if len(chosen) >= economy.XI_SIZE else None
+        chosen.extend(rest[: economy.XI_SIZE - len(chosen)])
+    return chosen[: economy.XI_SIZE] if len(chosen) >= economy.XI_SIZE else None
 
 
 # ── Reading a user's squad ───────────────────────────────────────────────────

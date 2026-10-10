@@ -624,6 +624,38 @@ def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
         return None
 
 
+def reset_cooldowns(user_id, starter: bool = False, weekly: bool = False, daily: bool = False) -> dict | None:
+    """Owner tool (/cooldown reset). Clears the chosen cooldowns for one user.
+    None if the user hasn't debuted. Otherwise {"starter", "weekly", "daily"} -> True if reset.
+
+    - starter: lets the user claim csstarterpack again.
+    - weekly:  csweekly is available right now.
+    - daily:   csdaily is available right now. The streak is KEPT: the 24h cooldown is
+               ended but the claim still falls inside the 48h streak window.
+    """
+    uid = _uid(user_id)
+    done = {"starter": False, "weekly": False, "daily": False}
+    with _tx() as conn:
+        row = conn.execute("SELECT last_daily FROM users WHERE user_id = ?", (uid,)).fetchone()
+        if row is None:
+            return None
+        if starter:
+            conn.execute("UPDATE users SET starter_claimed = 0 WHERE user_id = ?", (uid,))
+            done["starter"] = True
+        if weekly:
+            conn.execute("UPDATE users SET last_weekly = 0 WHERE user_id = ?", (uid,))
+            done["weekly"] = True
+        if daily:
+            last = float(row["last_daily"])
+            if last > 0:   # never claimed before = nothing to reset (and no streak to lose)
+                conn.execute(
+                    "UPDATE users SET last_daily = ? WHERE user_id = ?",
+                    (min(last, time.time() - DAY - 1), uid),
+                )
+            done["daily"] = True
+    return done
+
+
 # ── Trading ─────────────────────────────────────────────────────────────────
 
 def execute_trade(a_id, a_key: str, b_id, b_key: str) -> str | None:
