@@ -349,7 +349,7 @@ def _save_match_record(game):
     # Economy: reward winner and loser with coins
     try:
         from economy import reward_match_winner
-        reward_match_winner(str(winner_id), str(loser_id))
+        reward_match_winner(str(winner_id), str(loser_id), game.overs)
     except Exception as e:
         print(f"[economy] Failed to reward match coins: {e}")
 try:

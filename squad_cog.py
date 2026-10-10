@@ -804,7 +804,7 @@ class SquadCog(commands.Cog, name="Squad"):
         ), inline=False)
         embed.add_field(name="Economy", value=(
             "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"
-            "`cstrade @user my player | their player` `csleaderboard`"
+            "`cstrade @user my player | their player` (same OVR, 5,000 coins fee each) `cspending` `csleaderboard`"
         ), inline=False)
         embed.add_field(name="Play", value="`csmp @user <overs>` challenge • `cscancel` cancel match", inline=False)
         await ctx.send(embed=embed)
@@ -851,7 +851,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if economy.give_card(member.id, card["playername_key"]):
             await ctx.send(f"✅ Gave **{esc(card['playername'])}** to {esc(member.display_name)}.")
         else:
-            await ctx.send("❌ They haven't debuted, or already own that player.")
+            await ctx.send("❌ They haven't debuted, already own that player, or their squad is full (25).")
 
 
 async def setup(bot: commands.Bot):

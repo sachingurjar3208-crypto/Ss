@@ -37,11 +37,14 @@ STREAK_MILESTONE_EVERY = 50
 STREAK_MILESTONE_MULT  = 3      # per STREAK_MILESTONE_EVERY days
 WEEKLY_REWARD = 30_000
 MONTHLY_REWARD = 100_000
-WIN_REWARD    = 5_000
-LOSS_REWARD   = 1_500
+LOSS_REWARD_PER_OVER = 150       # loser gets overs x this, but only in matches of LOSS_MIN_OVERS or more
+LOSS_MIN_OVERS       = 10        # (10 overs = 1,500 ... 20 overs = 3,000; under 10 overs = nothing)
 MATCH_REWARD_DAILY_CAP   = 10   # rewarded matches per player per 24h
 MATCH_REWARD_PER_OPP_CAP = 3    # ... and against the same opponent per 24h (stops alt-account farming)
 MIN_SQUAD     = 11               # you can never sell below this many players
+SQUAD_MAX     = 25               # a squad can never hold more than this many players
+TRADE_FEE     = 5_000            # coins EACH of the two players pays for every completed trade
+WIN_REWARD_PER_OVER = 1_000      # match win = overs x this (1 over = 1,000 ... 20 overs = 20,000)
 XI_SIZE       = 11
 IMPACT_SUBS_MAX = 4              # how many bench players a team can nominate as Impact Player subs
 
@@ -167,6 +170,13 @@ def init_economy_db() -> None:
                 PRIMARY KEY (user_id, slot),
                 UNIQUE (user_id, player_key)
             );
+            CREATE TABLE IF NOT EXISTS pending_cards (
+                user_id    INTEGER NOT NULL,
+                player_key TEXT    NOT NULL,
+                source     TEXT,
+                ts         REAL    NOT NULL,
+                PRIMARY KEY (user_id, player_key)
+            );
             """
         )
     finally:
@@ -275,8 +285,27 @@ def add_coins(user_id, amount: int, reason: str = "") -> int:
         return 0 if result is None else result
 
 
-def reward_match_winner(winner_id, loser_id) -> None:
-    """Called by views.py when a match finishes. Coins are paid only up to
+def win_reward_for(overs) -> int:
+    """Coins for winning a match: 1,000 per over (1 over = 1,000 ... 20 overs = 20,000)."""
+    try:
+        return max(0, int(overs)) * WIN_REWARD_PER_OVER
+    except (TypeError, ValueError):
+        return 0
+
+
+def loss_reward_for(overs) -> int:
+    """Coins the LOSER gets: nothing under LOSS_MIN_OVERS overs, otherwise 150 per over
+    (10 overs = 1,500, 15 overs = 2,250, 20 overs = 3,000)."""
+    try:
+        o = int(overs)
+    except (TypeError, ValueError):
+        return 0
+    return o * LOSS_REWARD_PER_OVER if o >= LOSS_MIN_OVERS else 0
+
+
+def reward_match_winner(winner_id, loser_id, overs: int = 0) -> None:
+    """Called by views.py when a match finishes. The winner gets win_reward_for(overs);
+    the loser loss_reward_for(overs). Coins are paid only up to
     MATCH_REWARD_DAILY_CAP matches a day, and MATCH_REWARD_PER_OPP_CAP per
     opponent, so two accounts can't farm coins by playing each other."""
     w, l = _uid(winner_id), _uid(loser_id)
@@ -284,7 +313,7 @@ def reward_match_winner(winner_id, loser_id) -> None:
         return
     since = time.time() - DAY
     with _tx() as conn:
-        for uid, opp, amount, reason in ((w, l, WIN_REWARD, "Match win"), (l, w, LOSS_REWARD, "Match played")):
+        for uid, opp, amount, reason in ((w, l, win_reward_for(overs), f"Match win ({int(overs)} over(s))"), (l, w, loss_reward_for(overs), "Match played")):
             total = conn.execute(
                 "SELECT COUNT(*) AS n FROM reward_log WHERE user_id = ? AND ts > ?", (uid, since)
             ).fetchone()["n"]
@@ -292,11 +321,136 @@ def reward_match_winner(winner_id, loser_id) -> None:
                 "SELECT COUNT(*) AS n FROM reward_log WHERE user_id = ? AND opp_id = ? AND ts > ?",
                 (uid, opp, since),
             ).fetchone()["n"]
+            if amount <= 0:   # nothing to pay (e.g. loser of a short match): don't use up a daily slot
+                continue
             if total >= MATCH_REWARD_DAILY_CAP or pair >= MATCH_REWARD_PER_OPP_CAP:
                 continue
             conn.execute("INSERT INTO reward_log (user_id, opp_id, ts) VALUES (?, ?, ?)", (uid, opp, time.time()))
             _apply_coins(conn, uid, amount, reason)
         conn.execute("DELETE FROM reward_log WHERE ts < ?", (time.time() - 3 * DAY,))
+
+
+# ── Squad limit: max SQUAD_MAX players ──────────────────────────────────────
+# A card that arrives while the squad is full is NOT added. It waits in
+# `pending_cards` until the player chooses: sell it, or replace one of their
+# players with it (see resolve_pending). Nothing is ever lost or auto-sold.
+
+def _ensure_pending_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS pending_cards (
+            user_id    INTEGER NOT NULL,
+            player_key TEXT    NOT NULL,
+            source     TEXT,
+            ts         REAL    NOT NULL,
+            PRIMARY KEY (user_id, player_key)
+        )"""
+    )
+
+
+def _squad_count(conn: sqlite3.Connection, uid: int) -> int:
+    return int(conn.execute("SELECT COUNT(*) AS n FROM owned WHERE user_id = ?", (uid,)).fetchone()["n"])
+
+
+def _holds(conn: sqlite3.Connection, uid: int, key: str) -> bool:
+    """Owns the card, or it is waiting in their pending list."""
+    _ensure_pending_table(conn)
+    return (
+        conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone() is not None
+        or conn.execute("SELECT 1 FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
+        is not None
+    )
+
+
+def _grant(conn: sqlite3.Connection, uid: int, key: str, source: str) -> str:
+    """Give one card. Returns "added", "pending" (squad full) or "dupe"."""
+    if _holds(conn, uid, key):
+        return "dupe"
+    now = time.time()
+    if _squad_count(conn, uid) >= SQUAD_MAX:
+        conn.execute(
+            "INSERT OR IGNORE INTO pending_cards (user_id, player_key, source, ts) VALUES (?, ?, ?, ?)",
+            (uid, key, source, now),
+        )
+        return "pending"
+    conn.execute("INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, key, now))
+    _fill_empty_slots(conn, uid, [key])
+    return "added"
+
+
+def squad_count(user_id) -> int:
+    conn = _conn()
+    try:
+        return _squad_count(conn, _uid(user_id))
+    finally:
+        conn.close()
+
+
+def get_pending(user_id) -> list[str]:
+    """Player keys waiting for the user's decision (oldest first)."""
+    conn = _conn()
+    try:
+        _ensure_pending_table(conn)
+        rows = conn.execute(
+            "SELECT player_key FROM pending_cards WHERE user_id = ? ORDER BY ts", (_uid(user_id),)
+        ).fetchall()
+        return [r["player_key"] for r in rows]
+    finally:
+        conn.close()
+
+
+def resolve_pending(user_id, new_key: str, action: str, replace_key: str | None = None,
+                    new_value: int = 0, old_value: int = 0) -> str | None:
+    """Decide what happens to a waiting card. None on success, else an error text.
+
+    action "sell":    the waiting card is sold for `new_value` coins.
+    action "replace": `replace_key` (one of the user's players) is sold for `old_value`
+                      coins and the waiting card takes its place (and its XI spot).
+    action "keep":    only if the squad has room again (e.g. after selling someone).
+    """
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_pending_table(conn)
+        if conn.execute(
+            "SELECT 1 FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key)
+        ).fetchone() is None:
+            return "That card is no longer waiting."
+        if action == "sell":
+            conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key))
+            _apply_coins(conn, uid, int(new_value), f"Sold {new_key} (squad full)")
+            return None
+        if action == "keep":
+            if _squad_count(conn, uid) >= SQUAD_MAX:
+                return f"Your squad is full ({SQUAD_MAX}/{SQUAD_MAX})."
+            conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key))
+            conn.execute(
+                "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, new_key, time.time())
+            )
+            _fill_empty_slots(conn, uid, [new_key])
+            return None
+        if action == "replace":
+            if not replace_key or conn.execute(
+                "SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, replace_key)
+            ).fetchone() is None:
+                return "You don't own the player you picked to replace."
+            slot_row = conn.execute(
+                "SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (uid, replace_key)
+            ).fetchone()
+            conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, replace_key))
+            conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, replace_key))
+            conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, replace_key))
+            _ensure_impact_subs_table(conn)
+            conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, replace_key))
+            conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key))
+            conn.execute(
+                "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, new_key, time.time())
+            )
+            if slot_row is not None:
+                conn.execute(
+                    "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot_row["slot"], new_key)
+                )
+            _apply_coins(conn, uid, int(old_value), f"Sold {replace_key} (replaced)")
+            return None
+        return "Unknown choice."
 
 
 # ── Rewards (daily / weekly / monthly) ──────────────────────────────────────
@@ -308,7 +462,7 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
     A card the user already owns is skipped if they have any unowned one left in
     the pool; otherwise it turns into coins using `dupe_values`.
     Returns {"ok": True, "coins", "base", "bonus", "balance", "streak",
-             "card": key|None, "dupe": bool, "refund": n}
+             "card": key|None, "dupe": bool, "refund": n, "pending": bool (squad full)}
     or {"ok": False, "wait": seconds_left}."""
     if kind not in COOLDOWNS:
         raise ValueError("unknown reward kind")
@@ -341,24 +495,23 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
         coins = base + bonus
         conn.execute(f"UPDATE users SET {col} = ? WHERE user_id = ?", (now, uid))
         balance = _apply_coins(conn, uid, coins, f"{kind} reward" + (f" (streak {streak} bonus)" if bonus else ""))
-        card_key, dupe, refund = None, False, 0
+        card_key, dupe, refund, pending = None, False, 0, False
         pool = list(card_pool or [])
         if pool:
+            _ensure_pending_table(conn)
             owned = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
+            owned |= {r["player_key"] for r in conn.execute("SELECT player_key FROM pending_cards WHERE user_id = ?", (uid,))}
             fresh = [k for k in pool if k not in owned]
             if fresh:
                 card_key = _rng.choice(fresh)
-                conn.execute(
-                    "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, card_key, now)
-                )
-                _fill_empty_slots(conn, uid, [card_key])
+                pending = _grant(conn, uid, card_key, f"{kind} reward") == "pending"
             else:
                 card_key, dupe = _rng.choice(pool), True
                 refund = int((dupe_values or {}).get(card_key, 0))
                 if refund:
                     balance = _apply_coins(conn, uid, refund, f"Duplicate refund ({kind} reward)")
         return {"ok": True, "coins": coins, "base": base, "bonus": bonus, "balance": balance,
-                "streak": streak, "card": card_key, "dupe": dupe, "refund": refund}
+                "streak": streak, "card": card_key, "dupe": dupe, "refund": refund, "pending": pending}
 
 
 # ── Owned cards ─────────────────────────────────────────────────────────────
@@ -489,8 +642,10 @@ def buy_card(user_id, player_key: str, price: int) -> str | None:
         row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
         if row is None:
             return "You haven't debuted yet."
-        if conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, player_key)).fetchone():
-            return "You already own this player."
+        if _holds(conn, uid, player_key):
+            return "You already own this player (or it is waiting in your pending cards)."
+        if _squad_count(conn, uid) >= SQUAD_MAX:
+            return f"Your squad is full ({SQUAD_MAX}/{SQUAD_MAX}). Sell a player first."
         if int(row["purse"]) < price:
             return "Not enough coins."
         _apply_coins(conn, uid, -price, f"Bought {player_key}")
@@ -572,8 +727,8 @@ def buy_pack(user_id, pack_type: str, price: int) -> str | None:
 
 def open_pack(user_id, pack_type: str, keys: list[str], dupe_values: dict[str, int]) -> dict | str:
     """Use up one pack and hand over `keys`. Cards the user already owns are
-    turned into coins using `dupe_values`. Returns {"new": [...], "dupes": [...],
-    "refund": n} or an error message."""
+    turned into coins using `dupe_values`. Returns {"new": [...], "pending": [...] (squad
+    was full: waiting for sell/replace), "dupes": [...], "refund": n} or an error message."""
     uid = _uid(user_id)
     with _tx() as conn:
         cur = conn.execute(
@@ -582,25 +737,23 @@ def open_pack(user_id, pack_type: str, keys: list[str], dupe_values: dict[str, i
         )
         if cur.rowcount == 0:
             return "You don't have that pack."
-        new, dupes, refund = [], [], 0
+        new, pending, dupes, refund = [], [], [], 0
         for k in keys:
-            if k in new:
+            if k in new or k in pending:
                 dupes.append(k)
                 refund += dupe_values.get(k, 0)
                 continue
-            got = conn.execute(
-                "INSERT OR IGNORE INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)",
-                (uid, k, time.time()),
-            )
-            if got.rowcount:
+            status = _grant(conn, uid, k, f"{pack_type} pack")
+            if status == "added":
                 new.append(k)
+            elif status == "pending":
+                pending.append(k)
             else:
                 dupes.append(k)
                 refund += dupe_values.get(k, 0)
-        _fill_empty_slots(conn, uid, new)
         if refund:
             _apply_coins(conn, uid, refund, f"Duplicate refund ({pack_type} pack)")
-        return {"new": new, "dupes": dupes, "refund": refund}
+        return {"new": new, "pending": pending, "dupes": dupes, "refund": refund}
 
 
 def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
@@ -612,6 +765,13 @@ def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
             return "You haven't debuted yet."
         if row["starter_claimed"]:
             return "You already claimed your starter pack."
+        have = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
+        incoming = [k for k in dict.fromkeys(keys) if k not in have]
+        if len(have) + len(incoming) > SQUAD_MAX:
+            return (
+                f"Your squad would go over {SQUAD_MAX} players. "
+                f"Sell {len(have) + len(incoming) - SQUAD_MAX} player(s) first, then try again."
+            )
         now = time.time()
         for k in keys:
             conn.execute(
@@ -658,9 +818,10 @@ def reset_cooldowns(user_id, starter: bool = False, weekly: bool = False, daily:
 
 # ── Trading ─────────────────────────────────────────────────────────────────
 
-def execute_trade(a_id, a_key: str, b_id, b_key: str) -> str | None:
-    """Swap one player each between two users, atomically. Everything is
-    re-checked inside the transaction, so a stale or forged request fails."""
+def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> str | None:
+    """Swap one player each between two users, atomically. Both players pay `fee`
+    coins (every trade, always). Everything is re-checked inside the transaction,
+    so a stale or forged request fails."""
     a, b = _uid(a_id), _uid(b_id)
     if a == b:
         return "You can't trade with yourself."
@@ -672,6 +833,12 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str) -> str | None:
             return "One of the players is no longer available."
         if has(a, b_key) or has(b, a_key):
             return "One of you already owns the player you'd receive."
+        for u in (a, b):
+            row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (u,)).fetchone()
+            if row is None or int(row["purse"]) < fee:
+                return f"<@{u}> doesn't have the {fee:,} coins needed for the trade fee."
+        for u in (a, b):
+            _apply_coins(conn, u, -fee, "Trade fee")
         for u, out_k, in_k in ((a, a_key, b_key), (b, b_key, a_key)):
             slot_row = conn.execute("SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (u, out_k)).fetchone()
             conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (u, out_k))
@@ -718,6 +885,8 @@ def give_card(user_id, player_key: str) -> bool:
     with _tx() as conn:
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return False
+        if _squad_count(conn, uid) >= SQUAD_MAX:
+            return False   # squad is full (25/25)
         got = conn.execute(
             "INSERT OR IGNORE INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)",
             (uid, player_key, time.time()),

@@ -64,7 +64,7 @@ class AdminCog(commands.Cog):
         else:
             await ctx.send(
                 f"❌ Couldn't give **{esc(found['playername'])}**. "
-                "They haven't debuted yet, or already own this player."
+                "They haven't debuted yet, already own this player, or their squad is full (25)."
             )
 
     # -- coins -----------------------------------------------------------
