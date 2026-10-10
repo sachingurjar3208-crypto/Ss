@@ -59,6 +59,8 @@ ROLE_EMOJI = {
     "Fast":     "<:FastBowler3:1518961249826766879>",
     "Off Spin": "<:Offspin4:1518961309981610145>",
     "Leg Spin": "<:Legspinner:1518862597208801502>",
+    "Orthodox":     "<:Offspin4:1518961309981610145>",   # TODO: swap for dedicated emojis if you upload them
+    "Medium Pacer": "<:FastBowler3:1518961249826766879>",
     "BOWL":     "<:Normalnall:1518862733423022090>",   # bowler, unknown type
 }
 

@@ -19,6 +19,7 @@ from data import (
     TIMELINE_EMOJIS,
     FAST_STAGE1, FAST_STAGE2,
     OFF_SPIN_BUTTONS, LEG_SPIN_BUTTONS,
+    is_two_stage, get_two_stage_buttons, get_spin_buttons,
     BATTING_BUTTONS, SHOT_BUTTON_MAP,
     get_delivery_speed, resolve_delivery,
     DELIVERY_BUTTON_MAP,
@@ -73,13 +74,15 @@ def _bot_pick_delivery(game: GameState) -> tuple[str, str, str]:
     diff   = _get_difficulty(game)
     smart  = diff["smart_bowl"]
 
-    if btype == "Fast":
-        stage1 = random.choice(FAST_STAGE1)
-        # Smart bowl = use full FAST_STAGE2 pool; dumb = only easy deliveries
+    if is_two_stage(btype):   # Fast / Medium Pacer
+        s1_pool, s2_pool = get_two_stage_buttons(btype)
+        easy = ["Full", "Good Length"] if btype == "Medium Pacer" else _EASY_BOWL_FAST
+        stage1 = random.choice(s1_pool)
+        # Smart bowl = use full stage-2 pool; dumb = only easy deliveries
         if random.random() < smart:
-            stage2 = random.choice(FAST_STAGE2)            # any delivery
+            stage2 = random.choice(s2_pool)                # any delivery
         else:
-            stage2 = random.choice(_EASY_BOWL_FAST)        # easy/safe only
+            stage2 = random.choice(easy)                   # easy/safe only
         internal = DELIVERY_BUTTON_MAP.get(stage2, stage2)
         return stage1, stage2, internal
     elif btype == "Off Spin":
@@ -88,6 +91,11 @@ def _bot_pick_delivery(game: GameState) -> tuple[str, str, str]:
         else:
             btn = random.choice(_EASY_BOWL_SPIN[:2])        # basic spin only
         internal = resolve_delivery(btn, "Off Spin")
+        return "", btn, internal
+    elif btype == "Orthodox":
+        pool = get_spin_buttons("Orthodox")
+        btn = random.choice(pool) if random.random() < smart else random.choice(["Arm Ball", "Slider"])
+        internal = resolve_delivery(btn, "Orthodox")
         return "", btn, internal
     else:  # Leg Spin
         if random.random() < smart:
@@ -219,7 +227,7 @@ async def _practice_process_delivery_inner(
     bname = _pname(bowler)
     sname = _pname(striker)
 
-    speed_range  = get_delivery_speed(delivery_button)
+    speed_range  = get_delivery_speed(delivery_button, (game.current_bowler or {}).get("bowling_type"))
     speed        = random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
 
@@ -442,7 +450,7 @@ async def _practice_send_bowling(channel: discord.TextChannel, game: GameState):
         # Bot bats → bot picks shot automatically after human bowls
         btype = game.current_bowler.get("bowling_type", "Fast")
         prefix = "🟡 **FREE HIT!**  " if is_free_hit else ""
-        if btype == "Fast":
+        if is_two_stage(btype):
             view = PracticeFastBowlStage1View(game, is_free_hit=is_free_hit)
             view._channel = channel
             await channel.send(
@@ -475,7 +483,7 @@ async def _bot_bowl_and_wait(
     game.pending_delivery_internal = delivery_internal
     game.phase                     = "bat_select"
 
-    speed      = random.uniform(*get_delivery_speed(delivery_btn))
+    speed      = random.uniform(*get_delivery_speed(delivery_btn, (game.current_bowler or {}).get("bowling_type")))
     bname      = _pname(game.current_bowler)
     combined   = f"{stage1} {delivery_btn}".strip() if stage1 else delivery_btn
     free_prefix= "🟡 **FREE HIT!**  " if is_free_hit else ""
@@ -1054,6 +1062,15 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
         "Good":    discord.ButtonStyle.success,
         "Yorker":  discord.ButtonStyle.secondary,
     }
+    # Medium pacer colours (different from the fast bowler's)
+    _M_S1_STYLES = {
+        "Outswing": discord.ButtonStyle.success, "Inswing": discord.ButtonStyle.primary,
+        "Cutter":   discord.ButtonStyle.danger,  "Slower":  discord.ButtonStyle.success,
+    }
+    _M_S2_STYLES = {
+        "Bouncer": discord.ButtonStyle.primary, "Yorker": discord.ButtonStyle.danger,
+        "Good Length": discord.ButtonStyle.success, "Full": discord.ButtonStyle.primary,
+    }
 
     def __init__(self, game: GameState, is_free_hit: bool = False):
         super().__init__(timeout=VIEW_TIMEOUT)
@@ -1063,13 +1080,20 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
         self._stage1_btns: list = []
         self._stage2_btns: list = []
 
-        for label in FAST_STAGE1:
-            btn = ui.Button(label=label, style=self._S1_STYLES.get(label, discord.ButtonStyle.secondary), row=0)
+        self.btype = (game.current_bowler or {}).get("bowling_type", "Fast")
+        s1_labels, s2_labels = get_two_stage_buttons(self.btype)
+        if self.btype == "Medium Pacer":
+            self._s1_styles, self._s2_styles = self._M_S1_STYLES, self._M_S2_STYLES
+        else:
+            self._s1_styles, self._s2_styles = self._S1_STYLES, self._S2_STYLES
+
+        for label in s1_labels:
+            btn = ui.Button(label=label, style=self._s1_styles.get(label, discord.ButtonStyle.secondary), row=0)
             btn.callback = self._make_stage1_callback(label)
             self._stage1_btns.append(btn)
             self.add_item(btn)
 
-        for label in FAST_STAGE2:
+        for label in s2_labels:
             btn = ui.Button(label=label, style=discord.ButtonStyle.secondary, row=1, disabled=True)
             btn.callback = self._make_stage2_callback(label)
             self._stage2_btns.append(btn)
@@ -1092,7 +1116,7 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
                 b.style    = discord.ButtonStyle.secondary
             for b in self._stage2_btns:
                 b.disabled = False
-                b.style    = self._S2_STYLES.get(b.label, discord.ButtonStyle.secondary)
+                b.style    = self._s2_styles.get(b.label, discord.ButtonStyle.secondary)
             try:
                 await interaction.response.edit_message(view=self)
             except Exception as e:
@@ -1113,7 +1137,7 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
             self.game.pending_delivery_internal = delivery_internal
             self.game.phase = "bat_select"
 
-            speed    = random.uniform(*get_delivery_speed(delivery_button))
+            speed    = random.uniform(*get_delivery_speed(delivery_button, self.btype))
             combined = f"{self.stage1_choice} {delivery_button}"
 
             # Bot picks shot automatically
@@ -1144,7 +1168,7 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
 
     def _add_buttons(self):
         btype   = self.game.current_bowler.get("bowling_type", "Off Spin") if self.game.current_bowler else "Off Spin"
-        buttons = OFF_SPIN_BUTTONS if btype == "Off Spin" else LEG_SPIN_BUTTONS
+        buttons = get_spin_buttons(btype)
         _STYLES = {
             "Offspin": discord.ButtonStyle.primary,  "Carrom": discord.ButtonStyle.danger,
             "Arm Ball":discord.ButtonStyle.success,   "Doosra": discord.ButtonStyle.danger,
@@ -1152,6 +1176,10 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
             "Googly":  discord.ButtonStyle.danger,    "Flipper":discord.ButtonStyle.success,
             "Drifter": discord.ButtonStyle.danger,    "Slider": discord.ButtonStyle.success,
         }
+        if btype == "Orthodox":
+            _STYLES.update({"Arm Ball": discord.ButtonStyle.primary, "Top Spinner": discord.ButtonStyle.danger,
+                            "Doosra": discord.ButtonStyle.success, "Carrom": discord.ButtonStyle.primary,
+                            "Slider": discord.ButtonStyle.success})
         for i, label in enumerate(buttons):
             btn          = ui.Button(label=label, style=_STYLES.get(label, discord.ButtonStyle.secondary), row=i // 3)
             btn.callback = self._make_callback(label)
@@ -1169,7 +1197,7 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
             self.game.pending_delivery_internal = delivery_internal
             self.game.phase = "bat_select"
 
-            speed = random.uniform(*get_delivery_speed(delivery_button))
+            speed = random.uniform(*get_delivery_speed(delivery_button, btype))
             shot_button, is_rec = _bot_pick_shot(delivery_button, game=self.game)
             free_prefix = "🟡 **FREE HIT!**  " if self.is_free_hit else ""
             await interaction.response.edit_message(

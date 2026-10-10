@@ -238,7 +238,7 @@ class CardMakerCog(commands.Cog):
         battinghand="Right hand or left hand batter",
         narrative1="Playstyle 1 (optional) — its logo shows on the card",
         narrative2="Playstyle 2 (optional) — its logo shows on the card",
-        bowlingtype="Bowling type for bowlers/all-rounders (default Fast)",
+        bowlingtype="Bowling type for bowlers/all-rounders (Fast / Medium Pacer / Off Spin / Leg Spin / Orthodox; default Fast)",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
@@ -333,7 +333,7 @@ class CardMakerCog(commands.Cog):
         battinghand="New batting hand",
         narrative1="New playstyle 1 (choose None to remove)",
         narrative2="New playstyle 2 (choose None to remove)",
-        bowlingtype="New bowling type (Fast / Off Spin / Leg Spin)",
+        bowlingtype="New bowling type (Fast / Medium Pacer / Off Spin / Leg Spin / Orthodox)",
         panel="Stats-panel overlay image (added via /paneladder) — type none to remove",
     )
     @app_commands.choices(

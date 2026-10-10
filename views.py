@@ -285,6 +285,7 @@ from data import (
     TOSS_HEAD_EMOJI, TOSS_TAIL_EMOJI, TIMELINE_EMOJIS,
     FAST_STAGE1, FAST_STAGE2,
     OFF_SPIN_BUTTONS, LEG_SPIN_BUTTONS,
+    is_two_stage, get_two_stage_buttons, get_spin_buttons,
     BATTING_BUTTONS, SHOT_BUTTON_MAP,
     get_delivery_speed, resolve_delivery, BOWLING_TYPE_ICON,
     DELIVERY_BUTTON_MAP,
@@ -890,7 +891,7 @@ async def _send_bowling_prompt(
     # (the flag above is already cleared by the time the batter plays).
     game.current_ball_free_hit = is_free_hit
 
-    if btype == "Fast":
+    if is_two_stage(btype):   # Fast + Medium Pacer
         view = FastBowlStage1View(game, is_free_hit=is_free_hit)
     else:
         view = BowlingView(game, is_free_hit=is_free_hit)
@@ -970,6 +971,7 @@ async def _process_delivery(
     # The shot is being played now, so this delivery is no longer "pending" —
     # clear it so match-recovery (_resume_prompt) doesn't think a shot is
     # still waiting to be picked once this ball has actually been bowled.
+    _announced_speed               = game.pending_delivery_speed
     game.pending_delivery          = None
     game.pending_delivery_internal = None
     game.pending_delivery_speed    = None
@@ -991,8 +993,9 @@ async def _process_delivery(
     bname = _pname(bowler)
     sname = _pname(striker)
 
-    speed_range  = get_delivery_speed(delivery_button)
-    speed        = random.uniform(*speed_range)
+    # Same speed that was announced ("is coming with X kmph"); fall back to a fresh roll.
+    speed_range  = get_delivery_speed(delivery_button, bowler.get("bowling_type"))
+    speed        = _announced_speed if _announced_speed is not None else random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
 
     if shot_button == "Leave":
@@ -1799,6 +1802,20 @@ _FAST_STAGE2_STYLES = {
     "Yorker":  discord.ButtonStyle.secondary,
 }
 
+# Medium pacer — deliberately different colours from the fast bowler's set
+_MEDIUM_STAGE1_STYLES = {
+    "Outswing": discord.ButtonStyle.success,
+    "Inswing":  discord.ButtonStyle.primary,
+    "Cutter":   discord.ButtonStyle.danger,
+    "Slower":   discord.ButtonStyle.success,
+}
+_MEDIUM_STAGE2_STYLES = {
+    "Bouncer":     discord.ButtonStyle.primary,
+    "Yorker":      discord.ButtonStyle.danger,
+    "Good Length": discord.ButtonStyle.success,
+    "Full":        discord.ButtonStyle.primary,
+}
+
 
 class FastBowlStage1View(_TimeoutMixin, ui.View):
     """Fast bowling — ONE message, two rows.
@@ -1816,14 +1833,22 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
         self._stage1_btns: list[ui.Button] = []
         self._stage2_btns: list[ui.Button] = []
 
-        for label in FAST_STAGE1:
-            style = _FAST_STAGE1_STYLES.get(label, discord.ButtonStyle.secondary)
+        # Fast bowler and Medium pacer share this view; only the buttons / colours differ.
+        self.btype = (game.current_bowler or {}).get("bowling_type", "Fast")
+        stage1_labels, stage2_labels = get_two_stage_buttons(self.btype)
+        if self.btype == "Medium Pacer":
+            self._s1_styles, self._s2_styles = _MEDIUM_STAGE1_STYLES, _MEDIUM_STAGE2_STYLES
+        else:
+            self._s1_styles, self._s2_styles = _FAST_STAGE1_STYLES, _FAST_STAGE2_STYLES
+
+        for label in stage1_labels:
+            style = self._s1_styles.get(label, discord.ButtonStyle.secondary)
             btn   = ui.Button(label=label, style=style, row=0)
             btn.callback = self._make_stage1_callback(label)
             self._stage1_btns.append(btn)
             self.add_item(btn)
 
-        for label in FAST_STAGE2:
+        for label in stage2_labels:
             # Locked + grey until step 1 is chosen
             btn = ui.Button(label=label, style=discord.ButtonStyle.secondary, row=1, disabled=True)
             btn.callback = self._make_stage2_callback(label)
@@ -1850,7 +1875,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             # Row 1 -> unlock with the normal colours
             for b in self._stage2_btns:
                 b.disabled = False
-                b.style    = _FAST_STAGE2_STYLES.get(b.label, discord.ButtonStyle.secondary)
+                b.style    = self._s2_styles.get(b.label, discord.ButtonStyle.secondary)
 
             try:
                 # view only — keeps the existing message text/embed as it is
@@ -1873,7 +1898,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             self.game.pending_delivery_internal = delivery_internal
             self.game.phase = "bat_select"
 
-            speed    = random.uniform(*get_delivery_speed(delivery_button))
+            speed    = random.uniform(*get_delivery_speed(delivery_button, self.btype))
             combined = f"{self.stage1_choice} {delivery_button}"
             # Cached so a failed send can be retried (or _resume_prompt used)
             # with the exact same speed/label instead of losing it.
@@ -1909,6 +1934,15 @@ _SPIN_STYLES = {
     "Slider":   discord.ButtonStyle.success,
 }
 
+# Orthodox spinner — own colour set
+_ORTHODOX_STYLES = {
+    "Arm Ball":    discord.ButtonStyle.primary,
+    "Top Spinner": discord.ButtonStyle.danger,
+    "Doosra":      discord.ButtonStyle.success,
+    "Carrom":      discord.ButtonStyle.primary,
+    "Slider":      discord.ButtonStyle.success,
+}
+
 
 class BowlingView(_TimeoutMixin, ui.View):
     """Single-step bowling view for Off Spin and Leg Spin."""
@@ -1921,9 +1955,10 @@ class BowlingView(_TimeoutMixin, ui.View):
 
     def _add_buttons(self):
         btype   = self.game.current_bowler.get("bowling_type", "Off Spin") if self.game.current_bowler else "Off Spin"
-        buttons = OFF_SPIN_BUTTONS if btype == "Off Spin" else LEG_SPIN_BUTTONS
+        buttons = get_spin_buttons(btype)
+        styles  = _ORTHODOX_STYLES if btype == "Orthodox" else _SPIN_STYLES
         for i, label in enumerate(buttons):
-            style = _SPIN_STYLES.get(label, discord.ButtonStyle.secondary)
+            style = styles.get(label, discord.ButtonStyle.secondary)
             btn   = ui.Button(label=label, style=style, row=i // 3)
             btn.callback = self._make_callback(label)
             self.add_item(btn)
@@ -1940,7 +1975,7 @@ class BowlingView(_TimeoutMixin, ui.View):
             self.game.pending_delivery_internal = delivery_internal
             self.game.phase = "bat_select"
 
-            speed = random.uniform(*get_delivery_speed(delivery_button))
+            speed = random.uniform(*get_delivery_speed(delivery_button, btype))
             self.game.pending_delivery_speed = speed
             self.game.pending_stage1_choice  = ""
 

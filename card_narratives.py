@@ -78,8 +78,10 @@ HAND_CARD_WORD: dict[str, str] = {
 # Bowling types the match engine understands (data.py MYSTERY_POOL keys).
 BOWLING_TYPES: dict[str, str] = {
     "Fast": "Fast",
+    "Medium Pacer": "Medium Pacer",
     "Off Spin": "Off Spin",
     "Leg Spin": "Leg Spin",
+    "Orthodox": "Orthodox Spin",
 }
 
 # Role names as the match engine and team embeds expect them.
