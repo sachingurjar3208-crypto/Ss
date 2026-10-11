@@ -3,6 +3,7 @@ import io
 import os
 import random
 import discord
+import emojis
 from discord import ui
 
 _TOSS_IMG_PATH   = os.path.join(os.path.dirname(__file__), "toss_image.png")
@@ -1181,6 +1182,10 @@ async def _process_delivery(
         runs_after = game.batsman_stats.get(sname, {}).get("runs", 0)
         for milestone in (50, 100, 150, 200, 250, 300):
             if striker_runs_before < milestone <= runs_after:
+                if milestone in (50, 100):
+                    _m_emoji = emojis.CENTURY if milestone == 100 else emojis.HALFCENTURY
+                    _m_word = "CENTURY" if milestone == 100 else "HALF-CENTURY"
+                    commentary = f"{commentary}\n{_m_emoji} **{sname}** reaches a {_m_word}! ({runs_after})"
                 gif = get_milestone_gif(sname, str(milestone))
                 if not gif:
                     gif = get_player_media(sname, str(milestone))

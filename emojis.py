@@ -26,7 +26,9 @@ MONTHLY      = "<:Monthlypack:1558138440208486440>"
 WEEKLY       = "<:Weeklypack:1558138384675905536>"
 VOUCHER      = "<:Voucher:1558696772975464458>"       # Draft currency
 
-# Player roles (Developer Portal names: Legspin, Allrounder, Batter, Pacer, Mediumpacer)
+# Player roles (Developer Portal names)
+WICKETKEEPER = "<:Wicketkepper:1558757467045888100>"   # portal name is spelled "Wicketkepper"
+OFFSPIN      = "<:Offspin:1558778042925449297>"
 LEGSPIN      = "<:Legspin:1558757461081722882>"
 ALLROUNDER   = "<:Allrounder:1558757458762014730>"
 BATTER       = "<:Batter:1558757456337965186>"

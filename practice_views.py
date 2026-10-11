@@ -26,6 +26,7 @@ from data import (
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
     NOT_OUT_EMOJI, LBW_EMOJI,
 )
+import emojis
 from media import get_player_media, get_milestone_gif, get_umpire_gif
 
 VIEW_TIMEOUT = 300
@@ -330,6 +331,10 @@ async def _practice_process_delivery_inner(
         runs_after = game.batsman_stats.get(sname, {}).get("runs", 0)
         for milestone in (50, 100, 150, 200, 250, 300):
             if striker_runs_before < milestone <= runs_after:
+                if milestone in (50, 100):
+                    _m_emoji = emojis.CENTURY if milestone == 100 else emojis.HALFCENTURY
+                    _m_word = "CENTURY" if milestone == 100 else "HALF-CENTURY"
+                    commentary = f"{commentary}\n{_m_emoji} **{sname}** reaches a {_m_word}! ({runs_after})"
                 gif = get_milestone_gif(sname, str(milestone)) or get_player_media(sname, str(milestone))
                 if gif:
                     gif_urls.append(gif)

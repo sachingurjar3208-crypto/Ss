@@ -10,6 +10,7 @@ import math
 import secrets
 
 import card_db
+import emojis
 import economy
 from card_narratives import ENGINE_ROLE, ROLES
 
@@ -53,15 +54,15 @@ def card_emoji(card) -> str:
 # Custom role emojis (uploaded in the Discord developer portal, so the bot can
 # use them in any server). Pick by role + bowling type.
 ROLE_EMOJI = {
-    "WK":       "<:Wicketkeeper:1518961376884822087>",
-    "BAT":      "<:Batsman:1518862731103436900>",
-    "AR":       "<:AllRounder2:1518961183963484272>",
-    "Fast":     "<:FastBowler3:1518961249826766879>",
-    "Off Spin": "<:Offspin4:1518961309981610145>",
-    "Leg Spin": "<:Legspinner:1518862597208801502>",
-    "Orthodox":     "<:Offspin4:1518961309981610145>",   # TODO: swap for dedicated emojis if you upload them
-    "Medium Pacer": "<:FastBowler3:1518961249826766879>",
-    "BOWL":     "<:Normalnall:1518862733423022090>",   # bowler, unknown type
+    "WK":           emojis.WICKETKEEPER,
+    "BAT":          emojis.BATTER,
+    "AR":           emojis.ALLROUNDER,
+    "Fast":         emojis.PACER,
+    "Off Spin":     emojis.OFFSPIN,
+    "Leg Spin":     emojis.LEGSPIN,
+    "Orthodox":     emojis.OFFSPIN,        # no dedicated emoji yet
+    "Medium Pacer": emojis.MEDIUMPACER,
+    "BOWL":         emojis.PACER,          # bowler, unknown type
 }
 
 
