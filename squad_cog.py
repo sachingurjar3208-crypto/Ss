@@ -40,6 +40,23 @@ def _is_premium(member) -> bool:
     return any(r.id == PREMIUM_ROLE_ID for r in getattr(member, "roles", []))
 
 
+def premium_cooldown(seconds: int):
+    """Per-command cooldown for normal users. Premium members have NO cooldown.
+    Each use of this decorator has its own timer (not shared with other commands)."""
+    mapping = commands.CooldownMapping.from_cooldown(1, seconds, commands.BucketType.user)
+
+    async def predicate(ctx: commands.Context) -> bool:
+        if _is_premium(ctx.author):
+            return True
+        bucket = mapping.get_bucket(ctx.message)
+        retry_after = bucket.update_rate_limit() if bucket else None
+        if retry_after:
+            # security.py's error handler shows "Wait Xm Ys before using this again".
+            raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
+        return True
+    return commands.check(predicate)
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _in_match(bot, user_id: int) -> bool:
@@ -547,7 +564,7 @@ class SquadCog(commands.Cog, name="Squad"):
 
     # -- XI image + team OVR ----------------------------------------------
     @commands.command(name="csovr")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @premium_cooldown(30 * 60)          # normal users: 30 min, Premium: none
     async def csovr(self, ctx: commands.Context):
         """Your real playing XI as an image, with the team OVR."""
         if not await _need_debut(ctx):

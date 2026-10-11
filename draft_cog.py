@@ -50,7 +50,7 @@ import squad_logic as sl
 from bot_guard import ADMIN_GUILD_ID, is_staff
 from economy_cog import economy_cooldown, send_next_pending
 from security import OwnedView, esc
-from squad_cog import _card_line, _in_match, _need_debut
+from squad_cog import _card_line, _in_match, _need_debut, premium_cooldown
 
 _HERE = Path(__file__).parent
 _rng = secrets.SystemRandom()
@@ -373,7 +373,7 @@ class DraftCog(commands.Cog, name="Draft"):
             print(f"[draft] could not load pools: {e}")
 
     @commands.command(name="csdraft")
-    @economy_cooldown()
+    @premium_cooldown(2 * 60)           # normal users: 2 min, Premium: none
     async def csdraft(self, ctx: commands.Context):
         """Open the Draft screen."""
         if not await _need_debut(ctx):

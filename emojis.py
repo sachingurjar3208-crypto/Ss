@@ -24,9 +24,19 @@ SQUAD        = "<:Squad:1558139688231903322>"         # single player icon: squa
 COIN         = "<:CSCoin:1558139683702055062>"
 MONTHLY      = "<:Monthlypack:1558138440208486440>"
 WEEKLY       = "<:Weeklypack:1558138384675905536>"
-# Voucher (Draft currency). Put the full custom emoji here, like "<:Voucher:123456789012345678>".
-# Until then a normal ticket emoji is shown so nothing breaks.
-VOUCHER      = "🎟️"
+VOUCHER      = "<:Voucher:1558696772975464458>"       # Draft currency
+
+# Player roles (Developer Portal names: Legspin, Allrounder, Batter, Pacer, Mediumpacer)
+LEGSPIN      = "<:Legspin:1558757461081722882>"
+ALLROUNDER   = "<:Allrounder:1558757458762014730>"
+BATTER       = "<:Batter:1558757456337965186>"
+PACER        = "<:Pacer:1558757453846548560>"
+MEDIUMPACER  = "<:Mediumpacer:1558757449878605884>"
+
+# Milestone / wicket emojis (animated: <a:...>)
+HALFCENTURY  = "<a:Halfcentury:1558777604042137700>"
+CENTURY      = "<a:Century:1558781921389977650>"
+LBW          = "<a:LBW:1558777617434419240>"
 
 # Reward emoji by claim type (csdaily / csweekly / csmonthly)
 REWARD = {"daily": DAILY, "weekly": WEEKLY, "monthly": MONTHLY}

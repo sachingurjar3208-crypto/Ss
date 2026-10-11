@@ -16,9 +16,8 @@ from discord.ext import commands
 import economy
 import quest
 import quest_image
-from economy_cog import economy_cooldown
 from security import OwnedView
-from squad_cog import _need_debut
+from squad_cog import _need_debut, premium_cooldown
 
 
 async def _render(user_id: int, team_name: str):
@@ -58,7 +57,7 @@ class QuestCog(commands.Cog, name="Quest"):
             print(f"[quest] could not create quest tables: {e}")
 
     @commands.command(name="csquest", aliases=["csquests", "quests"])
-    @economy_cooldown()
+    @premium_cooldown(5 * 60)           # normal users: 5 min, Premium: none
     async def csquest(self, ctx: commands.Context):
         """Show today's quests and your progress."""
         if not await _need_debut(ctx):
