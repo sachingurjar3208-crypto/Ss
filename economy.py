@@ -36,6 +36,8 @@ STREAK_EVERY          = 7
 STREAK_MILESTONE_EVERY = 50
 STREAK_MILESTONE_MULT  = 3      # per STREAK_MILESTONE_EVERY days
 WEEKLY_REWARD = 30_000
+WEEKLY_VOUCHERS = 5      # every weekly claim also gives this many vouchers
+STREAK_VOUCHERS = 3      # vouchers on every 7th daily-streak day (7, 14, 21 ...). No vouchers on other days.
 MONTHLY_REWARD = 100_000
 LOSS_REWARD_PER_OVER = 150       # loser gets overs x this, but only in matches of LOSS_MIN_OVERS or more
 LOSS_MIN_OVERS       = 10        # (10 overs = 1,500 ... 20 overs = 3,000; under 10 overs = nothing)
@@ -479,7 +481,8 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
     A card the user already owns is skipped if they have any unowned one left in
     the pool; otherwise it turns into coins using `dupe_values`.
     Returns {"ok": True, "coins", "base", "bonus", "balance", "streak",
-             "card": key|None, "dupe": bool, "refund": n, "pending": bool (squad full)}
+             "card": key|None, "dupe": bool, "refund": n, "pending": bool (squad full),
+             "vouchers": n (weekly: 5, daily: 3 on every 7th streak day, else 0)}
     or {"ok": False, "wait": seconds_left}."""
     if kind not in COOLDOWNS:
         raise ValueError("unknown reward kind")
@@ -512,6 +515,14 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
         coins = base + bonus
         conn.execute(f"UPDATE users SET {col} = ? WHERE user_id = ?", (now, uid))
         balance = _apply_coins(conn, uid, coins, f"{kind} reward" + (f" (streak {streak} bonus)" if bonus else ""))
+        # Vouchers (same transaction as the claim: both happen or neither does).
+        vouchers = 0
+        if kind == "weekly":
+            vouchers = WEEKLY_VOUCHERS
+            _voucher_change(conn, uid, vouchers, "Weekly reward")
+        elif kind == "daily" and streak > 0 and streak % STREAK_EVERY == 0:
+            vouchers = STREAK_VOUCHERS
+            _voucher_change(conn, uid, vouchers, f"Daily streak {streak}")
         card_key, dupe, refund, pending = None, False, 0, False
         pool = list(card_pool or [])
         if pool:
@@ -528,7 +539,8 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
                 if refund:
                     balance = _apply_coins(conn, uid, refund, f"Duplicate refund ({kind} reward)")
         return {"ok": True, "coins": coins, "base": base, "bonus": bonus, "balance": balance,
-                "streak": streak, "card": card_key, "dupe": dupe, "refund": refund, "pending": pending}
+                "streak": streak, "card": card_key, "dupe": dupe, "refund": refund, "pending": pending,
+                "vouchers": vouchers}
 
 
 # ── Owned cards ─────────────────────────────────────────────────────────────

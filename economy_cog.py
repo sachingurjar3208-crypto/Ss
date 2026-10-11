@@ -23,6 +23,7 @@ from discord.ext import commands
 import card_db
 import economy
 import emojis
+import quest
 import security
 import squad_logic as sl
 import card_cache
@@ -378,6 +379,8 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send(f"⏳ You already claimed your {kind} reward. Come back in **{fmt_wait(res['wait'])}**.")
             return
         lines = [f"{REWARD_EMOJI.get(kind, '🎁')} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**"]
+        if kind == "weekly" and res.get("vouchers"):
+            lines.append(f"{emojis.VOUCHER} Weekly vouchers: **+{res['vouchers']}**")
         if kind == "daily":
             streak = res["streak"]
             if res["bonus"]:
@@ -385,9 +388,11 @@ class EconomyCog(commands.Cog, name="Economy"):
                     f"🎉 Streak bonus: **+{economy.fmt_coins(res['bonus'])}** "
                     f"(daily {economy.fmt_coins(res['base'])} + streak {economy.fmt_coins(res['bonus'])})"
                 )
+            if res.get("vouchers"):
+                lines.append(f"{emojis.VOUCHER} {streak}-day streak reward: **+{res['vouchers']} vouchers**")
             nxt = economy.STREAK_EVERY - streak % economy.STREAK_EVERY
             lines.append(
-                f"<:Streak:1558139736617390292> Streak: **{streak}** day(s) — next streak bonus in **{nxt}** day(s). "
+                f"<:Streak:1558139736617390292> Streak: **{streak}** day(s) — next {economy.STREAK_VOUCHERS} vouchers in **{nxt}** day(s). "
                 f"Miss a day and it restarts from 1!"
             )
         if res["card"]:
@@ -404,6 +409,8 @@ class EconomyCog(commands.Cog, name="Economy"):
         await ctx.send("\n".join(lines))
         if res.get("pending"):
             await send_next_pending(ctx, ctx.author.id)
+        if kind == "daily":
+            await quest.track_and_notify(ctx, ctx.author.id, {"daily_claim": 1})
 
     @commands.command(name="csdaily")
     @economy_cooldown()
@@ -449,6 +456,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             err = economy.buy_pack(uid, key, spec["price"])
             if err:
                 return f"❌ {err}"
+            await quest.track_and_notify(ctx.channel, uid, {"packs_bought": 1})
             return (
                 f"✅ Bought 1× {spec['emoji']} {spec['label']} for {economy.fmt_coins(spec['price'])}. "
                 f"Open it with `csopen {key}`."
@@ -506,6 +514,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         await ctx.send(embed=embed)
         if result.get("pending"):
             await send_next_pending(ctx, ctx.author.id)
+        await quest.track_and_notify(ctx, ctx.author.id, {"packs_opened": 1})
 
     # -- buy / sell ------------------------------------------------------
     @commands.command(name="csbuy")
@@ -681,6 +690,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         medals = ["🥇", "🥈", "🥉"]
         lines = [f"{medals[i] if i < 3 else f'`{i + 1}.`'} **{esc(n)}** — {v}" for i, (n, v) in enumerate(rows)]
         await ctx.send(embed=discord.Embed(title=title, description="\n".join(lines), color=discord.Color.gold()))
+        await quest.track_and_notify(ctx, ctx.author.id, {"lb_view": 1})
 
 
 async def setup(bot: commands.Bot):

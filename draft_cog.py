@@ -11,6 +11,8 @@ Owner / admin  (text commands, main server only)
     csvoucher check @user        see someone's vouchers + draft counter   (also: voucher check)
     csvoucher give @user <n>     give vouchers
     csvoucher remove @user <n>   take vouchers (stops at 0)
+    /pool animation pool:A pathname:<name> url:<link>   add a Pool A animation (plays on a Pool A pull)
+    /pool animation_merge pathname:<name> url:<link>    replace that animation completely
 
 Safety
 - The whole draft (take vouchers, roll cards, give cards, move the Pool A
@@ -41,6 +43,8 @@ import draft_config as cfg
 import draft_image
 import economy
 import emojis
+import pool_anim
+import quest
 import security
 import squad_logic as sl
 from bot_guard import ADMIN_GUILD_ID, is_staff
@@ -257,6 +261,7 @@ class DraftView(OwnedView):
                 return
             _last_draft[uid] = time.monotonic()
             await self._show_result(interaction, res, by_key, count)
+            await quest.track_and_notify(interaction.channel, uid, {"drafts": count})
         finally:
             _busy.discard(uid)
 
@@ -284,9 +289,16 @@ class DraftView(OwnedView):
         result_file = discord.File(buf, filename="draft.jpg")
 
         got_a = any(r["pool"] == "A" for r in rows)
-        anim = _HERE / cfg.POOL_A_ANIMATION_FILE
+        # The animation only plays when a Pool A player was pulled. Animations come from
+        # `/pool animation` (one is picked at random); the old single file is the fallback.
+        anim = None
+        if got_a:
+            anim = await asyncio.to_thread(pool_anim.pick, "A")
+            if anim is None:
+                legacy = _HERE / cfg.POOL_A_ANIMATION_FILE
+                anim = legacy if legacy.exists() else None
         msg = None
-        if got_a and anim.exists():
+        if got_a and anim is not None:
             try:
                 ext = anim.suffix.lower() or ".gif"
                 anim_embed = discord.Embed(color=draft_color("A"))
@@ -300,7 +312,7 @@ class DraftView(OwnedView):
                 print(f"[draft] animation step failed: {e}")
                 msg = None
         if msg is None:
-            if got_a and anim.exists():                     # animation failed: rebuild the file, send plain
+            if got_a and anim is not None:                  # animation failed: rebuild the file, send plain
                 result_file = discord.File(io.BytesIO(buf.getvalue()), filename="draft.jpg")
             await interaction.followup.send(embed=embed, file=result_file)
 
@@ -333,6 +345,11 @@ async def _pool_card_autocomplete(interaction: discord.Interaction, current: str
     return [app_commands.Choice(name=n[:100], value=n[:100]) for n in names[:25]]
 
 
+async def _anim_autocomplete(interaction: discord.Interaction, current: str):
+    found = await asyncio.to_thread(pool_anim.names, current)
+    return [app_commands.Choice(name=n, value=n) for n in found[:25]]
+
+
 class DraftCog(commands.Cog, name="Draft"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -340,6 +357,7 @@ class DraftCog(commands.Cog, name="Draft"):
     async def cog_load(self):
         try:
             await asyncio.to_thread(economy.ensure_draft_tables)
+            await asyncio.to_thread(pool_anim.ensure_table)
         except Exception as e:
             print(f"[draft] could not create voucher tables: {e}")
         # warm the pool cache so the first csdraft is fast and typos show in the console
@@ -498,6 +516,60 @@ class DraftCog(commands.Cog, name="Draft"):
             for c in rows
         ]
         await interaction.followup.send((f"**Pool {letter}** ({len(rows)} cards)\n" + "\n".join(lines))[:1900], ephemeral=True)
+
+    # -- Pool A animation (shown when someone pulls a Pool A player) -------
+    @pool.command(name="animation", description="Add a Pool animation: plays when someone pulls a Pool A player")
+    @app_commands.describe(
+        pool="Which pool (only Pool A for now)",
+        pathname="A short name for this animation, e.g. golden_a (letters, numbers, - and _)",
+        url="Link to the GIF (Giphy links work)",
+    )
+    @app_commands.choices(pool=[app_commands.Choice(name="Pool A", value="A")])
+    async def pool_animation(self, interaction: discord.Interaction, pool: app_commands.Choice[str],
+                             pathname: str, url: str):
+        if not await self._staff_only(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            res = await pool_anim.add(pool.value, pathname, url)
+        except pool_anim.AnimError as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            return
+        await self._anim_done(interaction, f"✅ Animation **{res['pathname']}** saved for **Pool {res['pool']}**.", res)
+
+    @pool.command(name="animation_merge", description="Replace a Pool animation with a new one (the old one is deleted)")
+    @app_commands.describe(
+        pathname="Name of the animation to replace",
+        url="Link to the NEW GIF (Giphy links work)",
+    )
+    @app_commands.autocomplete(pathname=_anim_autocomplete)
+    async def pool_animation_merge(self, interaction: discord.Interaction, pathname: str, url: str):
+        if not await self._staff_only(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            res = await pool_anim.merge(pathname, url)
+        except pool_anim.AnimError as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            return
+        await self._anim_done(
+            interaction,
+            f"✅ **{res['pathname']}** replaced. The old animation is deleted; Pool {res['pool']} now uses the new one.",
+            res,
+        )
+
+    @staticmethod
+    async def _anim_done(interaction: discord.Interaction, text: str, res: dict) -> None:
+        """Confirm to the admin, with a preview of the saved animation."""
+        path = res["file"]
+        try:
+            await interaction.followup.send(
+                text + "\nIt plays whenever someone pulls a Pool A player.",
+                file=discord.File(str(path), filename=f"preview{path.suffix}"),
+                ephemeral=True,
+            )
+        except discord.HTTPException:
+            await interaction.followup.send(text, ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

@@ -167,6 +167,13 @@ def save_innings(
     saved.add(inn)
     game._career_saved_innings = saved
 
+    # Daily quests: credit this innings' runs / sixes / wickets (real matches only).
+    try:
+        import quest
+        quest.on_innings(game, batting_user_id, bowling_user_id)
+    except Exception as e:
+        print(f"[quest] innings tracking failed: {type(e).__name__}: {e}")
+
     dismissed = set(getattr(game, "dismissed", []) or [])
 
     bat_rows: dict[str, dict] = {}

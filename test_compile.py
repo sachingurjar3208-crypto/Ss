@@ -7,6 +7,9 @@ files = [
     'card_db.py',
     'card_image.py',
     'cardmaker_cog.py',
+    'quest.py',
+    'quest_cog.py',
+    'quest_image.py',
 ]
 
 failed = False

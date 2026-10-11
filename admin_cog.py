@@ -6,6 +6,10 @@
     admin player reset @user all      (cards only)
     admin reset all @user             (coins -> 0 AND all cards removed)
     admin user top [20-50] [coins|cards]   (owner / admin role only)
+    admin voucher give @user <n>
+    admin voucher remove @user <n>
+    admin voucher check @user
+    admin quest reset @user      (clears today's quest progress for that user)
 """
 from __future__ import annotations
 
@@ -13,9 +17,13 @@ import discord
 from discord.ext import commands
 
 import card_db
+import draft_config as cfg
 import economy
+import emojis
+import quest
 import security
 import squad_logic as sl
+from bot_guard import ADMIN_GUILD_ID
 from security import esc
 
 ADMIN_ROLE_IDS = {1556267277249155156, *security.FULL_ADMIN_ROLE_IDS}
@@ -53,7 +61,11 @@ class AdminCog(commands.Cog):
             "`admin coin remove @user <coins>`\n"
             "`admin player reset @user all`\n"
             "`admin reset all @user`\n"
-            "`admin user top [20-50] [coins|cards]`"
+            "`admin user top [20-50] [coins|cards]`\n"
+            "`admin voucher give @user <number>`\n"
+            "`admin voucher remove @user <number>`\n"
+            "`admin voucher check @user`\n"
+            "`admin quest reset @user`"
         )
 
     # -- cards -----------------------------------------------------------
@@ -153,6 +165,100 @@ class AdminCog(commands.Cog):
         await ctx.send(
             f"✅ Full reset for {esc(member.display_name)}: removed **{res['cards']}** card(s) "
             f"and **{economy.fmt_coins(res['coins'])}**. Their packs, XI and captain were cleared too."
+        )
+
+    # -- vouchers --------------------------------------------------------
+    # Same rules as csvoucher (draft_cog): owner / full-admin only, main server
+    # only, 1..VOUCHER_ADMIN_MAX per command, logged in voucher_log.
+    @admin.group(name="voucher", invoke_without_command=True)
+    @security.owner_or_admin_role()
+    async def voucher(self, ctx: commands.Context):
+        await ctx.send(
+            "`admin voucher give @user <number>`\n"
+            "`admin voucher remove @user <number>`\n"
+            "`admin voucher check @user`"
+        )
+
+    @staticmethod
+    def _main_guild(ctx: commands.Context) -> bool:
+        return ctx.guild is not None and ctx.guild.id == ADMIN_GUILD_ID
+
+    @voucher.command(name="give")
+    @security.owner_or_admin_role()
+    async def voucher_give(self, ctx: commands.Context, member: discord.Member, amount: int):
+        if not self._main_guild(ctx):
+            return
+        if member.bot:
+            await ctx.send("❌ Bots can't have vouchers.")
+            return
+        if not 1 <= amount <= cfg.VOUCHER_ADMIN_MAX:
+            await ctx.send(f"❌ Give between 1 and {cfg.VOUCHER_ADMIN_MAX:,} vouchers at a time.")
+            return
+        new = economy.add_vouchers(member.id, amount, f"Admin give by {ctx.author.id}")
+        if new is None:
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        await ctx.send(
+            f"✅ Gave **{amount:,}** {emojis.VOUCHER} to {esc(member.display_name)}. "
+            f"They now have **{new:,}**.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @voucher.command(name="remove")
+    @security.owner_or_admin_role()
+    async def voucher_remove(self, ctx: commands.Context, member: discord.Member, amount: int):
+        if not self._main_guild(ctx):
+            return
+        if not 1 <= amount <= cfg.VOUCHER_ADMIN_MAX:
+            await ctx.send(f"❌ Remove between 1 and {cfg.VOUCHER_ADMIN_MAX:,} vouchers at a time.")
+            return
+        out = economy.remove_vouchers(member.id, amount, f"Admin remove by {ctx.author.id}")
+        if out is None:
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        removed, new = out
+        await ctx.send(
+            f"✅ Removed **{removed:,}** {emojis.VOUCHER} from {esc(member.display_name)}. "
+            f"They now have **{new:,}**.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @voucher.command(name="check")
+    @security.owner_or_admin_role()
+    async def voucher_check(self, ctx: commands.Context, member: discord.Member):
+        if not self._main_guild(ctx):
+            return
+        if not economy.user_exists(member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        have = economy.get_vouchers(member.id)
+        since = economy.get_draft_pity(member.id)
+        left = max(1, cfg.PITY_A_EVERY - since)
+        await ctx.send(
+            f"{emojis.VOUCHER} **{esc(member.display_name)}** has **{have:,}** voucher(s).\n"
+            f"Pool A guaranteed in **{left}** draft(s).",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    # -- quests ----------------------------------------------------------
+    @admin.group(name="quest", invoke_without_command=True)
+    @security.owner_or_admin_role()
+    async def quest_group(self, ctx: commands.Context):
+        await ctx.send("Usage: `admin quest reset @user`")
+
+    @quest_group.command(name="reset")
+    @security.owner_or_admin_role()
+    async def quest_reset(self, ctx: commands.Context, member: discord.Member):
+        if not self._main_guild(ctx):
+            return
+        if not economy.user_exists(member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        n = quest.reset_user_today(member.id)
+        await ctx.send(
+            f"✅ Cleared today's quest progress for {esc(member.display_name)} "
+            f"({n} finished quest(s) reset). Vouchers already paid were not taken back.",
+            allowed_mentions=discord.AllowedMentions.none(),
         )
 
     # -- user stats ------------------------------------------------------

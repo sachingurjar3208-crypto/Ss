@@ -20,6 +20,7 @@ from discord.ext import commands
 import card_cache
 import card_db
 import economy
+import quest
 import security
 import squad_logic as sl
 from squad_image import build_team_image, FILENAME as TEAM_IMG_NAME
@@ -541,6 +542,8 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         view = AutoXiView(ctx.author.id) if target.id == ctx.author.id else None
         await ctx.send(embed=_xi_embed(target, user), view=view)
+        if target.id == ctx.author.id:
+            await quest.track_and_notify(ctx, ctx.author.id, {"xi_view": 1})
 
     # -- XI image + team OVR ----------------------------------------------
     @commands.command(name="csovr")
@@ -752,6 +755,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(f"❌ {err}")
             return
         await ctx.send(f"<:Captain:1558139695177932951> **{esc(card['playername'])}** is now your captain.")
+        await quest.track_and_notify(ctx, ctx.author.id, {"captain_set": 1})
 
     # -- team name -------------------------------------------------------
     @commands.command(name="csteamname")
@@ -801,6 +805,8 @@ class SquadCog(commands.Cog, name="Squad"):
         embed.add_field(name="<:Streak:1558139736617390292> Daily streak", value=str(user["daily_streak"]))
         embed.add_field(name=f"Form (last {len(form)})", value=f"{form_txt}\n{wins} win(s)" if form else form_txt)
         await ctx.send(embed=embed)
+        if target.id == ctx.author.id:
+            await quest.track_and_notify(ctx, ctx.author.id, {"profile_view": 1})
 
     # -- help ------------------------------------------------------------
     @commands.command(name="cshelp")
@@ -819,7 +825,8 @@ class SquadCog(commands.Cog, name="Squad"):
         ), inline=False)
         embed.add_field(name="Economy", value=(
             "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"
-            "`cstrade @user my player | their player` (same OVR, 5,000 coins fee each) `cspending` `csleaderboard`"
+            "`cstrade @user my player | their player` (same OVR, 5,000 coins fee each) `cspending` `csleaderboard`\n"
+            "`csquest` 5 daily quests, 1 voucher each · `csdraft` use vouchers"
         ), inline=False)
         embed.add_field(name="Play", value="`csmp @user <overs>` challenge • `cscancel` cancel match", inline=False)
         await ctx.send(embed=embed)

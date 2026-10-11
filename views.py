@@ -325,17 +325,32 @@ def get_career_stats(user_id, player_name):
 from match_records import record_match_result as _record_match_result
 
 
+async def _flush_quest_notes(channel, game):
+    """Tell the players which daily quests they just finished (never raises)."""
+    try:
+        import quest
+        await quest.flush_notes(channel, [game.batting_user_id, game.bowling_user_id])
+    except Exception as e:
+        print(f"[quest] announce failed: {type(e).__name__}: {e}")
+
+
 def _save_match_record(game):
     """Derive winner/loser and persist to match_records. Ignores ties."""
     t1 = game.runs[0]
     t2 = game.runs[1]
-    if t1 == t2:
-        return  # tie — don't record
     # After start_second_innings():
     #   bowling_user_id  = innings-1 batter (defending team)
     #   batting_user_id  = innings-2 batter (chasing team)
     inn1_uid = game.bowling_user_id
     inn2_uid = game.batting_user_id
+    # Daily quests (real matches only: practice never calls this). Ties count as played.
+    try:
+        import quest
+        quest.on_match_end(game, inn1_uid, inn2_uid, t1, t2)
+    except Exception as e:
+        print(f"[quest] match tracking failed: {type(e).__name__}: {e}")
+    if t1 == t2:
+        return  # tie — don't record
     if t2 > t1:
         winner_id, loser_id = inn2_uid, inn1_uid
         winner_score, loser_score = t2, t1
@@ -1237,6 +1252,7 @@ async def _process_delivery(
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
                 await _send_match_summary(channel, game)
+                await _flush_quest_notes(channel, game)
                 active_games.pop(channel.id, None)
             return
 
@@ -1301,6 +1317,7 @@ async def _handle_wicket_fall(channel, game: GameState):
             _save_match_record(game)
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
+            await _flush_quest_notes(channel, game)
             active_games.pop(channel.id, None)
         return
 
