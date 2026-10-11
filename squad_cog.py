@@ -446,6 +446,21 @@ class SquadCog(commands.Cog, name="Squad"):
         styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
         if styles:   # only cards that have a playstyle/narrative
             lines.append("Playstyle: " + " · ".join(styles))
+        # Preferred look: one image card. If anything goes wrong while drawing it,
+        # fall back to the old text embed below so csview never breaks.
+        try:
+            from csview_image import generate_view_card
+            png = await asyncio.to_thread(
+                generate_view_card,
+                card["playername"], card["ovr"], card["bat"], card["bowl"],
+                ctx.author.display_name, f"{sl.sell_value(card):,} coins",
+                bat, bowl, card["image_path"], styles,
+            )
+            await ctx.send(file=discord.File(io.BytesIO(png), filename="csview.png"))
+            return
+        except Exception as e:
+            print(f"[csview] image card failed, using text embed: {e}")
+
         embed = discord.Embed(
             title=f"Player Stats: {esc(card['playername'])}",
             description="```\n" + "\n".join(lines) + "\n\n" + table + "\n```",
