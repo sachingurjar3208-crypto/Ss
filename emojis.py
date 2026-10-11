@@ -24,6 +24,9 @@ SQUAD        = "<:Squad:1558139688231903322>"         # single player icon: squa
 COIN         = "<:CSCoin:1558139683702055062>"
 MONTHLY      = "<:Monthlypack:1558138440208486440>"
 WEEKLY       = "<:Weeklypack:1558138384675905536>"
+# Voucher (Draft currency). Put the full custom emoji here, like "<:Voucher:123456789012345678>".
+# Until then a normal ticket emoji is shown so nothing breaks.
+VOUCHER      = "🎟️"
 
 # Reward emoji by claim type (csdaily / csweekly / csmonthly)
 REWARD = {"daily": DAILY, "weekly": WEEKLY, "monthly": MONTHLY}

@@ -22,6 +22,7 @@ from discord.ext import commands
 
 import card_db
 import economy
+import emojis
 import security
 import squad_logic as sl
 import card_cache
@@ -343,14 +344,14 @@ class EconomyCog(commands.Cog, name="Economy"):
     @commands.command(name="csbal")
     @economy_cooldown()
     async def csbal(self, ctx: commands.Context):
-        """Show your coins and unopened packs."""
+        """Show your coins and vouchers."""
         if not await _need_debut(ctx):
             return
-        packs = economy.get_packs(ctx.author.id)
-        pack_txt = ", ".join(f"{sl.PACKS[t]['emoji']} {n}× {sl.PACKS[t]['label']}" for t, n in packs.items() if t in sl.PACKS)
+        coins = economy.get_balance(ctx.author.id)
+        vouchers = economy.get_vouchers(ctx.author.id)
         await ctx.send(
-            f"Purse: **{economy.fmt_coins(economy.get_balance(ctx.author.id))}**"
-            + (f"\n📦 Unopened: {pack_txt}" if pack_txt else "")
+            f"Purse: **{economy.fmt_coins(coins)}**\n"
+            f"{emojis.VOUCHER} Vouchers: **{vouchers:,}**"
         )
 
     # -- rewards ---------------------------------------------------------

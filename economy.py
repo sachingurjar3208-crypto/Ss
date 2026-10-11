@@ -177,6 +177,23 @@ def init_economy_db() -> None:
                 ts         REAL    NOT NULL,
                 PRIMARY KEY (user_id, player_key)
             );
+            CREATE TABLE IF NOT EXISTS vouchers (
+                user_id INTEGER PRIMARY KEY,
+                amount  INTEGER NOT NULL DEFAULT 0 CHECK (amount >= 0)
+            );
+            CREATE TABLE IF NOT EXISTS voucher_log (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER NOT NULL,
+                delta         INTEGER NOT NULL,
+                reason        TEXT,
+                balance_after INTEGER NOT NULL,
+                ts            REAL    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_voucher_log_user ON voucher_log (user_id, ts);
+            CREATE TABLE IF NOT EXISTS draft_pity (
+                user_id INTEGER PRIMARY KEY,
+                since_a INTEGER NOT NULL DEFAULT 0 CHECK (since_a >= 0)
+            );
             """
         )
     finally:
@@ -756,6 +773,139 @@ def open_pack(user_id, pack_type: str, keys: list[str], dupe_values: dict[str, i
         return {"new": new, "pending": pending, "dupes": dupes, "refund": refund}
 
 
+# ── Vouchers & Draft ─────────────────────────────────────────────────────────
+# Safety rules (same style as coins):
+#  * vouchers are integers that can NEVER go below 0 (DB CHECK + checked inside
+#    the transaction), and are capped at MAX_VOUCHERS.
+#  * a draft takes the vouchers, rolls the cards, hands them over and moves the
+#    "guarantee" counter in ONE transaction: a crash or a button spam can never
+#    give a card without paying, or charge without giving.
+#  * every change is written to voucher_log (who, how many, why).
+
+MAX_VOUCHERS = 1_000_000
+
+
+def get_vouchers(user_id) -> int:
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (_uid(user_id),)).fetchone()
+        return int(row["amount"]) if row else 0
+    finally:
+        conn.close()
+
+
+def _voucher_change(conn: sqlite3.Connection, uid: int, delta: int, reason: str) -> int:
+    """Add/remove vouchers inside an open transaction. Never below 0, never above MAX_VOUCHERS."""
+    row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
+    cur = int(row["amount"]) if row else 0
+    new = max(0, min(MAX_VOUCHERS, cur + int(delta)))
+    conn.execute(
+        "INSERT INTO vouchers (user_id, amount) VALUES (?, ?) "
+        "ON CONFLICT(user_id) DO UPDATE SET amount = excluded.amount",
+        (uid, new),
+    )
+    conn.execute(
+        "INSERT INTO voucher_log (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, ?, ?)",
+        (uid, new - cur, (reason or "")[:120], new, time.time()),
+    )
+    return new
+
+
+def add_vouchers(user_id, amount: int, reason: str = "") -> int | None:
+    """Give vouchers. Returns the new amount, or None if the user hasn't debuted."""
+    uid = _uid(user_id)
+    amount = int(amount)
+    if amount <= 0:
+        return None
+    with _tx() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return None
+        return _voucher_change(conn, uid, amount, reason)
+
+
+def remove_vouchers(user_id, amount: int, reason: str = "") -> tuple[int, int] | None:
+    """Take vouchers away (stops at 0). Returns (removed, new_amount) or None if the user hasn't debuted."""
+    uid = _uid(user_id)
+    amount = int(amount)
+    if amount <= 0:
+        return None
+    with _tx() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return None
+        row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
+        cur = int(row["amount"]) if row else 0
+        new = _voucher_change(conn, uid, -amount, reason)
+        return cur - new, new
+
+
+def get_draft_pity(user_id) -> int:
+    """How many drafts since the user's last Pool A card."""
+    conn = _conn()
+    try:
+        row = conn.execute("SELECT since_a FROM draft_pity WHERE user_id = ?", (_uid(user_id),)).fetchone()
+        return int(row["since_a"]) if row else 0
+    finally:
+        conn.close()
+
+
+def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_value_fn) -> dict | str:
+    """Run `count` drafts in ONE transaction. Returns a dict or an error text.
+
+    roll_fn(force_a: bool) -> (pool_letter, player_key) | None   (picks one card)
+    dupe_value_fn(player_key) -> coins given back if the card is a duplicate
+
+    Counter: every draft adds 1 to since_a. When it reaches `pity_at` that draft
+    is a guaranteed Pool A card. Any Pool A card (lucky or guaranteed) resets it.
+    Result: {"results": [{"pool","key","status","refund"}], "refund": n,
+             "vouchers": left, "pity": counter}
+    """
+    uid = _uid(user_id)
+    count = int(count)
+    cost = int(cost_each) * count
+    if count <= 0 or cost <= 0:
+        return "Invalid draft."
+    with _tx() as conn:
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return "You haven't debuted yet."
+        row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
+        have = int(row["amount"]) if row else 0
+        if have < cost:
+            return f"Not enough vouchers (need {cost}, you have {have})."
+        prow = conn.execute("SELECT since_a FROM draft_pity WHERE user_id = ?", (uid,)).fetchone()
+        since = int(prow["since_a"]) if prow else 0
+
+        left = _voucher_change(conn, uid, -cost, f"Draft x{count}")
+        results, seen, total_refund = [], set(), 0
+        for _ in range(count):
+            since += 1
+            force_a = since >= int(pity_at)
+            rolled = roll_fn(force_a)
+            if rolled is None:
+                # nothing could be rolled (no cards in game) -> undo everything
+                raise sqlite3.Error("draft roll failed")
+            pool, key = rolled
+            if pool == "A":
+                since = 0
+            if key in seen:
+                status = "dupe"
+            else:
+                status = _grant(conn, uid, key, f"Draft pool {pool}")
+                seen.add(key)
+            refund = 0
+            if status == "dupe":
+                refund = int(dupe_value_fn(key))
+                total_refund += refund
+            results.append({"pool": pool, "key": key, "status": status, "refund": refund})
+        if total_refund:
+            _apply_coins(conn, uid, total_refund, f"Duplicate refund (draft x{count})")
+        conn.execute(
+            "INSERT INTO draft_pity (user_id, since_a) VALUES (?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET since_a = excluded.since_a",
+            (uid, since),
+        )
+        return {"results": results, "refund": total_refund, "vouchers": left, "pity": since}
+
+
 def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
     """Give the one-time starter squad and set the XI. None on success."""
     uid = _uid(user_id)
@@ -926,6 +1076,8 @@ def reset_everything(user_id) -> dict:
         _ensure_pending_table(conn)
         conn.execute("DELETE FROM pending_cards WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM packs WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM vouchers WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM draft_pity WHERE user_id = ?", (uid,))
         conn.execute("UPDATE users SET purse = 0, captain_key = NULL WHERE user_id = ?", (uid,))
         if old:
             conn.execute(
