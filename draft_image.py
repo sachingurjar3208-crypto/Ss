@@ -148,13 +148,6 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
             x = gx + (i % 3) * (int(ch * 0.684) + gap)
             y = gy + (i // 3) * (ch + gap)
             cw_i = _paste_card(img, c, x, y, ch)
-            pct = shares.get(c["playername_key"])
-            if pct is not None:
-                txt = f"{pct:g}%"
-                bw = int(d.textlength(txt, font=_f(_LAB, 26))) + 22
-                bx = x + (cw_i - bw) // 2
-                d.rounded_rectangle([bx, y + ch - 36, bx + bw, y + ch - 8], radius=8, fill=(0, 20, 80), outline=col, width=2)
-                d.text((bx + bw // 2, y + ch - 22), txt, font=_f(_LAB, 26), fill=WHITE, anchor="mm")
         if not chunk:
             d.text((gx, gy + 40), "No cards added to this pool yet", font=_f(_LAB, 30), fill=DIM, anchor="lm")
 
@@ -174,7 +167,6 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
     else:
         sub = "FIXED CARDS ONLY"
     d.text((1230, 290), sub, font=_f(_LAB, 38), fill=WHITE, anchor="rm")
-    d.text((1230, 340), f"CHANCE  {odds.get(pool, 0)}%  PER DRAFT", font=_f(_LAB, 32), fill=DIM, anchor="rm")
 
     if len(_base_cache) >= 24:
         _base_cache.pop(next(iter(_base_cache)))

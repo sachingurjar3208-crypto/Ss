@@ -958,6 +958,18 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
         _ensure_draft_tables(conn)
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return "You haven't debuted yet."
+        # Squad limit: every pack can add one card, so the squad (owned + cards already
+        # waiting) must have room for ALL packs. Checked before anything is charged.
+        _ensure_pending_table(conn)
+        held = _squad_count(conn, uid) + int(
+            conn.execute("SELECT COUNT(*) AS n FROM pending_cards WHERE user_id = ?", (uid,)).fetchone()["n"]
+        )
+        if held + count > SQUAD_MAX:
+            need = held + count - SQUAD_MAX
+            return (
+                f"Your squad limit is {SQUAD_MAX}. You have {held} card(s) and this opens {count} pack(s). "
+                f"You need to sell at least {need} card(s) first (`cssell`)."
+            )
         row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
         have = int(row["amount"]) if row else 0
         if have < cost:

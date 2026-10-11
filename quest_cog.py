@@ -2,7 +2,7 @@
 
     csquest      today's 5 quests with your progress (aliases: csquests, quests)
 
-Every finished quest pays 1 voucher automatically. Rules, quest list and
+Finishing ALL of the day's quests pays 1 voucher automatically. Rules, quest list and
 settings are in quest.py. The image is drawn by quest_image.py.
 """
 from __future__ import annotations
@@ -28,9 +28,9 @@ async def _render(user_id: int, team_name: str):
     embed.set_image(url=f"attachment://{quest_image.FILENAME}")
     left = len(board["quests"]) - board["done_count"]
     if left == 0:
-        embed.set_footer(text="All quests done for today. New quests after the reset.")
+        embed.set_footer(text="All quests done, voucher earned. New quests after the reset.")
     else:
-        embed.set_footer(text=f"{quest.QUEST_VOUCHER} voucher for every quest you finish  |  {left} left today")
+        embed.set_footer(text=f"Finish all quests for {quest.QUEST_VOUCHER} voucher  |  {left} left today")
     return embed, discord.File(buf, filename=quest_image.FILENAME)
 
 

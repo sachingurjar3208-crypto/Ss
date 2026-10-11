@@ -119,11 +119,20 @@ def _make_roll(pools: dict[str, list], weights: dict[str, float]):
         if force_a and "A" in avail:
             pool = "A"
         else:
-            names = list(avail)
-            w = [max(0, float(cfg.ODDS.get(p, 0))) for p in names]
-            if sum(w) <= 0:
-                w = [1.0] * len(names)
-            pool = _rng.choices(names, weights=w, k=1)[0]
+            # Pool A is decided on its own: EXACTLY ODDS["A"]% per draft (3%), no matter
+            # whether Pool B / C have cards. Only the pity draft can add more.
+            a_chance = max(0.0, float(cfg.ODDS.get("A", 0)))
+            if "A" in avail and _rng.random() * 100.0 < a_chance:
+                pool = "A"
+            else:
+                others = [p for p in avail if p != "A"]
+                if not others:
+                    pool = "A"          # only Pool A has cards: nothing else to roll
+                else:
+                    w = [max(0.0, float(cfg.ODDS.get(p, 0))) for p in others]
+                    if sum(w) <= 0:
+                        w = [1.0] * len(others)
+                    pool = _rng.choices(others, weights=w, k=1)[0]
         rows = avail[pool]
         if pool in ("A", "B"):                       # fixed pools: each card has its own chance
             cw = [max(0.0, float(weights.get(r["playername_key"], 1.0))) for r in rows]
@@ -142,10 +151,7 @@ def _make_roll(pools: dict[str, list], weights: dict[str, float]):
 def _screen_embed(pool: str) -> discord.Embed:
     embed = discord.Embed(color=draft_color(pool))
     embed.set_image(url=f"attachment://{draft_image.FILENAME}")
-    embed.set_footer(
-        text=f"Pool A {cfg.ODDS['A']}% · Pool B {cfg.ODDS['B']}% · Pool C {cfg.ODDS['C']}%  |  "
-             f"Pool A is guaranteed on every {cfg.PITY_A_EVERY}th draft"
-    )
+    embed.set_footer(text=f"Pool A is guaranteed on every {cfg.PITY_A_EVERY}th draft")
     return embed
 
 
@@ -165,7 +171,7 @@ async def _render_screen(uid: int, pool: str, page: int) -> tuple[discord.Embed,
         pool, page, cards, vouchers, since, cfg.PITY_A_EVERY, dict(cfg.ODDS),
         (cfg.POOL_C_OVR_MIN, cfg.POOL_C_OVR_MAX),
         cfg.VOUCHERS_PER_DRAFT, cfg.VOUCHERS_PER_DRAFT * cfg.DRAFT_MULTI, cfg.DRAFT_MULTI,
-        shares_for(pools, pool),
+        {},
     )
     return _screen_embed(pool), discord.File(buf, filename=draft_image.FILENAME), page
 

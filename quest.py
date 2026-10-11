@@ -1,14 +1,16 @@
 """Daily Quest system.
 
 Every day (resets at midnight IST) there are 5 quests, the same for everybody:
-3 easy + 1 medium + 1 hard. Each quest you finish gives QUEST_VOUCHER voucher(s).
+3 easy + 1 medium + 1 hard. Finishing ALL of the day's quests gives QUEST_VOUCHER voucher(s)
+(one voucher for the whole day, NOT one per quest).
 The 5 quests change every day and are never the same set as yesterday.
 
 How it works
 - Game events call  track(user_id, {metric: amount})  (e.g. {"sixes": 2}).
 - Counters are stored per user per day. When a counter reaches a quest's target the
-  quest is marked done and the voucher is paid in the SAME database transaction,
-  so a quest can never pay twice and a crash can never pay without marking it.
+  quest is marked done. When the LAST quest of the day is marked done, the single daily
+  voucher is paid in the SAME database transaction, so it can never pay twice and a crash
+  can never pay without marking it.
 - Practice (bot) matches never reach these hooks, so they never count.
 - Match quests only count real matches of QUEST_MIN_OVERS+ overs, and at most
   QUEST_PER_OPP_CAP matches a day against the same opponent (stops alt farming).
@@ -25,7 +27,7 @@ from datetime import datetime, timedelta, timezone
 import economy
 
 # ── Settings ─────────────────────────────────────────────────────────────────
-QUEST_VOUCHER = 1            # vouchers for each finished quest
+QUEST_VOUCHER = 1            # vouchers for finishing ALL quests of the day (paid once)
 QUEST_MIN_OVERS = 2          # a match shorter than this does not count for quests
 QUEST_PER_OPP_CAP = 3        # matches per day vs the SAME opponent that count
 SLOTS = (("easy", 3), ("medium", 1), ("hard", 1))     # 5 quests a day
@@ -212,6 +214,8 @@ def today_quests() -> list[Quest]:
 
 # (user_id, quest_id) pairs finished by match code, waiting to be announced in the channel.
 _NOTES: list[tuple[int, str]] = []
+# (user_id, day) pairs whose final quest was finished by a track() call -> voucher just paid.
+_ALL_DONE: set[tuple[int, str]] = set()
 
 
 def track(user_id, metrics: dict) -> list[str]:
@@ -257,8 +261,16 @@ def track(user_id, metrics: dict) -> list[str]:
                 (uid, day, qid, time.time()),
             )
             if cur.rowcount == 1:
-                economy._voucher_change(conn, uid, QUEST_VOUCHER, f"Quest: {q.title}")
                 finished.append(qid)
+        if finished:
+            n_done = conn.execute(
+                "SELECT COUNT(*) AS n FROM quest_done WHERE user_id = ? AND day = ?", (uid, day)
+            ).fetchone()["n"]
+            if int(n_done) >= len(ids):
+                # whole day cleared: pay the one daily voucher (quest_done rows are unique
+                # per quest, so this block runs exactly once per user per day)
+                economy._voucher_change(conn, uid, QUEST_VOUCHER, "Quest: all daily quests complete")
+                _ALL_DONE.add((uid, day))
         return finished
 
 
@@ -290,7 +302,7 @@ def get_board(user_id) -> dict:
         "day": day,
         "quests": rows,
         "done_count": sum(1 for r in rows if r["done"]),
-        "vouchers_earned": sum(1 for r in rows if r["done"]) * QUEST_VOUCHER,
+        "vouchers_earned": QUEST_VOUCHER if rows and all(r["done"] for r in rows) else 0,
         "reset_in": seconds_to_reset(),
         "streak": int(user["daily_streak"]) if user else 0,
     }
@@ -418,10 +430,14 @@ def pop_notes(user_ids) -> list[tuple[int, str]]:
 def _notice_embed(pairs: list[tuple[int, str]]):
     import discord
     lines = []
+    day = today()
     for uid, qid in pairs:
         q = BY_ID.get(qid)
         if q:
-            lines.append(f"<@{uid}> finished **{q.title}**  ·  +{QUEST_VOUCHER} voucher")
+            lines.append(f"<@{uid}> finished **{q.title}**")
+        if (uid, day) in _ALL_DONE:
+            _ALL_DONE.discard((uid, day))
+            lines.append(f"<@{uid}> cleared ALL daily quests  ·  +{QUEST_VOUCHER} voucher")
     if not lines:
         return None
     embed = discord.Embed(title="Quest complete", description="\n".join(lines), color=0x2FBF9B)

@@ -167,9 +167,8 @@ def build_quest_board(board: dict, team_name: str = "") -> io.BytesIO:
         # right side: counter or DONE
         rx = W - SIDE - 24
         if fin:
-            _spaced(d, (rx, y + 26), "+1 VOUCHER", f_label, DIM, spacing=3, anchor="r")
-            tw2 = _spaced(d, (rx, y + 64), "COMPLETE", f_label, TEAL, spacing=3, anchor="r")
-            _check(d, rx - tw2 - 26, y + 76, 11, TEAL, 5)
+            tw2 = _spaced(d, (rx, y + ROW_H // 2 - 8), "COMPLETE", f_label, TEAL, spacing=3, anchor="r")
+            _check(d, rx - tw2 - 26, y + ROW_H // 2 + 4, 11, TEAL, 5)
         else:
             _counter(d, rx, y + ROW_H // 2 - 8, q["progress"], q["target"], f_count, WHITE, DIM)
             left = q["target"] - q["progress"]
