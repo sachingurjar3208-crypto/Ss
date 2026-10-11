@@ -687,8 +687,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if not rows:
             await ctx.send("No teams on the leaderboard yet.")
             return
-        medals = ["🥇", "🥈", "🥉"]
-        lines = [f"{medals[i] if i < 3 else f'`{i + 1}.`'} **{esc(n)}** — {v}" for i, (n, v) in enumerate(rows)]
+        lines = [f"`{i + 1}.` **{esc(n)}** — {v}" for i, (n, v) in enumerate(rows)]
         await ctx.send(embed=discord.Embed(title=title, description="\n".join(lines), color=discord.Color.gold()))
         await quest.track_and_notify(ctx, ctx.author.id, {"lb_view": 1})
 

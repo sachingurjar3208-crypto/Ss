@@ -44,7 +44,7 @@ def tier_of(ovr: int) -> str:
     return "common"
 
 
-TIER_EMOJI = {"elite": "🥇", "rare": "🥈", "common": "🥉"}
+TIER_EMOJI = {"elite": "", "rare": "", "common": ""}   # medal emojis removed everywhere
 
 
 def card_emoji(card) -> str:

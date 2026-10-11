@@ -84,7 +84,7 @@ async def _need_debut(ctx: commands.Context) -> bool:
 def _card_line(card, extra: str = "", emojis: bool = True) -> str:
     role = ROLES.get(card_db.effective_role(card), "?")
     if emojis:
-        prefix = f"{sl.card_emoji(card)} {sl.role_emoji(card)} "
+        prefix = f"{sl.role_emoji(card)} "
     else:
         prefix = ""   # plain text for non-premium members
     return f"{prefix}**{esc(card['playername'])}** · {card['ovr']} · {role}{extra}"
@@ -102,7 +102,7 @@ def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
             continue
         badge = " <:Captain:1558139695177932951>" if card["playername_key"] == cap_key else ""
         lines.append(
-            f"`{slot:>2}.` {sl.card_emoji(card)} **{esc(card['playername'])}** · "
+            f"`{slot:>2}.` **{esc(card['playername'])}** · "
             f"{card['ovr']} · {ROLES.get(card_db.effective_role(card), '?')}{badge}"
         )
     cards = sl.xi_cards(member.id)
@@ -409,7 +409,7 @@ class SquadCog(commands.Cog, name="Squad"):
         from card_narratives import NARRATIVES
         styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
         desc = (
-            f"{sl.card_emoji(card)} OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
+            f"OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
             f"{ROLES.get(card_db.effective_role(card), '?')}"
             + (f" · {HANDS.get(card['batting_hand'], '')} bat" if card["batting_hand"] else "")
             + (f" · {card_db.effective_bowling_type(card)}" if card_db.effective_bowling_type(card) else "")
