@@ -307,6 +307,10 @@ class DraftCog(commands.Cog, name="Draft"):
         self.bot = bot
 
     async def cog_load(self):
+        try:
+            await asyncio.to_thread(economy.ensure_draft_tables)
+        except Exception as e:
+            print(f"[draft] could not create voucher tables: {e}")
         # warm the pool cache so the first csdraft is fast and typos show in the console
         try:
             await asyncio.to_thread(get_pools, True)

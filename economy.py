@@ -785,9 +785,39 @@ def open_pack(user_id, pack_type: str, keys: list[str], dupe_values: dict[str, i
 MAX_VOUCHERS = 1_000_000
 
 
+def _ensure_draft_tables(conn: sqlite3.Connection) -> None:
+    """Create the voucher/draft tables on first use. The live database was made
+    before these existed and init_economy_db() is not run at start-up, so every
+    voucher function makes sure they are there (cheap, safe to repeat, and uses
+    plain execute() so it never ends a running transaction)."""
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS vouchers ("
+        "user_id INTEGER PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0 CHECK (amount >= 0))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS voucher_log ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, delta INTEGER NOT NULL, "
+        "reason TEXT, balance_after INTEGER NOT NULL, ts REAL NOT NULL)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_voucher_log_user ON voucher_log (user_id, ts)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS draft_pity ("
+        "user_id INTEGER PRIMARY KEY, since_a INTEGER NOT NULL DEFAULT 0 CHECK (since_a >= 0))"
+    )
+
+
+def ensure_draft_tables() -> None:
+    conn = _conn()
+    try:
+        _ensure_draft_tables(conn)
+    finally:
+        conn.close()
+
+
 def get_vouchers(user_id) -> int:
     conn = _conn()
     try:
+        _ensure_draft_tables(conn)
         row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (_uid(user_id),)).fetchone()
         return int(row["amount"]) if row else 0
     finally:
@@ -796,6 +826,7 @@ def get_vouchers(user_id) -> int:
 
 def _voucher_change(conn: sqlite3.Connection, uid: int, delta: int, reason: str) -> int:
     """Add/remove vouchers inside an open transaction. Never below 0, never above MAX_VOUCHERS."""
+    _ensure_draft_tables(conn)
     row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
     cur = int(row["amount"]) if row else 0
     new = max(0, min(MAX_VOUCHERS, cur + int(delta)))
@@ -842,6 +873,7 @@ def get_draft_pity(user_id) -> int:
     """How many drafts since the user's last Pool A card."""
     conn = _conn()
     try:
+        _ensure_draft_tables(conn)
         row = conn.execute("SELECT since_a FROM draft_pity WHERE user_id = ?", (_uid(user_id),)).fetchone()
         return int(row["since_a"]) if row else 0
     finally:
@@ -865,6 +897,7 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
     if count <= 0 or cost <= 0:
         return "Invalid draft."
     with _tx() as conn:
+        _ensure_draft_tables(conn)
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return "You haven't debuted yet."
         row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
@@ -1076,6 +1109,7 @@ def reset_everything(user_id) -> dict:
         _ensure_pending_table(conn)
         conn.execute("DELETE FROM pending_cards WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM packs WHERE user_id = ?", (uid,))
+        _ensure_draft_tables(conn)
         conn.execute("DELETE FROM vouchers WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM draft_pity WHERE user_id = ?", (uid,))
         conn.execute("UPDATE users SET purse = 0, captain_key = NULL WHERE user_id = ?", (uid,))
