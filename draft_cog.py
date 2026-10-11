@@ -5,6 +5,9 @@ Players
     csbal                        (in economy_cog) shows coins + vouchers
 
 Owner / admin  (text commands, main server only)
+    /pool add <A|B> <player> <chance>   put a card in Pool A or B with its chance (slash command)
+    /pool remove <player>               take a card out of its pool
+    /pool list <A|B>                    see a pool with the real % of each card
     csvoucher check @user        see someone's vouchers + draft counter   (also: voucher check)
     csvoucher give @user <n>     give vouchers
     csvoucher remove @user <n>   take vouchers (stops at 0)
@@ -30,7 +33,7 @@ import time
 from pathlib import Path
 
 import discord
-from discord import ui
+from discord import app_commands, ui
 from discord.ext import commands
 
 import card_db
@@ -40,7 +43,7 @@ import economy
 import emojis
 import security
 import squad_logic as sl
-from bot_guard import ADMIN_GUILD_ID
+from bot_guard import ADMIN_GUILD_ID, is_staff
 from economy_cog import economy_cooldown, send_next_pending
 from security import OwnedView, esc
 from squad_cog import _card_line, _in_match, _need_debut
@@ -55,49 +58,55 @@ _last_draft: dict[int, float] = {}
 
 
 # ── Pool contents (cached for a minute) ──────────────────────────────────────
+# Pool A / B cards and their chances live in the database (managed with the
+# `/pool` slash commands). Pool C = every card in the OVR range of draft_config.
 
-_pool_cache: dict = {"t": 0.0, "data": None}
-_warned: set[str] = set()
-
-
-def _resolve(names: list[str], label: str) -> list:
-    out, seen = [], set()
-    for name in names:
-        card, err = sl.resolve_any(str(name))
-        if card is None:
-            tag = f"{label}:{name}"
-            if tag not in _warned:
-                _warned.add(tag)
-                print(f"[draft] Pool {label}: could not use '{name}' — {err}")
-            continue
-        if card["playername_key"] in seen:
-            continue
-        seen.add(card["playername_key"])
-        out.append(card)
-    return out
+_pool_cache: dict = {"t": 0.0, "data": None, "weights": {}}
 
 
 def get_pools(force: bool = False) -> dict[str, list]:
-    """{"A": [rows], "B": [rows], "C": [rows]}. Cached for 60 s (call with force=True to refresh)."""
+    """{"A": [rows], "B": [rows], "C": [rows]}. Cached for 60 s (force=True refreshes)."""
     now = time.time()
     if not force and _pool_cache["data"] is not None and now - _pool_cache["t"] < 60:
         return _pool_cache["data"]
-    a = _resolve(cfg.POOL_A_CARDS, "A")
-    a_keys = {c["playername_key"] for c in a}
-    b = [c for c in _resolve(cfg.POOL_B_CARDS, "B") if c["playername_key"] not in a_keys]
-    fixed = a_keys | {c["playername_key"] for c in b}
-    c = [
+    saved = economy.pool_cards()
+    by_key = card_db.get_cards([k for _, k, _ in saved]) if saved else {}
+    pools: dict[str, list] = {"A": [], "B": [], "C": []}
+    weights: dict[str, float] = {}
+    for pool, key, weight in saved:
+        row = by_key.get(key)
+        if row is None:
+            continue                                  # card was deleted from the game
+        pools[pool].append(row)
+        weights[key] = weight
+    fixed = set(weights)
+    pools["C"] = [
         x for x in card_db.list_all_cards()
         if cfg.POOL_C_OVR_MIN <= int(x["ovr"]) <= cfg.POOL_C_OVR_MAX and x["playername_key"] not in fixed
     ]
-    a.sort(key=lambda x: -int(x["ovr"]))
-    b.sort(key=lambda x: -int(x["ovr"]))
-    data = {"A": a, "B": b, "C": c}
-    _pool_cache.update(t=now, data=data)
-    return data
+    pools["A"].sort(key=lambda x: -int(x["ovr"]))
+    pools["B"].sort(key=lambda x: -int(x["ovr"]))
+    _pool_cache.update(t=now, data=pools, weights=weights)
+    return pools
 
 
-def _make_roll(pools: dict[str, list]):
+def get_weights() -> dict[str, float]:
+    return dict(_pool_cache.get("weights") or {})
+
+
+def shares_for(pools: dict[str, list], pool: str) -> dict[str, float]:
+    """{player_key: % chance inside this pool} (the pool's weights scaled to 100)."""
+    if pool not in ("A", "B"):
+        return {}
+    w = _pool_cache.get("weights") or {}
+    rows = pools.get(pool, [])
+    total = sum(w.get(r["playername_key"], 0) for r in rows)
+    if total <= 0:
+        return {}
+    return {r["playername_key"]: round(100 * w.get(r["playername_key"], 0) / total, 1) for r in rows}
+
+
+def _make_roll(pools: dict[str, list], weights: dict[str, float]):
     avail = {p: rows for p, rows in pools.items() if rows}
 
     def roll(force_a: bool):
@@ -107,11 +116,19 @@ def _make_roll(pools: dict[str, list]):
             pool = "A"
         else:
             names = list(avail)
-            weights = [max(0, float(cfg.ODDS.get(p, 0))) for p in names]
-            if sum(weights) <= 0:
-                weights = [1.0] * len(names)
-            pool = _rng.choices(names, weights=weights, k=1)[0]
-        return pool, _rng.choice(avail[pool])["playername_key"]
+            w = [max(0, float(cfg.ODDS.get(p, 0))) for p in names]
+            if sum(w) <= 0:
+                w = [1.0] * len(names)
+            pool = _rng.choices(names, weights=w, k=1)[0]
+        rows = avail[pool]
+        if pool in ("A", "B"):                       # fixed pools: each card has its own chance
+            cw = [max(0.0, float(weights.get(r["playername_key"], 1.0))) for r in rows]
+            if sum(cw) <= 0:
+                cw = [1.0] * len(rows)
+            card = _rng.choices(rows, weights=cw, k=1)[0]
+        else:
+            card = _rng.choice(rows)
+        return pool, card["playername_key"]
 
     return roll
 
@@ -144,6 +161,7 @@ async def _render_screen(uid: int, pool: str, page: int) -> tuple[discord.Embed,
         pool, page, cards, vouchers, since, cfg.PITY_A_EVERY, dict(cfg.ODDS),
         (cfg.POOL_C_OVR_MIN, cfg.POOL_C_OVR_MAX),
         cfg.VOUCHERS_PER_DRAFT, cfg.VOUCHERS_PER_DRAFT * cfg.DRAFT_MULTI, cfg.DRAFT_MULTI,
+        shares_for(pools, pool),
     )
     return _screen_embed(pool), discord.File(buf, filename=draft_image.FILENAME), page
 
@@ -228,7 +246,7 @@ class DraftView(OwnedView):
             try:
                 res = await asyncio.to_thread(
                     economy.draft_spin, uid, count, cfg.VOUCHERS_PER_DRAFT, cfg.PITY_A_EVERY,
-                    _make_roll(pools), lambda k: sl.sell_value(by_key[k]) if k in by_key else 0,
+                    _make_roll(pools, get_weights()), lambda k: sl.sell_value(by_key[k]) if k in by_key else 0,
                 )
             except Exception as e:                      # transaction rolled back: nothing was charged
                 print(f"[draft] spin failed for {uid}: {e}")
@@ -300,6 +318,19 @@ class DraftView(OwnedView):
 
 def _admin_guild_only(ctx: commands.Context) -> bool:
     return ctx.guild is not None and ctx.guild.id == ADMIN_GUILD_ID
+
+
+async def _card_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    names = [n for n in await asyncio.to_thread(card_db.list_playernames) if cur in n.lower()]
+    return [app_commands.Choice(name=n[:100], value=n[:100]) for n in names[:25]]
+
+
+async def _pool_card_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    pools = await asyncio.to_thread(get_pools)
+    names = [c["playername"] for p in ("A", "B") for c in pools[p] if cur in c["playername"].lower()]
+    return [app_commands.Choice(name=n[:100], value=n[:100]) for n in names[:25]]
 
 
 class DraftCog(commands.Cog, name="Draft"):
@@ -384,6 +415,89 @@ class DraftCog(commands.Cog, name="Draft"):
             return
         removed, new = out
         await ctx.send(f"✅ Removed **{removed:,}** {emojis.VOUCHER} from {esc(member.display_name)}. They now have **{new:,}**.")
+
+    # -- owner / admin: pool cards + chances (SLASH commands, main server only) --
+    pool = app_commands.Group(
+        name="pool",
+        description="Draft pools: add / remove cards and set their chance (owner & admin)",
+        guild_ids=[ADMIN_GUILD_ID],                       # only exists in your server
+        guild_only=True,
+        default_permissions=discord.Permissions(),        # hidden from normal members
+    )
+
+    @staticmethod
+    async def _staff_only(interaction: discord.Interaction) -> bool:
+        if is_staff(interaction.user):
+            return True
+        await interaction.response.send_message("🔒 Only the bot owner or an admin can use this.", ephemeral=True)
+        return False
+
+    @pool.command(name="add", description="Put a card in Pool A or B with its chance (run again to change it)")
+    @app_commands.describe(
+        pool="Pool A or Pool B",
+        player="Which player card",
+        chance="Chance of this card inside the pool, e.g. 30 (cards in a pool share the pool)",
+    )
+    @app_commands.choices(pool=[app_commands.Choice(name="Pool A", value="A"), app_commands.Choice(name="Pool B", value="B")])
+    @app_commands.autocomplete(player=_card_autocomplete)
+    async def pool_add(self, interaction: discord.Interaction, pool: app_commands.Choice[str], player: str,
+                       chance: app_commands.Range[float, 0.01, 100.0]):
+        if not await self._staff_only(interaction):
+            return
+        card = card_db.get_card(player)
+        if card is None:
+            card, err = sl.resolve_any(security.clean_input(player, 80))
+            if card is None:
+                await interaction.response.send_message(f"❌ {err}", ephemeral=True)
+                return
+        await interaction.response.defer(ephemeral=True)
+        letter = pool.value
+        await asyncio.to_thread(economy.pool_set, letter, card["playername_key"], float(chance))
+        pools = await asyncio.to_thread(get_pools, True)
+        share = shares_for(pools, letter).get(card["playername_key"], 0)
+        await interaction.followup.send(
+            f"✅ **{esc(card['playername'])}** ({card['ovr']} OVR) is in **Pool {letter}** with chance **{chance:g}** "
+            f"→ **{share:g}%** of Pool {letter} (Pool {letter} now has {len(pools[letter])} card(s)).",
+            ephemeral=True,
+        )
+
+    @pool.command(name="remove", description="Take a card out of Pool A or B")
+    @app_commands.describe(player="Which player card")
+    @app_commands.autocomplete(player=_pool_card_autocomplete)
+    async def pool_remove(self, interaction: discord.Interaction, player: str):
+        if not await self._staff_only(interaction):
+            return
+        card = card_db.get_card(player)
+        if card is None:
+            await interaction.response.send_message("❌ Pick a player from the list.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        was = await asyncio.to_thread(economy.pool_remove, card["playername_key"])
+        if was is None:
+            await interaction.followup.send(f"❌ **{esc(card['playername'])}** isn't in Pool A or B.", ephemeral=True)
+            return
+        await asyncio.to_thread(get_pools, True)
+        await interaction.followup.send(f"✅ Removed **{esc(card['playername'])}** from Pool {was}.", ephemeral=True)
+
+    @pool.command(name="list", description="Show the cards of Pool A or B with their real chance %")
+    @app_commands.describe(pool="Pool A or Pool B")
+    @app_commands.choices(pool=[app_commands.Choice(name="Pool A", value="A"), app_commands.Choice(name="Pool B", value="B")])
+    async def pool_list(self, interaction: discord.Interaction, pool: app_commands.Choice[str]):
+        if not await self._staff_only(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        letter = pool.value
+        pools = await asyncio.to_thread(get_pools, True)
+        rows = pools[letter]
+        if not rows:
+            await interaction.followup.send(f"Pool {letter} is empty. Add cards with `/pool add`.", ephemeral=True)
+            return
+        w, sh = get_weights(), shares_for(pools, letter)
+        lines = [
+            f"{c['ovr']} OVR · **{esc(c['playername'])}** — chance {w.get(c['playername_key'], 0):g} → **{sh.get(c['playername_key'], 0):g}%**"
+            for c in rows
+        ]
+        await interaction.followup.send((f"**Pool {letter}** ({len(rows)} cards)\n" + "\n".join(lines))[:1900], ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

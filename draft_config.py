@@ -1,23 +1,16 @@
 """Draft (voucher) system settings. EVERYTHING you may want to change is here.
 
 Pools
-  Pool A  fixed cards  -> write the player names in POOL_A_CARDS
-  Pool B  fixed cards  -> write the player names in POOL_B_CARDS
+  Pool A  fixed cards  -> added with `/pool add` (each with its own chance)
+  Pool B  fixed cards  -> added with `/pool add`
   Pool C  random card between POOL_C_OVR_MIN and POOL_C_OVR_MAX (all cards in that range)
 
-Names are matched like `csgivecard` does (type enough of the name to be unique,
-or the exact card name). A name that can't be found is skipped and printed in
-the bot console at start-up, so a typo never crashes the draft.
 """
 
-# ── Fixed cards ──────────────────────────────────────────────────────────────
-POOL_A_CARDS: list[str] = [
-    # "Virat Kohli",
-    # "MS Dhoni",
-]
-POOL_B_CARDS: list[str] = [
-    # "Rohit Sharma",
-]
+# ── Fixed cards (Pool A / B) ─────────────────────────────────────────────────
+# Not written here any more: add / remove them in Discord with
+#   /pool add     /pool remove     /pool list
+# Each card has its own chance inside its pool.
 
 # ── Pool C: random card from this OVR range ──────────────────────────────────
 POOL_C_OVR_MIN = 60

@@ -804,6 +804,11 @@ def _ensure_draft_tables(conn: sqlite3.Connection) -> None:
         "CREATE TABLE IF NOT EXISTS draft_pity ("
         "user_id INTEGER PRIMARY KEY, since_a INTEGER NOT NULL DEFAULT 0 CHECK (since_a >= 0))"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS draft_pool_cards ("
+        "player_key TEXT PRIMARY KEY, pool TEXT NOT NULL CHECK (pool IN ('A','B')), "
+        "weight REAL NOT NULL CHECK (weight > 0))"
+    )
 
 
 def ensure_draft_tables() -> None:
@@ -867,6 +872,47 @@ def remove_vouchers(user_id, amount: int, reason: str = "") -> tuple[int, int] |
         cur = int(row["amount"]) if row else 0
         new = _voucher_change(conn, uid, -amount, reason)
         return cur - new, new
+
+
+def pool_set(pool: str, player_key: str, weight: float) -> None:
+    """Put a card in Pool A or B with its chance (a card lives in ONE pool; adding again
+    updates it / moves it)."""
+    with _tx() as conn:
+        _ensure_draft_tables(conn)
+        conn.execute(
+            "INSERT INTO draft_pool_cards (player_key, pool, weight) VALUES (?, ?, ?) "
+            "ON CONFLICT(player_key) DO UPDATE SET pool = excluded.pool, weight = excluded.weight",
+            (player_key.strip().lower(), pool, float(weight)),
+        )
+
+
+def pool_remove(player_key: str) -> str | None:
+    """Take a card out of its pool. Returns the pool it was in, or None if it wasn't in one."""
+    with _tx() as conn:
+        _ensure_draft_tables(conn)
+        row = conn.execute(
+            "SELECT pool FROM draft_pool_cards WHERE player_key = ?", (player_key.strip().lower(),)
+        ).fetchone()
+        if row is None:
+            return None
+        conn.execute("DELETE FROM draft_pool_cards WHERE player_key = ?", (player_key.strip().lower(),))
+        return row["pool"]
+
+
+def pool_cards(pool: str | None = None) -> list[tuple[str, str, float]]:
+    """[(pool, player_key, weight)] for Pool A / B (or one of them)."""
+    conn = _conn()
+    try:
+        _ensure_draft_tables(conn)
+        if pool:
+            rows = conn.execute(
+                "SELECT pool, player_key, weight FROM draft_pool_cards WHERE pool = ?", (pool,)
+            ).fetchall()
+        else:
+            rows = conn.execute("SELECT pool, player_key, weight FROM draft_pool_cards").fetchall()
+        return [(r["pool"], r["player_key"], float(r["weight"])) for r in rows]
+    finally:
+        conn.close()
 
 
 def get_draft_pity(user_id) -> int:

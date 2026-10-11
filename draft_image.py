@@ -117,8 +117,10 @@ def _stamp(cards: list) -> tuple:
     return tuple(out)
 
 
-def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], odds: dict) -> Image.Image:
-    key = (pool, page, _stamp(cards), c_range, odds.get(pool))
+def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], odds: dict,
+                 shares: dict | None = None) -> Image.Image:
+    shares = shares or {}
+    key = (pool, page, _stamp(cards), c_range, odds.get(pool), tuple(sorted(shares.items())))
     hit = _base_cache.get(key)
     if hit is not None:
         return hit
@@ -145,7 +147,14 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
         for i, c in enumerate(chunk):
             x = gx + (i % 3) * (int(ch * 0.684) + gap)
             y = gy + (i // 3) * (ch + gap)
-            _paste_card(img, c, x, y, ch)
+            cw_i = _paste_card(img, c, x, y, ch)
+            pct = shares.get(c["playername_key"])
+            if pct is not None:
+                txt = f"{pct:g}%"
+                bw = int(d.textlength(txt, font=_f(_LAB, 26))) + 22
+                bx = x + (cw_i - bw) // 2
+                d.rounded_rectangle([bx, y + ch - 36, bx + bw, y + ch - 8], radius=8, fill=(0, 20, 80), outline=col, width=2)
+                d.text((bx + bw // 2, y + ch - 22), txt, font=_f(_LAB, 26), fill=WHITE, anchor="mm")
         if not chunk:
             d.text((gx, gy + 40), "No cards added to this pool yet", font=_f(_LAB, 30), fill=DIM, anchor="lm")
 
@@ -175,8 +184,8 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
 
 def build_draft_screen(pool: str, page: int, cards: list, vouchers: int, since_a: int, pity_at: int,
                        odds: dict, c_range: tuple[int, int], cost_one: int, cost_multi: int,
-                       multi: int) -> io.BytesIO:
-    base = _base_screen(pool, page, cards, c_range, odds).copy()
+                       multi: int, shares: dict | None = None) -> io.BytesIO:
+    base = _base_screen(pool, page, cards, c_range, odds, shares).copy()
     d = ImageDraw.Draw(base)
 
     # voucher count (top right)
