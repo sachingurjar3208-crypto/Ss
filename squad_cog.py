@@ -856,7 +856,7 @@ class SquadCog(commands.Cog, name="Squad"):
         """List the commands."""
         embed = discord.Embed(title="🏏 CricStar Help", color=discord.Color.orange())
         embed.add_field(name="Start", value=(
-            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player\n`csclaim` free card every hour (Premium: 35 min)\n`csmp ranked` ranked match (8 overs)\n`csrank` your tier & stars\n`csranktop` global top 10"
+            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player\n`csclaim` free card every hour (Premium: 35 min)\n`csmp ranked` rank up mode (5 overs)\n`csrank` your tier & stars\n`csranktop` global top 10"
         ), inline=False)
         embed.add_field(name="Squad", value=(
             "`cssquad` `csshow <player>` `csxi` `csovr` XI image + OVR · `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"

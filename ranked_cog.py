@@ -1,7 +1,7 @@
 """Ranked matchmaking cog.
 
 Commands:
-  csmp ranked   join the ranked queue (8 overs, same-tier opponents only)
+  csmp ranked   join the ranked queue (5 overs, same-tier opponents only)
   csrank        your tier / stars / season record     (csrank @user for someone else)
   csranktop     global top 10 by stars
 
@@ -37,6 +37,7 @@ class _Entry:
     joined: float = field(default_factory=time.monotonic)
     message: Optional[discord.Message] = None
     task: Optional[asyncio.Task] = None
+    anim: Optional[asyncio.Task] = None
 
 
 # Everyone currently searching, by user id.
@@ -48,18 +49,36 @@ def in_queue(user_id: int) -> bool:
     return int(user_id) in _queue
 
 
+def _search_embed(entry: _Entry, dots: int = 1, text: str | None = None) -> discord.Embed:
+    """The 'searching for a player' card (dots + timer move) or, with `text`, a plain status card."""
+    embed = discord.Embed(title="RANK UP MODE", color=discord.Color.from_rgb(8, 22, 60))
+    if text:
+        embed.description = f"{_sep()}\n{text}\n{_sep()}"
+        return embed
+    secs = int(time.monotonic() - entry.joined)
+    embed.description = (
+        f"{_sep()}\n"
+        f"**Searching for a player{'.' * dots}**\n"
+        f"{_sep()}\n\n"
+        f"**Rank:**   {entry.tier}\n"
+        f"**Match:**  {ranked.RANKED_OVERS} overs\n"
+        f"**Time:**   {secs // 60}:{secs % 60:02d}"
+    )
+    return embed
+
+
 class _SearchView(OwnedView):
     def __init__(self, cog: "RankedCog", entry: _Entry):
         super().__init__(entry.uid, timeout=ranked.SEARCH_TIMEOUT + 30)
         self.cog, self.entry = cog, entry
 
-    @ui.button(label="Cancel search", style=discord.ButtonStyle.danger, emoji="✖️")
+    @ui.button(label="Cancel search", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: ui.Button):
         removed = await self.cog._remove(self.entry)
         self.stop()
-        text = "✖️ Ranked search cancelled." if removed else "Your match is already starting."
+        text = "Search cancelled." if removed else "Match is starting."
         try:
-            await interaction.response.edit_message(content=text, view=None)
+            await interaction.response.edit_message(embed=_search_embed(self.entry, text=text), view=None)
         except discord.HTTPException:
             pass
 
@@ -79,8 +98,7 @@ class RankedCog(commands.Cog, name="Ranked"):
     async def cog_unload(self):
         self.season_loop.cancel()
         for e in list(_queue.values()):
-            if e.task:
-                e.task.cancel()
+            self._stop_tasks(e)
         _queue.clear()
 
     # ── monthly reset ─────────────────────────────────────────────────────
@@ -104,9 +122,14 @@ class RankedCog(commands.Cog, name="Ranked"):
             if _queue.get(entry.uid) is not entry:
                 return False
             _queue.pop(entry.uid, None)
-        if entry.task and entry.task is not asyncio.current_task():
-            entry.task.cancel()
+        self._stop_tasks(entry)
         return True
+
+    @staticmethod
+    def _stop_tasks(entry: _Entry) -> None:
+        for t in (entry.task, entry.anim):
+            if t and t is not asyncio.current_task():
+                t.cancel()
 
     async def _show_notices(self, ctx_or_channel, user_id: int):
         notes = await asyncio.to_thread(ranked.pop_notices, user_id)
@@ -126,7 +149,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             return
         await self._show_notices(ctx, me.id)
         if me.id in _queue:
-            await ctx.send("🔎 You are already searching for a ranked match.")
+            await ctx.send("❌ You are already searching for a player.")
             return
         if _in_match(self.bot, me.id):
             await ctx.send("❌ You are already in a match.")
@@ -156,23 +179,37 @@ class RankedCog(commands.Cog, name="Ranked"):
                 _queue[me.id] = entry
 
         if partner is not None:
-            if partner.task:
-                partner.task.cancel()
+            self._stop_tasks(partner)
             ok = await self._start_pvp(partner, entry, ctx.channel)
             if not ok:   # no free channel: put the waiting player back, tell the new one
                 async with self._lock:
                     _queue[partner.uid] = partner
                 partner.task = asyncio.create_task(self._wait_task(partner))
-                await ctx.send("⚠️ No free channel to start the match right now. Try again in a moment.")
+                partner.anim = asyncio.create_task(self._anim_task(partner))
+                await ctx.send("❌ No free channel to start the match right now. Try again in a moment.")
             return
 
-        t = ranked.tier_emoji(tier)
-        entry.message = await ctx.send(
-            f"🔎 Searching for a {t} **{tier}** opponent… (up to {ranked.SEARCH_TIMEOUT // 60} min)\n"
-            f"Ranked: **{ranked.RANKED_OVERS} overs** • win **+1 ⭐** • lose **-1 ⭐**",
-            view=_SearchView(self, entry),
-        )
+        entry.message = await ctx.send(embed=_search_embed(entry, 1), view=_SearchView(self, entry))
         entry.task = asyncio.create_task(self._wait_task(entry))
+        entry.anim = asyncio.create_task(self._anim_task(entry))
+
+    async def _anim_task(self, entry: _Entry):
+        """Moves the dots and the timer so it looks like a live player search."""
+        dots = 1
+        try:
+            while True:
+                await asyncio.sleep(3)
+                if _queue.get(entry.uid) is not entry or entry.message is None:
+                    return
+                dots = dots % 3 + 1
+                try:
+                    await entry.message.edit(embed=_search_embed(entry, dots))
+                except discord.NotFound:
+                    return
+                except discord.HTTPException:
+                    pass
+        except asyncio.CancelledError:
+            return
 
     # ── waiting for a bot / timeout ───────────────────────────────────────
     async def _wait_task(self, entry: _Entry):
@@ -183,7 +220,7 @@ class RankedCog(commands.Cog, name="Ranked"):
                     return
                 if time.monotonic() - entry.joined >= ranked.SEARCH_TIMEOUT:
                     if await self._remove(entry):
-                        await self._edit_search(entry, "⌛ No opponent found. Try `csmp ranked` again.")
+                        await self._edit_search(entry, "No player found.\nTry `csmp ranked` again.")
                     return
                 if await self._try_bot(entry):
                     return
@@ -200,12 +237,12 @@ class RankedCog(commands.Cog, name="Ranked"):
     async def _edit_search(self, entry: _Entry, text: str):
         if entry.message is not None:
             try:
-                await entry.message.edit(content=text, view=None)
+                await entry.message.edit(content=None, embed=_search_embed(entry, text=text), view=None)
                 return
             except discord.HTTPException:
                 pass
         try:
-            await entry.channel.send(text)
+            await entry.channel.send(embed=_search_embed(entry, text=text))
         except discord.HTTPException:
             pass
 
@@ -257,7 +294,7 @@ class RankedCog(commands.Cog, name="Ranked"):
         from views import active_games, autoplay_ids, start_toss
         from game import GameState
         from data import random_match_conditions
-        from embeds import _ground_line
+        from embeds import build_ranked_match_embed
 
         game = GameState(channel.id, challenger, opponent, ranked.RANKED_OVERS)
         humans = [m for m in (challenger, opponent) if not getattr(m, "is_fake", False)]
@@ -283,33 +320,25 @@ class RankedCog(commands.Cog, name="Ranked"):
         game.pitch_type = cond["pitch_type"]
         active_games[channel.id] = game
 
-        t = ranked.TIER_BY_NAME[tier]
-        embed = discord.Embed(title="⚔️ RANKED MATCH", color=discord.Color.from_rgb(212, 175, 55))
-        embed.description = (
-            f"{_sep()}\n"
-            f"{t['emoji']} **{tier}** • **{ranked.RANKED_OVERS}-over** match\n\n"
-            f"**{challenger.mention}**  vs  **{opponent.mention}**\n"
-            f"{_sep()}\n\n"
-            f"**Venue:**      {cond['venue']}, {cond['location']}\n"
-            f"**Pitch:**      {cond['pitch']}\n"
-            f"**Ground:**     {_ground_line(cond)}\n"
-            f"**Weather:**    {cond['weather']}  •  {cond['temperature']}°C\n"
-            f"**Umpire:**     {cond['umpire']}\n"
-            f"**Crowd:**      {cond['crowd']}\n"
-            f"{_sep()}"
-        )
-        embed.set_footer(text="Win +1 ⭐  •  Lose -1 ⭐")
-        if cond.get("gif_url"):
-            embed.set_image(url=cond["gif_url"])
+        # 1) the searching card turns into "Player found" (the waiting player may be in another channel)
+        names = {challenger.id: opponent.display_name, opponent.id: challenger.display_name}
+        flashed = False
+        for e in search_msgs or []:
+            opp_name = names.get(e.uid, "")
+            text = f"**Player found!**\n\n**{opp_name}**\n**Rank:**  {tier}"
+            if e.channel.id != channel.id:
+                text += f"\n\nGo to {channel.mention}"
+            if e.message is not None:
+                flashed = True
+            await self._edit_search(e, text)
+        if flashed:
+            await asyncio.sleep(2)
+
+        # 2) the match card: same layout as a normal csmp challenge, titled RANK UP MODE
+        embed = build_ranked_match_embed(challenger, opponent, ranked.RANKED_OVERS, cond,
+                                         gif_url=cond.get("gif_url"))
         mentions = " ".join(m.mention for m in humans)
         await channel.send(content=mentions, embed=embed)
-
-        # tell the waiting player(s) in other channels where the match is
-        for e in search_msgs or []:
-            if e.channel.id != channel.id:
-                await self._edit_search(e, f"⚔️ Match found! Go to {channel.mention}.")
-            else:
-                await self._edit_search(e, "⚔️ Match found!")
         await start_toss(channel, game)
 
     # ── csrank ────────────────────────────────────────────────────────────

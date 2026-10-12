@@ -48,6 +48,40 @@ def build_match_invite_embed(
     return embed
 
 
+def build_ranked_match_embed(
+    challenger,
+    opponent,
+    overs: int,
+    conditions: dict,
+    gif_url: str | None = None,
+) -> discord.Embed:
+    """Same layout as the normal csmp invite (venue, pitch, ground, soil, weather, umpire, crowd),
+    but titled RANK UP MODE and without Accept / Decline."""
+    sep = "──────────────────────"
+    embed = discord.Embed(
+        title="RANK UP MODE",
+        color=discord.Color.from_rgb(8, 22, 60),
+    )
+    embed.description = (
+        f"{sep}\n"
+        f"**{challenger.mention}** vs **{opponent.mention}** — **{overs}-over** match!\n"
+        f"{sep}\n\n"
+        f"**Venue:**      {conditions['venue']}, {conditions['location']}\n"
+        f"**Pitch:**      {conditions['pitch']}\n"
+        f"**Ground:**     {_ground_line(conditions)}\n"
+        + (f"**Soil:**       {conditions['soil']}\n" if conditions.get("soil") else "")
+        +
+        f"**Weather:**    {conditions['weather']}  •  {conditions['temperature']}°C\n"
+        f"**Umpire:**     {conditions['umpire']}\n"
+        f"**Crowd:**      {conditions['crowd']}\n"
+        f"{sep}"
+    )
+    embed.set_footer(text="Win: +1 star  |  Lose: -1 star")
+    if gif_url:
+        embed.set_image(url=gif_url)
+    return embed
+
+
 def _role_bonus(chem: int, role: str) -> int:
     extras = {"Batter": 0, "WK": 1, "All-Rounder": 0, "Bowler": -1}
     return max(1, (chem // 20) + extras.get(role, 0))

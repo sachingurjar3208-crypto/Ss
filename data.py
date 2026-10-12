@@ -216,7 +216,7 @@ TIMELINE_EMOJIS = {
     "Wd":   "<:28395:1557661638772138064>",
 }
 
-NOT_OUT_EMOJI = "<:28399:1557661632371359764>"
+NOT_OUT_EMOJI = "<:notout:1559153832435523624>"   # if it is an animated emoji use <a:notout:...> instead
 LBW_EMOJI     = "<a:LBW:1558777617434419240>"
 
 BOWLING_TYPE_ICON = {
