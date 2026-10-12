@@ -79,38 +79,19 @@ class RateLimited(commands.CheckFailure):
 
 
 class WrongMatchChannel(commands.CheckFailure):
-    """csmp (casual or `csmp ranked`) used outside a match channel in one of
-    MATCH_RESTRICTED_GUILD_IDS. Every other server: no restriction at all."""
+    """csmp (casual or `csmp ranked`) used inside one of LOCKED_CHANNEL_IDS.
+    Every other channel, in every server: no restriction at all."""
     pass
 
 
-# ── Match channel restriction (two specific servers only) ────────────────────
-# In these servers, csmp (and "csmp ranked") only works inside the channels
-# named Match-1 / Match-2 / Match-3 (any emoji/bullet/bold styling in front of
-# the name is ignored). Every other server is unaffected.
-MATCH_RESTRICTED_GUILD_IDS = {1556662732017766450, 1556644440280535243}
-MATCH_CHANNEL_NAMES = {"match1", "match2", "match3"}
+# ── Match channel restriction (two specific channels, locked) ────────────────
+# csmp (and "csmp ranked") is blocked inside these exact channel IDs, in
+# whichever server they belong to. Every other channel is unaffected.
+LOCKED_CHANNEL_IDS = {1556662732017766450, 1556644440280535243}
 
 
-def _normalized_channel_name(channel) -> str:
-    """'#・𝗠𝗮𝘁𝗰𝗵-𝟭' -> 'match1': NFKC folds the bold unicode digits/letters back
-    to plain ASCII, then we drop every non-alphanumeric character."""
-    name = unicodedata.normalize("NFKC", getattr(channel, "name", "") or "")
-    return "".join(ch for ch in name.lower() if ch.isalnum())
-
-
-def is_match_channel(channel) -> bool:
-    return _normalized_channel_name(channel) in MATCH_CHANNEL_NAMES
-
-
-def _match_channels_text(guild) -> str:
-    chans = sorted(
-        (c for c in getattr(guild, "text_channels", []) if is_match_channel(c)),
-        key=lambda c: _normalized_channel_name(c),
-    )
-    if chans:
-        return " ".join(c.mention for c in chans)
-    return "the designated match channels"
+def is_locked_channel(channel) -> bool:
+    return getattr(channel, "id", None) in LOCKED_CHANNEL_IDS
 
 
 # ── Ban list (kept in memory, saved in economy.db) ───────────────────────────
@@ -206,15 +187,10 @@ async def global_check(ctx: commands.Context) -> bool:
 
 
 def match_channel_check():
-    """Command check for csmp: in MATCH_RESTRICTED_GUILD_IDS, a match (casual
-    or `csmp ranked`) can only be started from a match channel. Every other
-    server: always allowed, nothing changes."""
+    """Command check for csmp: a match (casual or `csmp ranked`) is blocked
+    in LOCKED_CHANNEL_IDS. Every other channel: always allowed."""
     async def predicate(ctx: commands.Context) -> bool:
-        if (
-            ctx.guild is not None
-            and ctx.guild.id in MATCH_RESTRICTED_GUILD_IDS
-            and not is_match_channel(ctx.channel)
-        ):
+        if is_locked_channel(ctx.channel):
             raise WrongMatchChannel()
         return True
     return commands.check(predicate)
@@ -322,8 +298,7 @@ async def handle_command_error(ctx: commands.Context, error: Exception) -> None:
         return
     if isinstance(error, WrongMatchChannel):
         if _notice_allowed(ctx.author.id, 5):
-            where = _match_channels_text(ctx.guild)
-            await ctx.send(f"❌ You can't play matches in this channel. Play in: {where}")
+            await ctx.send("❌ Matches can't be played in this channel. Try a different channel.")
         return
     if isinstance(error, RateLimited):
         if _notice_allowed(ctx.author.id):

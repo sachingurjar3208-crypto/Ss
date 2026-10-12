@@ -224,7 +224,7 @@ class SquadCog(commands.Cog, name="Squad"):
         self.bot = bot
 
     # -- challenge a player (csmp @user <overs>) ---------------------------
-    # In security.MATCH_RESTRICTED_GUILD_IDS, this also covers "csmp ranked":
+    # security.LOCKED_CHANNEL_IDS blocks this in 2 channels; also covers "csmp ranked":
     # both paths go through this one command, so one check guards both.
     @commands.command(name="csmp")
     @commands.cooldown(1, 10, commands.BucketType.user)
