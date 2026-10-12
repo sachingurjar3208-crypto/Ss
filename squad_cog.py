@@ -224,8 +224,11 @@ class SquadCog(commands.Cog, name="Squad"):
         self.bot = bot
 
     # -- challenge a player (csmp @user <overs>) ---------------------------
+    # In security.MATCH_RESTRICTED_GUILD_IDS, this also covers "csmp ranked":
+    # both paths go through this one command, so one check guards both.
     @commands.command(name="csmp")
     @commands.cooldown(1, 10, commands.BucketType.user)
+    @security.match_channel_check()
     async def csmp(self, ctx: commands.Context, opponent: Union[discord.Member, str], overs: int = 5):
         """Challenge another player: `csmp @user 5`. Ranked matchmaking: `csmp ranked`."""
         from views import AcceptDeclineView, active_games
@@ -850,27 +853,17 @@ class SquadCog(commands.Cog, name="Squad"):
             await quest.track_and_notify(ctx, ctx.author.id, {"profile_view": 1})
 
     # -- help ------------------------------------------------------------
+    # Normal users: once every 2 minutes. Premium members: no cooldown at all.
     @commands.command(name="cshelp")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @premium_cooldown(120)
     async def cshelp(self, ctx: commands.Context):
-        """List the commands."""
-        embed = discord.Embed(title="🏏 CricStar Help", color=discord.Color.orange())
-        embed.add_field(name="Start", value=(
-            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player\n`csclaim` free card every hour (Premium: 35 min)\n`csmp ranked` rank up mode (5 overs)\n`csrank` your tier & stars\n`csranktop` global top 10"
-        ), inline=False)
-        embed.add_field(name="Squad", value=(
-            "`cssquad` `csshow <player>` `csxi` `csovr` XI image + OVR · `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"
-            "`csswap 3 5` or `csswap A | B`\n`cscaptain <player>` `csteamname <name>` `csprofile`\n"
-            "`csview <player>` your stats on a card you own · `csdata <player>` all-owners stats (Premium)\n"
-            "`cssubs` view Impact Player subs · `cssubs add/remove <player>` · `cssubs clear`"
-        ), inline=False)
-        embed.add_field(name="Economy", value=(
-            "`cspurse` `cspack` `csopen <type>`\n`csbuy <player>` `cssell <player>`\n"
-            "`cstrade @user my player | their player` (same OVR, 5,000 coins fee each) `cspending` `csleaderboard`\n"
-            "`csquest` 5 daily quests, 1 voucher each · `csdraft` use vouchers"
-        ), inline=False)
-        embed.add_field(name="Play", value="`csmp @user <overs>` challenge • `cscancel` cancel match", inline=False)
-        await ctx.send(embed=embed)
+        """List the commands (image menu)."""
+        import asyncio
+        import help_image
+        buf = await asyncio.to_thread(help_image.build_help_image)
+        embed = discord.Embed(color=discord.Color.orange())
+        embed.set_image(url=f"attachment://{help_image.FILENAME}")
+        await ctx.send(embed=embed, file=discord.File(buf, filename=help_image.FILENAME))
 
     # ── Owner-only tools ─────────────────────────────────────────────────
     @commands.command(name="csban")

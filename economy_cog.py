@@ -475,6 +475,38 @@ class EconomyCog(commands.Cog, name="Economy"):
         if res["pending"]:
             await send_next_pending(ctx, ctx.author.id)
 
+    # -- cscd: when is every claim command ready again? --------------------
+    @commands.command(name="cscd")
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def cscd(self, ctx: commands.Context):
+        """Show when csdaily/csweekly/csmonthly/csclaim are next ready."""
+        if not await _need_debut(ctx):
+            return
+        premium = _is_premium(ctx.author)
+        status = await asyncio.to_thread(economy.reward_cooldowns, ctx.author.id, premium)
+        if status is None:
+            await ctx.send("❌ You haven't debuted yet. Use `csdebut`.")
+            return
+
+        def line(emoji: str, label: str, cmd: str, wait: int, extra: str = "") -> str:
+            state = "✅ Ready now!" if wait <= 0 else f"⏳ Ready in **{fmt_wait(wait)}**"
+            return f"{emoji} **{label}** (`{cmd}`) — {state}{extra}"
+
+        lines = [line("☀️", "Daily", "csdaily", status["daily"])]
+        if premium:
+            lines.append(line("📅", "Weekly", "csweekly", status["weekly"]))
+        else:
+            lines.append("📅 **Weekly** (`csweekly`) — 💎 Premium members only")
+        if status["monthly_locked"] > 0:
+            lines.append(f"🗓️ **Monthly** (`csmonthly`) — 🔒 Unlocks in **{fmt_wait(status['monthly_locked'])}**")
+        else:
+            lines.append(line("🗓️", "Monthly", "csmonthly", status["monthly"]))
+        claim_extra = "" if premium else "  •  💎 Premium: 35 min cooldown"
+        lines.append(line("🎴", "Claim", "csclaim", status["claim"], claim_extra))
+
+        embed = discord.Embed(title="⏱️ Your Cooldowns", description="\n".join(lines), color=discord.Color.teal())
+        await ctx.send(embed=embed)
+
     # -- packs -----------------------------------------------------------
     @commands.command(name="cspack")
     @economy_cooldown()

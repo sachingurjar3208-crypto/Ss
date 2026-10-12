@@ -630,6 +630,41 @@ def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
         return {"ok": True, "card": key, "dupe": dupe, "refund": refund, "pending": pending, "balance": balance}
 
 
+# ── cscd: read-only snapshot of every claim cooldown ─────────────────────────
+
+def reward_cooldowns(user_id, premium: bool = False) -> dict | None:
+    """For `cscd`: seconds left on daily / weekly / monthly / csclaim, without
+    touching anything (pure read, no transaction). None if the user hasn't
+    debuted. `monthly_locked` is the extra wait before the monthly reward
+    unlocks at all (1 month after debut) and is separate from `monthly`."""
+    uid = _uid(user_id)
+    conn = _conn()
+    try:
+        _ensure_claim_column(conn)
+        row = conn.execute(
+            "SELECT last_daily, last_weekly, last_monthly, last_claim, created_at "
+            "FROM users WHERE user_id = ?", (uid,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    now = time.time()
+
+    def left(col: str, cooldown: int) -> int:
+        return max(0, int(cooldown - (now - float(row[col]))) )
+
+    claim_cooldown = CLAIM_COOLDOWN_PREMIUM if premium else CLAIM_COOLDOWN
+    return {
+        "daily": left("last_daily", COOLDOWNS["daily"]),
+        "weekly": left("last_weekly", COOLDOWNS["weekly"]),
+        "monthly": left("last_monthly", COOLDOWNS["monthly"]),
+        "monthly_locked": max(0, int(MONTHLY_UNLOCK_AFTER_DEBUT - (now - float(row["created_at"])))),
+        "claim": left("last_claim", claim_cooldown),
+        "claim_cooldown": claim_cooldown,
+    }
+
+
 # ── Owned cards ─────────────────────────────────────────────────────────────
 
 def owned_keys(user_id) -> list[str]:
