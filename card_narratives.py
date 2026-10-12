@@ -7,13 +7,16 @@ in /cardmaker or /editcard.
 
 These narratives now change how matches play out: logic.py reads a player's
 card by name and applies the effect (see ATTR_EFFECTS there to tune numbers).
-"Swing King" is the engine's existing "Swing Master"; "Balanced" is neutral.
+"Swing King" and "Swing Master" are two separate playstyles; "Balanced" is neutral.
+Players only ever see the playstyle NAME (never these descriptions or any percentages).
 """
 
 from __future__ import annotations
 
 NARRATIVES: dict[str, str] = {
     "Swing King": "Bowler who gets a lot of swing: +25% wickets on swing deliveries.",
+    "Swing Master": "Swing specialist: batters struggle to hit sixes and wickets come more often on swing deliveries.",
+    "Breakthrough": "Game changer batter (Maxwell / Russell / Pollard type): hits more sixes and can win the match in a chase, but is slightly more likely to get out.",
     "Yorker King": "Bowler who nails yorkers: +30% wickets on yorkers.",
     "Lethal Pace": "Express pace bowler: +25% wickets and -8% runs off pace deliveries.",
     "Aggressive": "Attacking batter: +10% fours/sixes, -10% dot balls.",

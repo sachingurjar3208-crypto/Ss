@@ -190,7 +190,9 @@ ATTR_EFFECTS = {
     "Powerplay Bowler": {"pp_wkt_mult":     1.15},  # +15% wickets in powerplay
     "Spin Wizard":      {"spin_wkt_mult":   1.40},  # +40% wickets with spin deliveries
     "Yorker King":      {"yorker_wkt_mult": 1.30},  # +30% wickets on yorker
-    "Swing Master":     {"swing_wkt_mult":  1.25},  # +25% wickets on swing
+    "Swing King":       {"swing_wkt_mult":  1.25},  # +25% wickets on swing (old Swing Master numbers)
+    "Swing Master":     {"swing_wkt_mult":  1.15,   # +15% wickets on swing deliveries
+                         "swing_six_mult":  0.60},  # sixes ~40% rarer against swing deliveries
     "Bouncer Specialist":{"bouncer_wkt_mult":1.25}, # +25% wickets on bouncer
     "Economical":       {"run_reduce":      0.85},  # -15% runs given per over
     # ── All-rounder / Legacy ─────────────────────────────────────────────────
@@ -227,10 +229,14 @@ ATTR_EFFECTS = {
     "Spell Finisher":  {"wkt_mult":         1.25,   # +25% wickets in the bowler's final over(s)
                         "run_reduce":       0.90},  # -10% runs in the bowler's final over(s)
     "Mind Games":      {"wkt_mult":         1.25},  # +25% wickets when the delivery type changes
+    # Breakthrough (Maxwell / Russell / Pollard type game changer). Never shown to users.
+    "Breakthrough":    {"chase_six_mult":   1.30,   # +30% sixes while chasing (2nd innings)
+                        "chase_death_mult": 1.30,   # +30% 1s/2s/3s/4s in the last overs of a chase (match winner)
+                        "wkt_increase":     1.05},  # +5% wicket chance (high risk, high reward)
 }
 
 # Names a card can carry that the engine knows under another name.
-_ATTR_ALIASES = {"Swing King": "Swing Master"}
+_ATTR_ALIASES: dict[str, str] = {}   # (Swing King used to alias Swing Master; they are separate now)
 
 # Delivery types classified as spin
 _SPIN_DELIVERIES = {
@@ -473,6 +479,15 @@ def calculate_outcome(
         w["6"] = w["6"] * lb["six_mult"]
         for k in ("1", "2", "3"): w[k] = w[k] * lb["rotate_mult"]
 
+    # BREAKTHROUGH: game changer. More sixes + a finishing push in a chase, but a bit riskier.
+    if "Breakthrough" in batsman_attrs:
+        bt = ATTR_EFFECTS["Breakthrough"]
+        w["W"] = w["W"] * bt["wkt_increase"]
+        if innings == 2:
+            w["6"] = w["6"] * bt["chase_six_mult"]
+            if current_over >= _death_start:
+                for k in ("1", "2", "3", "4"): w[k] = w[k] * bt["chase_death_mult"]
+
     # MR360: better outcomes on Sweep / Reverse-Sweep / Flick / Lofted shots
     if "Mr360" in batsman_attrs and shot_internal in _SHOTS_360:
         m360 = ATTR_EFFECTS["Mr360"]
@@ -507,6 +522,11 @@ def calculate_outcome(
     # SWING MASTER: +wickets on swing deliveries
     if "Swing Master" in bowler_attrs and delivery_internal in _SWING_DELIVERIES:
         w["W"] = w["W"] * ATTR_EFFECTS["Swing Master"]["swing_wkt_mult"]
+        w["6"] = max(0.3, w["6"] * ATTR_EFFECTS["Swing Master"]["swing_six_mult"])
+
+    # SWING KING: +wickets on swing deliveries
+    if "Swing King" in bowler_attrs and delivery_internal in _SWING_DELIVERIES:
+        w["W"] = w["W"] * ATTR_EFFECTS["Swing King"]["swing_wkt_mult"]
 
     # BOUNCER SPECIALIST: +wickets on bouncers
     if "Bouncer Specialist" in bowler_attrs and delivery_internal in _BOUNCER_DELIVERIES:
@@ -572,6 +592,11 @@ def calculate_outcome(
         w["4"] = w["4"] * lq["four_mult"]
         w["W"] = max(0.15, w["W"] * lq["wkt_reduce"])
         _six_cap_mult = lq["six_cap_mult"]
+
+    # Breakthrough in a chase: lift the six cap by the same 30% so the bonus isn't swallowed
+    # when the death-over / chase-pressure multipliers are already stacked.
+    if "Breakthrough" in batsman_attrs and innings == 2:
+        _six_cap_mult = _six_cap_mult * ATTR_EFFECTS["Breakthrough"]["chase_six_mult"]
 
     # ── Hard cap on stacked six weight ───────────────────────────────────────
     # Even with every multiplier firing, six weight can't exceed 2× its

@@ -9,6 +9,7 @@ from discord.ext import commands
 
 # Import card_image early to trigger font startup checks
 import card_image as _card_image_startup_check
+import security
 from bot_guard import ADMIN_GUILD_ID, GuardedTree, MaintenancePrefixBlocked, maintenance_prefix_check
 
 # Bot setup
@@ -55,7 +56,8 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     """Text commands blocked by maintenance were already answered: stay quiet. Everything else = default."""
     if isinstance(error, MaintenancePrefixBlocked):
         return
-    await commands.Bot.on_command_error(bot, ctx, error)
+    # security.py turns cooldowns / bad input / bugs into short friendly messages.
+    await security.handle_command_error(ctx, error)
 
 
 async def load_cogs():

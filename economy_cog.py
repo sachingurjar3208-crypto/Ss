@@ -430,6 +430,51 @@ class EconomyCog(commands.Cog, name="Economy"):
         """Claim monthly coins + a random 85-88 player."""
         await self._claim(ctx, "monthly")
 
+    # -- csclaim: free card every hour (Premium: every 35 min) -------------
+    @commands.command(name="csclaim")
+    @economy_cooldown()
+    async def csclaim(self, ctx: commands.Context):
+        """Claim a free random player card every hour (Premium: every 35 min)."""
+        if not await _need_debut(ctx):
+            return
+        premium = _is_premium(ctx.author)
+        cooldown = economy.CLAIM_COOLDOWN_PREMIUM if premium else economy.CLAIM_COOLDOWN
+        by_ovr: dict[int, list[str]] = {}
+        values: dict[str, int] = {}
+        for c in card_db.list_all_cards():
+            by_ovr.setdefault(int(c["ovr"]), []).append(c["playername_key"])
+            values[c["playername_key"]] = sl.sell_value(c)
+        res = await asyncio.to_thread(economy.claim_card, ctx.author.id, cooldown, by_ovr, values)
+        if not res["ok"]:
+            if res.get("empty"):
+                await ctx.send("🎴 No player cards are available to claim yet. Try again later.")
+                return
+            msg = f"⏳ Your next card is ready in **{fmt_wait(res['wait'])}**."
+            if not premium:
+                msg += "\n💎 Premium members can claim every **35 min**."
+            await ctx.send(msg)
+            return
+
+        card = card_db.get_card(res["card"])
+        ovr = int(card["ovr"])
+        if res["dupe"]:
+            body = f"{_card_line(card, '  ♻️ duplicate')}\n💰 Sold automatically for **+{economy.fmt_coins(res['refund'])}**"
+        elif res["pending"]:
+            body = f"{_card_line(card, '  ⚠️ squad full')}\nChoose below: sell it or replace a player."
+        else:
+            body = _card_line(card, "  🆕")
+        if ovr >= 84:
+            title, color = "🌟 Rare Claim!", discord.Color.purple()
+        elif ovr >= 76:
+            title, color = "🎴 Hourly Claim", discord.Color.blue()
+        else:
+            title, color = "🎴 Hourly Claim", discord.Color.light_grey()
+        embed = discord.Embed(title=title, description=body, color=color)
+        embed.set_footer(text=f"Next claim in {fmt_wait(cooldown)}" + (" • 💎 Premium" if premium else ""))
+        await card_cache.send_embed(ctx, embed, card["image_path"])   # card image comes with the message
+        if res["pending"]:
+            await send_next_pending(ctx, ctx.author.id)
+
     # -- packs -----------------------------------------------------------
     @commands.command(name="cspack")
     @economy_cooldown()

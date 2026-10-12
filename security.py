@@ -280,7 +280,10 @@ async def handle_command_error(ctx: commands.Context, error: Exception) -> None:
     if isinstance(error, commands.NoPrivateMessage):
         return
     if isinstance(error, commands.CommandOnCooldown):
-        await ctx.send(f"⏳ Wait {_fmt_wait(error.retry_after)} before using this again.")
+        # Short message so the bot never looks "off". Throttled so spamming can't make the bot spam back.
+        if _notice_allowed(ctx.author.id, 3):
+            name = ctx.invoked_with or getattr(ctx.command, "name", "this command")
+            await ctx.send(f"⏳ `{name}` is on cooldown. Try again in **{_fmt_wait(error.retry_after)}**.")
         return
     if isinstance(error, commands.NotOwner):
         await ctx.send("🔒 Only the bot owner can use this command.")

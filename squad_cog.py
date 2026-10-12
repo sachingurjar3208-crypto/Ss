@@ -406,7 +406,6 @@ class SquadCog(commands.Cog, name="Squad"):
         if card is None:
             await ctx.send(f"❌ {err}")
             return
-        from card_narratives import NARRATIVES
         styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
         desc = (
             f"OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
@@ -415,10 +414,8 @@ class SquadCog(commands.Cog, name="Squad"):
             + (f" · {card_db.effective_bowling_type(card)}" if card_db.effective_bowling_type(card) else "")
             + f"\n{card['country_emoji']} {esc(card['country'])}"
         )
-        if styles:
-            desc += "\n\n**Playstyles**\n" + "\n".join(
-                f"• **{esc(s)}** — {esc(NARRATIVES.get(s, ''))}" for s in styles
-            )
+        if styles:   # names only: the effects / percentages are never shown to players
+            desc += "\n\n**Playstyles**\n" + "\n".join(f"• **{esc(s)}**" for s in styles)
         desc += f"\n\nBuy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
         embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
         await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
@@ -832,7 +829,7 @@ class SquadCog(commands.Cog, name="Squad"):
         """List the commands."""
         embed = discord.Embed(title="🏏 CricStar Help", color=discord.Color.orange())
         embed.add_field(name="Start", value=(
-            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player"
+            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player\n`csclaim` free card every hour (Premium: 35 min)"
         ), inline=False)
         embed.add_field(name="Squad", value=(
             "`cssquad` `csshow <player>` `csxi` `csovr` XI image + OVR · `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"

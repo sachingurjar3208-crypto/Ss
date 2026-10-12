@@ -543,6 +543,93 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
                 "vouchers": vouchers}
 
 
+# ── csclaim: a free random card every hour ──────────────────────────────────
+# Cooldown: 60 min for normal users, 35 min for Premium (the cog picks which).
+CLAIM_COOLDOWN = 60 * 60
+CLAIM_COOLDOWN_PREMIUM = 35 * 60
+
+# 60-75 OVR cards share the leftover chance and are picked at random (no table needed).
+CLAIM_LOW_RANGE = (60, 75)
+
+# Chance in % for every higher OVR. Edit these numbers to change the odds.
+# 76-83: the higher the OVR, the lower the chance.  84-88: fixed rare chances.
+# Everything that is NOT listed here (the rest of the 100%) gives a 60-75 card.
+CLAIM_RARITY = {
+    76: 10.0, 77: 7.0, 78: 5.0, 79: 3.5, 80: 2.5, 81: 1.8, 82: 1.2, 83: 0.8,
+    84: 2.0, 85: 1.0, 86: 0.5, 87: 0.3, 88: 0.1,
+}
+
+
+def _ensure_claim_column(conn: sqlite3.Connection) -> None:
+    """Adds users.last_claim on old databases (init_economy_db isn't run at start-up)."""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    if "last_claim" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN last_claim REAL NOT NULL DEFAULT 0")
+
+
+def _roll_claim_ovr() -> int | None:
+    """Returns the OVR that was rolled (76-88), or None = a 60-75 card."""
+    r = _rng.random() * 100
+    acc = 0.0
+    for ovr, pct in sorted(CLAIM_RARITY.items()):
+        acc += pct
+        if r < acc:
+            return ovr
+    return None
+
+
+def _claim_pool(by_ovr: dict[int, list[str]], ovr: int | None) -> list[str]:
+    """Cards for the rolled OVR. If there are no cards at that OVR yet, step down to the
+    next lower rated one (never below 76), then to the 60-75 group."""
+    if ovr is not None:
+        for o in range(ovr, CLAIM_LOW_RANGE[1], -1):
+            if by_ovr.get(o):
+                return list(by_ovr[o])
+    lo, hi = CLAIM_LOW_RANGE
+    return [k for o in range(lo, hi + 1) for k in by_ovr.get(o, [])]
+
+
+def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
+               dupe_values: dict[str, int] | None = None) -> dict:
+    """csclaim: one random card, once per `cooldown` seconds, all in one transaction.
+
+    `by_ovr` maps OVR -> player keys. A card the user already has is skipped when
+    an unowned one exists at the rolled OVR; otherwise it turns into coins
+    (`dupe_values`). Squad full (25) -> the card waits in pending_cards, so the
+    sell / replace buttons appear.
+    Returns {"ok": True, "card", "ovr", "dupe", "refund", "pending", "balance"}
+    or {"ok": False, "wait": seconds} / {"ok": False, "missing": True} / {"ok": False, "empty": True}."""
+    uid = _uid(user_id)
+    now = time.time()
+    with _tx() as conn:
+        _ensure_claim_column(conn)
+        row = conn.execute("SELECT purse, last_claim FROM users WHERE user_id = ?", (uid,)).fetchone()
+        if row is None:
+            return {"ok": False, "missing": True, "wait": 0}
+        left = cooldown - (now - float(row["last_claim"]))
+        if left > 0:
+            return {"ok": False, "wait": int(left) + 1}
+        pool = _claim_pool(by_ovr, _roll_claim_ovr())
+        if not pool:
+            return {"ok": False, "empty": True, "wait": 0}   # no cards exist: cooldown NOT used
+        _ensure_pending_table(conn)
+        owned = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
+        owned |= {r["player_key"] for r in conn.execute("SELECT player_key FROM pending_cards WHERE user_id = ?", (uid,))}
+        fresh = [k for k in pool if k not in owned]
+        balance = int(row["purse"])
+        dupe, refund, pending = False, 0, False
+        if fresh:
+            key = _rng.choice(fresh)
+            pending = _grant(conn, uid, key, "csclaim") == "pending"
+        else:
+            key, dupe = _rng.choice(pool), True
+            refund = int((dupe_values or {}).get(key, 0))
+            if refund:
+                balance = _apply_coins(conn, uid, refund, "Duplicate refund (csclaim)")
+        conn.execute("UPDATE users SET last_claim = ? WHERE user_id = ?", (now, uid))
+        return {"ok": True, "card": key, "dupe": dupe, "refund": refund, "pending": pending, "balance": balance}
+
+
 # ── Owned cards ─────────────────────────────────────────────────────────────
 
 def owned_keys(user_id) -> list[str]:
