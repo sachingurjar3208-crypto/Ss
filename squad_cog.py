@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import io
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import discord
 from discord import ui
@@ -226,14 +226,33 @@ class SquadCog(commands.Cog, name="Squad"):
     # -- challenge a player (csmp @user <overs>) ---------------------------
     @commands.command(name="csmp")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def csmp(self, ctx: commands.Context, opponent: discord.Member, overs: int = 5):
-        """Challenge another player to a match: `csmp @user 5`."""
+    async def csmp(self, ctx: commands.Context, opponent: Union[discord.Member, str], overs: int = 5):
+        """Challenge another player: `csmp @user 5`. Ranked matchmaking: `csmp ranked`."""
         from views import AcceptDeclineView, active_games
         from game import GameState
         from embeds import build_match_invite_embed
         from data import random_match_conditions
 
+        if isinstance(opponent, str):
+            if opponent.strip().lower() == "ranked":
+                cog = self.bot.get_cog("Ranked")
+                if cog is None:
+                    await ctx.send("❌ Ranked mode is not available right now.")
+                    return
+                await cog.start_ranked(ctx)
+                return
+            await ctx.send("❌ Use `csmp @user 5` to challenge someone, or `csmp ranked` for ranked matchmaking.")
+            return
+
         challenger = ctx.author
+        try:
+            from ranked_cog import in_queue
+            for who, label in ((challenger, "You are"), (opponent, f"{opponent.display_name} is")):
+                if in_queue(who.id):
+                    await ctx.send(f"❌ {label} searching for a ranked match right now.")
+                    return
+        except ImportError:
+            pass
         if opponent.bot:
             await ctx.send("❌ You can't challenge a bot.")
             return
@@ -303,6 +322,14 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         active_games.pop(ctx.channel.id, None)
         game._afk_sent = True   # stops any pending timeout from fining anyone
+        if getattr(game, "ranked", False) and is_player:
+            # Ranked: cancelling = forfeit (-1 star for the one who cancelled, +1 for the other).
+            from views import _ranked_finish, _ranked_announce
+            other = game.opponent if game.challenger.id == ctx.author.id else game.challenger
+            await ctx.send("🏳️ Ranked match forfeited.")
+            _ranked_finish(game, other.id, ctx.author.id)
+            await _ranked_announce(ctx.channel, game)
+            return
         await ctx.send("Match cancelled. No result was recorded.")
 
     @commands.command(name="csresume")
@@ -829,7 +856,7 @@ class SquadCog(commands.Cog, name="Squad"):
         """List the commands."""
         embed = discord.Embed(title="🏏 CricStar Help", color=discord.Color.orange())
         embed.add_field(name="Start", value=(
-            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player\n`csclaim` free card every hour (Premium: 35 min)"
+            "`csdebut` create team\n`csstarterpack` first players\n`csdaily` `csweekly` (Premium) `csmonthly` free coins + player\n`csclaim` free card every hour (Premium: 35 min)\n`csmp ranked` ranked match (8 overs)\n`csrank` your tier & stars\n`csranktop` global top 10"
         ), inline=False)
         embed.add_field(name="Squad", value=(
             "`cssquad` `csshow <player>` `csxi` `csovr` XI image + OVR · `csautoxi` `csautoplay` (Premium) · `csxi @user` (Premium)\n"

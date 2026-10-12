@@ -335,6 +335,61 @@ async def _flush_quest_notes(channel, game):
         print(f"[quest] announce failed: {type(e).__name__}: {e}")
 
 
+def _ranked_finish(game, winner_id, loser_id):
+    """Ranked match decided: +1 star winner / -1 star loser (once per game, never raises)."""
+    if not getattr(game, "ranked", False) or game.__dict__.get("_ranked_done"):
+        return
+    game._ranked_done = True
+    try:
+        import ranked
+        game.ranked_result = ranked.apply_result(winner_id, loser_id)
+    except Exception as e:
+        game.ranked_result = {}
+        print(f"[ranked] result failed: {type(e).__name__}: {e}")
+
+
+async def _ranked_announce(channel, game):
+    """Post the star changes (and any tier reward) after a ranked match. Never raises."""
+    try:
+        if not getattr(game, "ranked", False) or game.__dict__.get("_ranked_announced"):
+            return
+        res = game.__dict__.get("ranked_result")
+        if res is None:
+            return
+        game._ranked_announced = True
+        import ranked
+        if not res:
+            await channel.send("🤝 Tied match — no stars changed.")
+            return
+        lines, pend = [], []
+        for uid, r in res.items():
+            who = game.challenger if game.challenger.id == uid else game.opponent
+            if r["delta"] > 0:
+                change = f"**+1** ⭐  ({r['old']} → **{r['new']}**)"
+            elif r["delta"] < 0:
+                change = f"**-1** ⭐  ({r['old']} → **{r['new']}**)"
+            else:
+                change = f"stays at **{r['new']}** ⭐"
+            tier = ranked.tier_of(r["new"])
+            line = f"{who.mention}: {change}  {ranked.tier_emoji(tier)} {tier}"
+            if r["tier_new"] != r["tier_old"] and not r["won"]:
+                line += f"\n⬇️ Dropped to {ranked.tier_emoji(tier)} **{tier}**"
+            for text in r["rewards"]:
+                line += f"\n🎉 {text}"
+            lines.append(line)
+            if r["pending"]:
+                pend.append(uid)
+        embed = discord.Embed(title="⭐ Ranked Result", description="\n\n".join(lines),
+                              color=discord.Color.from_rgb(212, 175, 55))
+        await channel.send(embed=embed)
+        if pend:
+            from economy_cog import send_next_pending
+            for uid in pend:
+                await send_next_pending(channel, uid)
+    except Exception as e:
+        print(f"[ranked] announce failed: {type(e).__name__}: {e}")
+
+
 def _save_match_record(game):
     """Derive winner/loser and persist to match_records. Ignores ties."""
     t1 = game.runs[0]
@@ -351,6 +406,9 @@ def _save_match_record(game):
     except Exception as e:
         print(f"[quest] match tracking failed: {type(e).__name__}: {e}")
     if t1 == t2:
+        if getattr(game, "ranked", False):   # ranked tie: no star change
+            game.ranked_result = {}
+            game._ranked_done = True
         return  # tie — don't record
     if t2 > t1:
         winner_id, loser_id = inn2_uid, inn1_uid
@@ -358,6 +416,7 @@ def _save_match_record(game):
     else:
         winner_id, loser_id = inn1_uid, inn2_uid
         winner_score, loser_score = t1, t2
+    _ranked_finish(game, winner_id, loser_id)
     try:
         game.match_record_id = _record_match_result(winner_id, loser_id, winner_score, loser_score, game.overs)
     except Exception as e:
@@ -465,13 +524,27 @@ def _first_select(view):
     return next((c for c in view.children if isinstance(c, ui.Select)), None)
 
 
+def _acting_skill(view):
+    """0..1 skill if the player being auto-played is a ranked BOT, else None
+    (None = normal csautoplay behaviour for real premium players)."""
+    uid = view.__dict__.get("_autoplay_uid")
+    game = getattr(view, "game", None)
+    if uid is None or game is None or uid not in getattr(game, "bot_ids", ()):
+        return None
+    return float(getattr(game, "bot_skill", 0.5))
+
+
 async def _auto_pick_from_select(view, make, n: int = 1) -> None:
     select = _first_select(view)
     if select is None:
         return
-    values = [o.value for o in select.options][:n]
-    if not values or values[0] == "none":
+    all_values = [o.value for o in select.options]
+    if not all_values or all_values[0] == "none":
         return
+    values = all_values[:n]   # the dropdown is already sorted best-first
+    skill = _acting_skill(view)
+    if skill is not None and len(all_values) > n and random.random() > skill:
+        values = random.sample(all_values, n)   # a weaker bot sometimes picks a worse player
     await select.callback(make(values))
 
 
@@ -513,6 +586,9 @@ async def _auto_spin_bowl(view, make):
 async def _auto_bat(view, make):
     btns = [c for c in view.children if isinstance(c, ui.Button)]
     good = [b for b in btns if b.label in (view.recommended or [])]
+    skill = _acting_skill(view)
+    if skill is not None and random.random() > skill:
+        good = []   # a weaker bot often ignores the recommended shot
     pool = good or [b for b in btns if b.label not in ("Leave", "Scoop")] or btns
     if pool:
         await random.choice(pool).callback(make())
@@ -582,7 +658,13 @@ def autoplay_kick(game) -> None:
 
 async def _autoplay_act(view, uid: int) -> None:
     try:
-        await asyncio.sleep(AUTOPLAY_DELAY)
+        # A ranked bot "thinks" for a random, human-like time; real players' autoplay uses the fixed delay.
+        _g = getattr(view, "game", None)
+        if uid in getattr(_g, "bot_ids", ()):
+            await asyncio.sleep(random.uniform(3.0, 8.0))
+        else:
+            await asyncio.sleep(AUTOPLAY_DELAY)
+        view.__dict__["_autoplay_uid"] = uid
         game = view.game
         message = getattr(view, "message", None)
         channel = getattr(view, "_channel", None) or getattr(message, "channel", None)
@@ -749,6 +831,11 @@ class _TimeoutMixin:
             )
         except Exception:
             pass
+        if getattr(game, "ranked", False) and leaver_id is not None:
+            # Ranked: leaving counts as a loss for the leaver and a win for the other player.
+            other = game.opponent if getattr(game.challenger, "id", None) == leaver_id else game.challenger
+            _ranked_finish(game, other.id, leaver_id)
+            await _ranked_announce(ch, game)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1220,6 +1307,8 @@ async def _process_delivery(
 
             batting_uid = game.batting_user_id
             reviews     = game.drs_reviews.get(batting_uid, 0)
+            if batting_uid in getattr(game, "bot_ids", ()):
+                reviews = 0   # a ranked bot never asks for a review
             if reviews > 0:
                 drs_view = DRSView(
                     game, channel, delivery_internal, shot_internal,
@@ -1256,6 +1345,7 @@ async def _process_delivery(
                 await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
+                await _ranked_announce(channel, game)
                 await _send_match_summary(channel, game)
                 await _flush_quest_notes(channel, game)
                 active_games.pop(channel.id, None)
@@ -1322,6 +1412,7 @@ async def _handle_wicket_fall(channel, game: GameState):
             _save_match_record(game)
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
+            await _ranked_announce(channel, game)
             await _flush_quest_notes(channel, game)
             active_games.pop(channel.id, None)
         return
@@ -1546,6 +1637,18 @@ class TossView(_TimeoutMixin, ui.View):
                 await channel.send(embed=bb_embed, view=bat_bowl_view)
             await _run_safely(_send_choice, allowed_ids=allowed, notify_channel=channel)
         return callback
+
+
+async def start_toss(channel, game: GameState) -> None:
+    """Send the coin-toss prompt (used by ranked matches, which skip Accept / Decline)."""
+    allowed = _match_ids(game)
+
+    async def _send_toss():
+        toss_embed = _build_toss_embed(game)
+        toss_view  = TossView(game)
+        toss_view._channel = channel
+        await channel.send(embed=toss_embed, view=toss_view, file=_toss_image_file())
+    await _run_safely(_send_toss, allowed_ids=allowed, notify_channel=channel)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
