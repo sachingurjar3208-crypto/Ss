@@ -44,7 +44,7 @@ from card_db import (
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
     remove_playstyle_logo, cards_using_playstyle_logo,
     panel_exists, get_panel, add_panel, list_panels, remove_panel,
-    update_panel_layout, set_card_panel,
+    update_panel_layout, set_card_panel, set_style2_options,
     cards_using_panel, reassign_cards_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
@@ -447,6 +447,10 @@ class CardMakerCog(commands.Cog):
 
         if updates:
             update_card(playername, **updates)
+            # Style 2 cards ignore the classic template, so a new background picked here
+            # is also used as the Style 2 background.
+            if "background" in updates and (get_card(playername)["card_style"] or "") == "style2":
+                set_style2_options(playername, bg=updates["background"])
         if slot_updates:
             set_playstyles(playername, **slot_updates)
         if panel_update_pending:

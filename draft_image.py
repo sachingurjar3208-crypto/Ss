@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 import card_cache
 
@@ -58,10 +58,7 @@ def _load_card(path: str | None) -> Image.Image | None:
     if not path:
         return None
     try:
-        data = card_cache._get_sync(path)
-        if data:
-            return Image.open(io.BytesIO(data)).convert("RGB")
-        return Image.open(path).convert("RGB")
+        return card_cache.load_rgba(path)   # RGBA keeps Style 2's see-through corners
     except Exception:
         return None
 
@@ -80,7 +77,8 @@ def _paste_card(base: Image.Image, card, x: int, y: int, h: int, outline=None) -
     img = img.resize((w, h), Image.LANCZOS)
     mask = Image.new("L", (w, h), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, w - 1, h - 1], radius=12, fill=255)
-    base.paste(img, (x, y), mask)
+    mask = ImageChops.multiply(mask, img.getchannel("A"))   # transparent corners stay transparent
+    base.paste(img.convert("RGB"), (x, y), mask)
     if outline:
         d.rounded_rectangle([x - 2, y - 2, x + w + 1, y + h + 1], radius=14, outline=outline, width=4)
     return w

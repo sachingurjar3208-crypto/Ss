@@ -23,26 +23,51 @@ from PIL import Image
 DISPLAY_W = 800          # width of the copy that gets sent in chat
 JPEG_QUALITY = 90
 MAX_MEMORY_ITEMS = 100   # how many cards stay in RAM (~300KB each, kept small for a 1GB server)
-FILENAME = "card.jpg"    # embeds must use attachment://card.jpg
+FILENAME = "card.jpg"    # opaque (classic) cards
+FILENAME_PNG = "card.png"   # cards with transparent corners (Style 2) - JPEG would turn them black
 
-_DISPLAY_DIR = Path(__file__).parent / "generated" / "display"
+# New folder name on purpose: old display copies were all flattened JPEGs (transparent
+# corners turned black), so they must not be reused.
+_DISPLAY_DIR = Path(__file__).parent / "generated" / "display_v2"
 _mem: dict[str, tuple[float, bytes]] = {}   # source path -> (source mtime, jpeg bytes)
 
 
-def _build(src: str, dst: Path) -> bytes:
-    img = Image.open(src).convert("RGB")
+def _has_transparency(img: Image.Image) -> bool:
+    if img.mode not in ("RGBA", "LA") and "transparency" not in img.info:
+        return False
+    alpha = img.convert("RGBA").getchannel("A")
+    return alpha.getextrema()[0] < 250
+
+
+def _build(src: str, dst_base: Path) -> bytes:
+    """Small display copy. Cards with transparent corners stay PNG (alpha kept);
+    opaque cards become JPEG as before."""
+    img = Image.open(src)
+    alpha = _has_transparency(img)
+    img = img.convert("RGBA" if alpha else "RGB")
     if img.width > DISPLAY_W:
         h = round(img.height * DISPLAY_W / img.width)
         img = img.resize((DISPLAY_W, h), Image.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    if alpha:
+        img.save(buf, format="PNG", optimize=True)
+        dst = dst_base.with_suffix(".png")
+    else:
+        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+        dst = dst_base.with_suffix(".jpg")
     data = buf.getvalue()
     try:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(data)
+        other = dst_base.with_suffix(".jpg" if alpha else ".png")
+        other.unlink(missing_ok=True)      # a card that changed type: drop the stale copy
     except OSError:
         pass  # disk cache is only a bonus
     return data
+
+
+def is_png(data: bytes | None) -> bool:
+    return bool(data) and data[:4] == b"\x89PNG"
 
 
 def _get_sync(path: str) -> bytes | None:
@@ -54,16 +79,19 @@ def _get_sync(path: str) -> bytes | None:
     hit = _mem.get(path)
     if hit and hit[0] == mtime:
         return hit[1]
-    dst = _DISPLAY_DIR / (p.stem + ".jpg")
+    base = _DISPLAY_DIR / p.stem
     data = None
-    try:
-        if dst.exists() and dst.stat().st_mtime >= mtime:
-            data = dst.read_bytes()
-    except OSError:
-        data = None
+    for ext in (".png", ".jpg"):
+        cand = base.with_suffix(ext)
+        try:
+            if cand.exists() and cand.stat().st_mtime >= mtime:
+                data = cand.read_bytes()
+                break
+        except OSError:
+            data = None
     if data is None:
         try:
-            data = _build(path, dst)
+            data = _build(path, base)
         except Exception as e:
             print(f"[card_cache] could not build display copy for {path}: {e}")
             return None
@@ -71,6 +99,26 @@ def _get_sync(path: str) -> bytes | None:
         _mem.pop(next(iter(_mem)))
     _mem[path] = (mtime, data)
     return data
+
+
+def filename_for(path: str | None) -> str:
+    """card.png for cards with transparency, card.jpg otherwise."""
+    return FILENAME_PNG if is_png(_get_sync(path)) else FILENAME if path else FILENAME
+
+
+def load_rgba(path: str | None) -> Image.Image | None:
+    """The card's display copy as RGBA (alpha = 255 everywhere for opaque cards).
+    Use this to paste cards onto other images so the transparent corners stay see-through."""
+    if not path:
+        return None
+    try:
+        data = _get_sync(path)
+        if data:
+            return Image.open(io.BytesIO(data)).convert("RGBA")
+        return Image.open(path).convert("RGBA")
+    except Exception as e:
+        print(f"[card_cache] could not load {path}: {e}")
+        return None
 
 
 async def card_file(path: str | None) -> discord.File | None:
@@ -81,7 +129,7 @@ async def card_file(path: str | None) -> discord.File | None:
     data = await asyncio.to_thread(_get_sync, path)
     if data is None:
         return None
-    return discord.File(io.BytesIO(data), filename=FILENAME)
+    return discord.File(io.BytesIO(data), filename=FILENAME_PNG if is_png(data) else FILENAME)
 
 
 async def warm(path: str | None) -> None:
@@ -120,7 +168,7 @@ def cached_url(path: str | None) -> str | None:
 
 def image_url(path: str | None) -> str:
     """What an embed should use as its image: the CDN link, or the attachment."""
-    return cached_url(path) or f"attachment://{FILENAME}"
+    return cached_url(path) or f"attachment://{filename_for(path)}"
 
 
 def remember(path: str | None, message: discord.Message | None) -> None:
@@ -128,7 +176,7 @@ def remember(path: str | None, message: discord.Message | None) -> None:
     if not path or message is None:
         return
     try:
-        att = next((a for a in message.attachments if a.filename == FILENAME), None)
+        att = next((a for a in message.attachments if a.filename in (FILENAME, FILENAME_PNG)), None)
         if att is None:
             return
         url = att.url
@@ -155,7 +203,7 @@ async def send_embed(ctx, embed: discord.Embed, path: str | None, **kwargs) -> d
     file = await card_file(path)
     if file is None:
         return await ctx.send(embed=embed, **kwargs)
-    embed.set_image(url=f"attachment://{FILENAME}")
+    embed.set_image(url=f"attachment://{file.filename}")
     msg = await ctx.send(embed=embed, file=file, **kwargs)
     remember(path, msg)
     return msg

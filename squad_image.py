@@ -45,10 +45,8 @@ def _load_card(path: str | None) -> Image.Image | None:
     if not path:
         return None
     try:
-        data = card_cache._get_sync(path)
-        if data:
-            return Image.open(io.BytesIO(data)).convert("RGB")
-        return Image.open(path).convert("RGB")
+        # RGBA: Style 2 cards have see-through corners, keep them see-through.
+        return card_cache.load_rgba(path)
     except Exception as e:
         print(f"[squad_image] could not load {path}: {e}")
         return None
@@ -143,17 +141,24 @@ def build_team_image(cards: list, team_name: str, team_ovr: int) -> io.BytesIO |
             x += card_w + GAP
         y += card_h + GAP
 
-    shade = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shade)
-    for (x, y) in positions:
-        sd.rectangle([x + 4, y + 8, x + card_w + 4, y + card_h + 8], fill=(0, 0, 0, 150))
-    shade = shade.filter(ImageFilter.GaussianBlur(9))
-    canvas = Image.alpha_composite(canvas.convert("RGBA"), shade).convert("RGB")
+    # Soft shadows follow the card's real shape (shield for Style 2, rectangle for classic).
+    sized = [img.resize((card_w, card_h), Image.LANCZOS) if img is not None else None for img in imgs]
+    shade_a = Image.new("L", canvas.size, 0)
+    for card_img, (x, y) in zip(sized, positions):
+        if card_img is not None:
+            m = card_img.getchannel("A").point(lambda v: int(v * 150 / 255))
+        else:
+            m = Image.new("L", (card_w, card_h), 150)
+        shade_a.paste(m, (x + 4, y + 8), m)
+    shade_a = shade_a.filter(ImageFilter.GaussianBlur(9))
+    base_rgba = canvas.convert("RGBA")
+    base_rgba.paste((0, 0, 0, 255), (0, 0), shade_a)
+    canvas = base_rgba.convert("RGB")
     d = ImageDraw.Draw(canvas)
 
-    for img, (x, y) in zip(imgs, positions):
-        if img is not None:
-            canvas.paste(img.resize((card_w, card_h), Image.LANCZOS), (x, y))
+    for card_img, (x, y) in zip(sized, positions):
+        if card_img is not None:
+            canvas.paste(card_img.convert("RGB"), (x, y), card_img.getchannel("A"))
         else:
             d.rounded_rectangle([x, y, x + card_w, y + card_h], radius=10,
                                 outline=(80, 90, 110), width=2)

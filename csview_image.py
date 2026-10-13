@@ -13,7 +13,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 _HERE = Path(__file__).parent
 _NUM, _LAB, _NAME = _HERE / "display_bold.ttf", _HERE / "label.ttf", _HERE / "name_font.ttf"
@@ -98,13 +98,13 @@ def _card_image(path: str | None) -> Image.Image | None:
         return None
     try:
         import card_cache   # reuses the small cached copy, never the full-size PNG
-        data = card_cache._get_sync(path)
-        if data is not None:
-            return Image.open(io.BytesIO(data)).convert("RGB")
+        img = card_cache.load_rgba(path)    # RGBA: keeps Style 2's see-through corners
+        if img is not None:
+            return img
     except Exception:
         pass
     try:
-        return Image.open(path).convert("RGB")
+        return Image.open(path).convert("RGBA")
     except Exception:
         return None
 
@@ -139,7 +139,8 @@ def generate_view_card(
         card = card.resize((max(1, int(card.width * scale)), max(1, int(card.height * scale))), Image.LANCZOS)
         mask = Image.new("L", card.size, 0)
         ImageDraw.Draw(mask).rounded_rectangle((0, 0, card.width, card.height), 18, fill=255)
-        im.paste(card, (fx + (fw - card.width) // 2, fy + (fh - card.height) // 2), mask)
+        mask = ImageChops.multiply(mask, card.getchannel("A"))   # transparent corners stay transparent
+        im.paste(card.convert("RGB"), (fx + (fw - card.width) // 2, fy + (fh - card.height) // 2), mask)
     else:
         d.text((fx + fw // 2, fy + fh // 2), "NO IMAGE", font=_f(_NUM, 80), fill=(60, 80, 130), anchor="mm")
 

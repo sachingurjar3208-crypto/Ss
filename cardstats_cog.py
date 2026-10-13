@@ -18,15 +18,22 @@ from discord.ext import commands
 from bot_guard import MaintenanceActive
 from card_db import (
     init_card_db, get_card, set_card_style, set_extra_stats, effective_role,
+    set_style2_options, get_background, list_backgrounds,
 )
 from card_stats import allowed_extra_keys, card_stat_details
 from cardmaker_cog import (
-    MAX_STAT, is_owner, playername_autocomplete, _regenerate_and_send,
+    MAX_STAT, is_owner, playername_autocomplete, background_autocomplete,
+    _regenerate_and_send,
 )
 
 STYLE_CHOICES = [
     app_commands.Choice(name="Style 2 (new design)", value="style2"),
     app_commands.Choice(name="Classic (old design)", value="classic"),
+]
+
+ICON_CHOICES = [
+    app_commands.Choice(name="Gold icon", value="gold"),
+    app_commands.Choice(name="No icon", value="none"),
 ]
 
 ROLE_NAMES = {"BAT": "Batter", "BOWL": "Bowler", "AR": "All-rounder", "WK": "Keeper"}
@@ -60,6 +67,8 @@ class CardStatsCog(commands.Cog):
     @app_commands.describe(
         player="Which card",
         style="Card design (default: Style 2)",
+        background="Style 2 background (from /bgadder). Type 'default' for the built-in purple",
+        icon="Gold icon in the left column (Style 2)",
         pwr="Power hitting (batter / all-rounder / keeper)",
         run="Running between wickets (batter / keeper)",
         tim="Timing (batter)",
@@ -71,14 +80,16 @@ class CardStatsCog(commands.Cog):
         kee="Wicketkeeping (keeper)",
         cat="Catching (keeper)",
     )
-    @app_commands.choices(style=STYLE_CHOICES)
-    @app_commands.autocomplete(player=playername_autocomplete)
+    @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES)
+    @app_commands.autocomplete(player=playername_autocomplete, background=background_autocomplete)
     @is_owner()
     async def cardstats(
         self,
         interaction: discord.Interaction,
         player: str,
         style: app_commands.Choice[str] | None = None,
+        background: str | None = None,
+        icon: app_commands.Choice[str] | None = None,
         pwr: Stat | None = None,
         run: Stat | None = None,
         tim: Stat | None = None,
@@ -108,6 +119,28 @@ class CardStatsCog(commands.Cog):
         to_save = {k: v for k, v in given.items() if k in allowed}
         ignored = [k.upper() for k in given if k not in allowed]
 
+        # Style 2 background / icon (only touched when given).
+        bg_note = ""
+        if background is not None:
+            if background.strip().lower() in ("default", "none", "purple"):
+                set_style2_options(player, bg=None)
+                bg_note = "Background: built-in purple"
+            else:
+                bg_row = get_background(background)
+                if bg_row is None:
+                    names = list_backgrounds()
+                    hint = ", ".join(names) if names else "(none added yet)"
+                    await interaction.followup.send(
+                        f"❌ Unknown background `{background}`.\nAvailable: {hint}\n"
+                        "(or type `default` for the built-in purple)"
+                    )
+                    return
+                set_style2_options(player, bg=bg_row["pathname"])
+                bg_note = f"Background: {bg_row['pathname']}"
+        if icon is not None:
+            set_style2_options(player, icon=None if icon.value == "none" else icon.value)
+            bg_note = (bg_note + " • " if bg_note else "") + f"Icon: {icon.name}"
+
         if to_save:
             set_extra_stats(player, to_save)
         chosen_style = style.value if style is not None else "style2"
@@ -117,6 +150,8 @@ class CardStatsCog(commands.Cog):
         verb = "Switched to Style 2" if chosen_style == "style2" else "Switched to Classic"
         if to_save:
             verb = "Stats saved • " + verb
+        if bg_note:
+            verb += " • " + bg_note
         try:
             await _regenerate_and_send(interaction, player, verb)
         except Exception as e:

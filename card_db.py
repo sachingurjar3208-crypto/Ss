@@ -86,6 +86,8 @@ _NEW_CARD_COLUMNS = [
     # ── Style 2 card design (set with /cardstats) ────────────────────────
     ("card_style",  "TEXT"),    # NULL or "classic" = old look, "style2" = new look
     ("extra_stats", "TEXT"),    # JSON, e.g. {"pwr": 94, "run": 99, "clu": 97}
+    ("s2_bg",      "TEXT"),    # Style 2 only: backgrounds.pathname (NULL = built-in purple)
+    ("s2_icon",    "TEXT"),    # Style 2 only: "gold" = gold icon in the left column, NULL = none
 ]
 
 
@@ -306,6 +308,29 @@ def set_card_style(playername: str, style: str) -> bool:
             "UPDATE cards SET card_style = ?, updated_at = ? WHERE playername_key = ?",
             (style, time.time(), playername.strip().lower()),
         )
+        conn.commit()
+    return True
+
+
+def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET) -> bool:
+    """Style 2 extras. bg: backgrounds.pathname or None (= built-in purple).
+    icon: "gold" or None. Arguments that are not given are left unchanged."""
+    if get_card(playername) is None:
+        return False
+    sets, vals = [], []
+    if bg is not _UNSET:
+        sets.append("s2_bg = ?")
+        vals.append(bg)
+    if icon is not _UNSET:
+        sets.append("s2_icon = ?")
+        vals.append(icon)
+    if not sets:
+        return True
+    sets.append("updated_at = ?")
+    vals.append(time.time())
+    vals.append(playername.strip().lower())
+    with _conn() as conn:
+        conn.execute(f"UPDATE cards SET {', '.join(sets)} WHERE playername_key = ?", vals)
         conn.commit()
     return True
 

@@ -23,7 +23,10 @@ import io
 import random
 import threading
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+import math
+from pathlib import Path
+
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 import card_image as ci
 from card_stats import card_stat_rows
@@ -169,6 +172,54 @@ def _static() -> dict:
         return _STATIC
 
 
+
+# ── Optional per-card background (set with /cardstats background:...) ────
+_BG_CACHE: dict = {}     # (path, mtime) -> fitted RGB image; tiny on purpose (RAM)
+
+
+def _custom_bg(card_row) -> Image.Image | None:
+    """The card's own Style 2 background, fitted to the card. None = use the
+    built-in purple gradient (also when the template is missing/unreadable)."""
+    name = ci._col(card_row, "s2_bg")
+    if not name:
+        return None
+    try:
+        from card_db import get_background
+        row = get_background(name)
+        if row is None:
+            return None
+        path = row["local_path"]
+        key = (path, Path(path).stat().st_mtime)
+        hit = _BG_CACHE.get(key)
+        if hit is None:
+            img = Image.open(path).convert("RGB")
+            hit = ImageOps.fit(img, (CW, CH), Image.LANCZOS, centering=(0.5, 0.5))
+            if len(_BG_CACHE) >= 3:
+                _BG_CACHE.pop(next(iter(_BG_CACHE)))
+            _BG_CACHE[key] = hit
+        return hit
+    except Exception:
+        return None
+
+
+def _hexagon(cx: float, cy: float, r: float) -> list:
+    return [_p(cx + r * math.cos(math.radians(30 + 60 * k)),
+               cy + r * math.sin(math.radians(30 + 60 * k))) for k in range(6)]
+
+
+def _draw_gold_icon(canvas: Image.Image, cx: float, cy: float, r: float) -> None:
+    """Small gold medal (hexagon + gem). Drawn in code, so no image file is needed."""
+    d = ImageDraw.Draw(canvas)
+    d.polygon(_hexagon(cx, cy, r), fill=(120, 80, 24, 255))
+    d.polygon(_hexagon(cx, cy, r * 0.93), fill=(236, 196, 96, 255))
+    d.polygon(_hexagon(cx, cy, r * 0.72), fill=(150, 104, 34, 255))
+    d.polygon(_hexagon(cx, cy, r * 0.62), fill=(214, 168, 70, 255))
+    gem = [_p(cx, cy - r * 0.40), _p(cx + r * 0.34, cy), _p(cx, cy + r * 0.40), _p(cx - r * 0.34, cy)]
+    d.polygon(gem, fill=(252, 228, 150, 255))
+    d.polygon([gem[0], gem[1], _p(cx, cy)], fill=(255, 246, 205, 255))     # light facet
+    d.polygon([gem[2], gem[3], _p(cx, cy)], fill=(196, 146, 54, 255))      # shadow facet
+
+
 # ── Per-card drawing ─────────────────────────────────────────────────────
 
 def _draw_player(canvas: Image.Image, card_row, fg) -> None:
@@ -235,10 +286,25 @@ def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, 
             logo = None
         if logo is not None:
             logos.append(logo)
-    ys = [810] if len(logos) == 1 else [790, 905]
+
+    gold = str(ci._col(card_row, "s2_icon", "") or "").lower() == "gold"
+    if gold:
+        # (icon y, icon radius, logo ys, logo box) for 0 / 1 / 2 logos
+        icon_y, icon_r, ys, box = {
+            0: (805, 52, [], 100),
+            1: (772, 44, [895], 92),
+            2: (752, 38, [838, 925], 78),
+        }[len(logos)]
+        try:
+            _draw_gold_icon(canvas, cx, icon_y, icon_r)
+        except Exception:
+            pass
+    else:
+        ys = [810] if len(logos) == 1 else [790, 905]
+        box = 100
     for logo, y in zip(logos, ys):
         try:
-            ci._draw_logo(canvas, logo, _p(cx, y), 0, 0, 100, box=100 * S)
+            ci._draw_logo(canvas, logo, _p(cx, y), 0, 0, 100, box=box * S)
         except Exception:
             pass
 
@@ -274,7 +340,7 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
     role = effective_role(card_row)
 
     with _RENDER_LOCK:
-        canvas = static["bg"].convert("RGBA")
+        canvas = (_custom_bg(card_row) or static["bg"]).convert("RGBA")
 
         _draw_player(canvas, card_row, fg_image)
 
