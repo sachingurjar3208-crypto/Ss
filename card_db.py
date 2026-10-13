@@ -87,7 +87,8 @@ _NEW_CARD_COLUMNS = [
     ("card_style",  "TEXT"),    # NULL or "classic" = old look, "style2" = new look
     ("extra_stats", "TEXT"),    # JSON, e.g. {"pwr": 94, "run": 99, "clu": 97}
     ("s2_bg",      "TEXT"),    # Style 2 only: backgrounds.pathname (NULL = built-in purple)
-    ("s2_icon",    "TEXT"),    # Style 2 only: "gold" = gold icon in the left column, NULL = none
+    ("s2_icon",    "TEXT"),    # Style 2 only: "gold" / "bronze" = medal icon in the left column, NULL = none
+    ("s2_transparent", "INTEGER"),  # Style 2 only: NULL or 1 = see-through outside the shield, 0 = solid (opaque)
 ]
 
 
@@ -312,12 +313,16 @@ def set_card_style(playername: str, style: str) -> bool:
     return True
 
 
-def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET) -> bool:
+def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET, transparent=_UNSET) -> bool:
     """Style 2 extras. bg: backgrounds.pathname or None (= built-in purple).
-    icon: "gold" or None. Arguments that are not given are left unchanged."""
+    icon: "gold", "bronze" or None. transparent: True = see-through corners (default),
+    False = solid card. Arguments that are not given are left unchanged."""
     if get_card(playername) is None:
         return False
     sets, vals = [], []
+    if transparent is not _UNSET:
+        sets.append("s2_transparent = ?")
+        vals.append(None if transparent is None else (1 if transparent else 0))
     if bg is not _UNSET:
         sets.append("s2_bg = ?")
         vals.append(bg)

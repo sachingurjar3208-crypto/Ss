@@ -207,17 +207,28 @@ def _hexagon(cx: float, cy: float, r: float) -> list:
                cy + r * math.sin(math.radians(30 + 60 * k))) for k in range(6)]
 
 
-def _draw_gold_icon(canvas: Image.Image, cx: float, cy: float, r: float) -> None:
-    """Small gold medal (hexagon + gem). Drawn in code, so no image file is needed."""
+# Medal colours: (rim, face, inner ring, inner face, gem, gem light facet, gem shadow facet)
+MEDAL_COLORS = {
+    "gold": ((120, 80, 24, 255), (236, 196, 96, 255), (150, 104, 34, 255), (214, 168, 70, 255),
+             (252, 228, 150, 255), (255, 246, 205, 255), (196, 146, 54, 255)),
+    "bronze": ((84, 44, 18, 255), (205, 127, 68, 255), (120, 66, 30, 255), (176, 100, 48, 255),
+               (226, 160, 106, 255), (242, 196, 150, 255), (140, 78, 36, 255)),
+}
+
+
+def _draw_medal_icon(canvas: Image.Image, cx: float, cy: float, r: float, kind: str = "gold") -> None:
+    """Small medal (hexagon + gem) in the "gold" or "bronze" colours. Drawn in code,
+    so no image file is needed."""
+    rim, face, ring, inner, gem_c, light, shadow = MEDAL_COLORS.get(kind, MEDAL_COLORS["gold"])
     d = ImageDraw.Draw(canvas)
-    d.polygon(_hexagon(cx, cy, r), fill=(120, 80, 24, 255))
-    d.polygon(_hexagon(cx, cy, r * 0.93), fill=(236, 196, 96, 255))
-    d.polygon(_hexagon(cx, cy, r * 0.72), fill=(150, 104, 34, 255))
-    d.polygon(_hexagon(cx, cy, r * 0.62), fill=(214, 168, 70, 255))
+    d.polygon(_hexagon(cx, cy, r), fill=rim)
+    d.polygon(_hexagon(cx, cy, r * 0.93), fill=face)
+    d.polygon(_hexagon(cx, cy, r * 0.72), fill=ring)
+    d.polygon(_hexagon(cx, cy, r * 0.62), fill=inner)
     gem = [_p(cx, cy - r * 0.40), _p(cx + r * 0.34, cy), _p(cx, cy + r * 0.40), _p(cx - r * 0.34, cy)]
-    d.polygon(gem, fill=(252, 228, 150, 255))
-    d.polygon([gem[0], gem[1], _p(cx, cy)], fill=(255, 246, 205, 255))     # light facet
-    d.polygon([gem[2], gem[3], _p(cx, cy)], fill=(196, 146, 54, 255))      # shadow facet
+    d.polygon(gem, fill=gem_c)
+    d.polygon([gem[0], gem[1], _p(cx, cy)], fill=light)     # light facet
+    d.polygon([gem[2], gem[3], _p(cx, cy)], fill=shadow)    # shadow facet
 
 
 # ── Per-card drawing ─────────────────────────────────────────────────────
@@ -287,8 +298,8 @@ def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, 
         if logo is not None:
             logos.append(logo)
 
-    gold = str(ci._col(card_row, "s2_icon", "") or "").lower() == "gold"
-    if gold:
+    medal = str(ci._col(card_row, "s2_icon", "") or "").lower()
+    if medal in MEDAL_COLORS:
         # (icon y, icon radius, logo ys, logo box) for 0 / 1 / 2 logos
         icon_y, icon_r, ys, box = {
             0: (805, 52, [], 100),
@@ -296,7 +307,7 @@ def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, 
             2: (752, 38, [838, 925], 78),
         }[len(logos)]
         try:
-            _draw_gold_icon(canvas, cx, icon_y, icon_r)
+            _draw_medal_icon(canvas, cx, icon_y, icon_r, medal)
         except Exception:
             pass
     else:
@@ -353,11 +364,24 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
         # Gold border, then clip to the shield. Pixels outside the shield get an
         # RGB of NAVY, so code that flattens to RGB shows navy and not pure black.
         canvas.paste(GOLD, (0, 0), static["border"])
-        out = Image.new("RGBA", canvas.size, NAVY + (0,))
-        out.paste(canvas, (0, 0), static["mask"])
-        del canvas
 
-        out = out.resize((OUT_W, OUT_H), Image.LANCZOS)
+        # Solid colour layer: shield on NAVY. It is resized on its own (no alpha),
+        # so the hidden colour under transparent pixels is NAVY and NEVER black.
+        # (Resizing an RGBA image turns fully transparent pixels black, which is
+        # what showed up as black boxes wherever a viewer/collage flattened the PNG.)
+        solid = Image.new("RGB", canvas.size, NAVY)
+        solid.paste(canvas.convert("RGB"), (0, 0), static["mask"])
+        del canvas
+        solid = solid.resize((OUT_W, OUT_H), Image.LANCZOS)
+
+        transparent = ci._col(card_row, "s2_transparent", 1)
+        if transparent in (0, "0", False):
+            out = solid                                   # transparency OFF: solid card
+        else:                                             # transparency ON: shield only
+            alpha = static["mask"].resize((OUT_W, OUT_H), Image.LANCZOS)
+            out = solid.convert("RGBA")
+            out.putalpha(alpha)
+        del solid
 
     buf = io.BytesIO()
     out.save(buf, format="PNG")

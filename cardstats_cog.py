@@ -33,7 +33,13 @@ STYLE_CHOICES = [
 
 ICON_CHOICES = [
     app_commands.Choice(name="Gold icon", value="gold"),
+    app_commands.Choice(name="Bronze icon", value="bronze"),
     app_commands.Choice(name="No icon", value="none"),
+]
+
+TRANSPARENCY_CHOICES = [
+    app_commands.Choice(name="On (see-through outside the card)", value="on"),
+    app_commands.Choice(name="Off (solid card, no transparency)", value="off"),
 ]
 
 ROLE_NAMES = {"BAT": "Batter", "BOWL": "Bowler", "AR": "All-rounder", "WK": "Keeper"}
@@ -68,7 +74,8 @@ class CardStatsCog(commands.Cog):
         player="Which card",
         style="Card design (default: Style 2)",
         background="Style 2 background (from /bgadder). Type 'default' for the built-in purple",
-        icon="Gold icon in the left column (Style 2)",
+        icon="Gold / Bronze icon in the left column (Style 2)",
+        transparency="Style 2 transparency on/off (On = see-through corners, Off = solid card)",
         pwr="Power hitting (batter / all-rounder / keeper)",
         run="Running between wickets (batter / keeper)",
         tim="Timing (batter)",
@@ -80,7 +87,7 @@ class CardStatsCog(commands.Cog):
         kee="Wicketkeeping (keeper)",
         cat="Catching (keeper)",
     )
-    @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES)
+    @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES, transparency=TRANSPARENCY_CHOICES)
     @app_commands.autocomplete(player=playername_autocomplete, background=background_autocomplete)
     @is_owner()
     async def cardstats(
@@ -90,6 +97,7 @@ class CardStatsCog(commands.Cog):
         style: app_commands.Choice[str] | None = None,
         background: str | None = None,
         icon: app_commands.Choice[str] | None = None,
+        transparency: app_commands.Choice[str] | None = None,
         pwr: Stat | None = None,
         run: Stat | None = None,
         tim: Stat | None = None,
@@ -140,6 +148,12 @@ class CardStatsCog(commands.Cog):
         if icon is not None:
             set_style2_options(player, icon=None if icon.value == "none" else icon.value)
             bg_note = (bg_note + " • " if bg_note else "") + f"Icon: {icon.name}"
+
+        if transparency is not None:
+            set_style2_options(player, transparent=(transparency.value == "on"))
+            bg_note = (bg_note + " • " if bg_note else "") + (
+                "Transparency: ON" if transparency.value == "on" else "Transparency: OFF (solid)"
+            )
 
         if to_save:
             set_extra_stats(player, to_save)
