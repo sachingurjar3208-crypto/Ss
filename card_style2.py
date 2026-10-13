@@ -141,14 +141,14 @@ def _build_static() -> dict:
     sd = ImageDraw.Draw(shade)
     for y in range(930, 1500):           # bottom fade, up to alpha ~215
         a = int(215 * ((y - 930) / (1500 - 930)) ** 1.2)
-        sd.line([_p(0, y), _p(DESIGN_W, y)], fill=a)
+        sd.line([_p(0, y), _p(DESIGN_W, y)], fill=a, width=S)
     sd.rectangle([_p(0, 1500), (CW, CH)], fill=215)   # keep the fade solid below it
     band = Image.new("L", (CW, CH), 0)
     bd = ImageDraw.Draw(band)
     for y in range(200, 1090):           # translucent band behind the left column
         t = (y - 200) / 890
         a = int(120 * min(1.0, t * 6) * min(1.0, (1 - t) * 6))
-        bd.line([_p(275, y), _p(480, y)], fill=a)
+        bd.line([_p(275, y), _p(480, y)], fill=a, width=S)
     shade = ImageChops.lighter(shade, band)
 
     # Gold border: thick outer ring + faint thin inner ring.
