@@ -320,6 +320,8 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         is_player = ctx.author.id in (game.challenger.id, game.opponent.id)
         is_mod = getattr(ctx.author.guild_permissions, "manage_messages", False) if ctx.guild else False
+        if getattr(game, "ranked", False):
+            is_mod = False   # ranked: only the two players can end it (a mod of one server can't void a result)
         if not (is_player or is_mod):
             await ctx.send("🔒 Only the two players (or a moderator) can cancel this match.")
             return
@@ -329,9 +331,10 @@ class SquadCog(commands.Cog, name="Squad"):
             # Ranked: cancelling = forfeit (-1 star for the one who cancelled, +1 for the other).
             from views import _ranked_finish, _ranked_announce
             other = game.opponent if game.challenger.id == ctx.author.id else game.challenger
-            await ctx.send("🏳️ Ranked match forfeited.")
+            out = game.__dict__.get("mirror") or ctx.channel   # cross-server: tell both channels
+            await out.send("🏳️ Ranked match forfeited.")
             _ranked_finish(game, other.id, ctx.author.id)
-            await _ranked_announce(ctx.channel, game)
+            await _ranked_announce(out, game)
             return
         await ctx.send("Match cancelled. No result was recorded.")
 
@@ -350,7 +353,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if game.batting_user_id is None:
             await ctx.send("The match hasn't started yet — finish the toss first.")
             return
-        await _resume_prompt(ctx.channel, game)
+        await _resume_prompt(game.__dict__.get("mirror") or ctx.channel, game)   # cross-server: both channels
 
     # -- debut -----------------------------------------------------------
     @commands.command(name="csdebut")

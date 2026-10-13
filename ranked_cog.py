@@ -87,6 +87,10 @@ def _sep() -> str:
     return "──────────────────────"
 
 
+_PERMS_TEXT = ("❌ I can't run ranked in this channel. I need **View Channel, Send Messages, "
+               "Embed Links** and **Attach Files** here.")
+
+
 class RankedCog(commands.Cog, name="Ranked"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -147,6 +151,10 @@ class RankedCog(commands.Cog, name="Ranked"):
             return
         if not await _need_debut(ctx):
             return
+        left = await asyncio.to_thread(ranked.blacklist_remaining, me.id)
+        if left > 0:
+            await ctx.send(f"🚫 You are blacklisted from ranked matches. You can play again <t:{int(time.time()) + left}:R>.")
+            return
         await self._show_notices(ctx, me.id)
         if me.id in _queue:
             await ctx.send("❌ You are already searching for a player.")
@@ -163,31 +171,55 @@ class RankedCog(commands.Cog, name="Ranked"):
         tier = info["tier"]
         entry = _Entry(uid=me.id, member=me, channel=ctx.channel, guild_id=ctx.guild.id, tier=tier)
 
+        from views import active_games
         partner: Optional[_Entry] = None
+        channel_busy = False
         async with self._lock:
-            for e in sorted(_queue.values(), key=lambda x: x.joined):
-                if e.uid == me.id or e.tier != tier or e.guild_id != entry.guild_id:
-                    continue
-                if _in_match(self.bot, e.uid):
-                    _queue.pop(e.uid, None)   # that player started something else meanwhile
-                    continue
-                partner = e
-                break
-            if partner is not None:
-                _queue.pop(partner.uid, None)
+            # one ranked search / match per channel
+            if ctx.channel.id in active_games or any(e.channel.id == ctx.channel.id for e in _queue.values()):
+                channel_busy = True
             else:
-                _queue[me.id] = entry
+                for e in sorted(_queue.values(), key=lambda x: x.joined):
+                    if e.uid == me.id or e.tier != tier or (not ranked.CROSS_SERVER and e.guild_id != entry.guild_id):
+                        continue
+                    if _in_match(self.bot, e.uid):
+                        _queue.pop(e.uid, None)   # that player started something else meanwhile
+                        continue
+                    # alt-farm guard: not the same opponent again within the next 3 matches
+                    if await asyncio.to_thread(ranked.recently_faced, me.id, e.uid):
+                        continue
+                    partner = e
+                    break
+                if partner is not None:
+                    _queue.pop(partner.uid, None)
+                else:
+                    _queue[me.id] = entry
+        if channel_busy:
+            await ctx.send("❌ A ranked search or match is already running in this channel. "
+                           "Go to another channel (or another server) to search.")
+            return
 
         if partner is not None:
             self._stop_tasks(partner)
-            ok = await self._start_pvp(partner, entry, ctx.channel)
-            if not ok:   # no free channel: put the waiting player back, tell the new one
+            res = await self._start_pvp(partner, entry)
+            if res == "ok":
+                return
+            if res == "first_bad":
+                # the waiting player's channel is unusable: cancel THEIR search, the newcomer keeps searching
+                await self._edit_search(partner, _PERMS_TEXT + "\nSearch cancelled.")
+                async with self._lock:
+                    _queue[me.id] = entry
+            else:
+                # put the waiting player back and tell the newcomer
                 async with self._lock:
                     _queue[partner.uid] = partner
                 partner.task = asyncio.create_task(self._wait_task(partner))
                 partner.anim = asyncio.create_task(self._anim_task(partner))
-                await ctx.send("❌ No free channel to start the match right now. Try again in a moment.")
-            return
+                if res == "second_bad":
+                    await ctx.send(_PERMS_TEXT)
+                else:
+                    await ctx.send("❌ Couldn't start the match right now. Try again in a moment.")
+                return
 
         entry.message = await ctx.send(embed=_search_embed(entry, 1), view=_SearchView(self, entry))
         entry.task = asyncio.create_task(self._wait_task(entry))
@@ -265,28 +297,30 @@ class RankedCog(commands.Cog, name="Ranked"):
         return True
 
     # ── starting matches ──────────────────────────────────────────────────
-    async def _start_pvp(self, first: _Entry, second: _Entry, new_channel) -> bool:
-        """first = the player who waited, second = the one who just typed the command."""
+    async def _start_pvp(self, first: _Entry, second: _Entry) -> str:
+        """first = the player who waited, second = the one who just typed the command.
+        Each player plays in their OWN channel (they may be in different servers); the match is
+        mirrored into both. Returns "ok", "retry", "first_bad" or "second_bad"."""
         from views import active_games
+        from ranked_mirror import MirrorChannel
 
-        def can_use(ch, member) -> bool:
+        def bot_can_post(ch) -> bool:
             try:
-                p = ch.permissions_for(member)
-                return p.view_channel and p.send_messages
+                p = ch.permissions_for(ch.guild.me)
+                return bool(p.view_channel and p.send_messages and p.embed_links and p.attach_files)
             except Exception:
                 return True
 
-        channel = None
-        for ch in (first.channel, new_channel):
-            if ch.id in active_games:
-                continue
-            if can_use(ch, first.member) and can_use(ch, second.member):
-                channel = ch
-                break
-        if channel is None:
-            return False
-        await self._launch(channel, first.member, second.member, first.tier, search_msgs=[first, second])
-        return True
+        if first.channel.id in active_games or second.channel.id in active_games:
+            return "retry"
+        if not bot_can_post(first.channel):
+            return "first_bad"
+        if not bot_can_post(second.channel):
+            return "second_bad"
+        channels = [first.channel] if first.channel.id == second.channel.id else [first.channel, second.channel]
+        mirror = MirrorChannel(channels, members=[first.member, second.member])
+        await self._launch(mirror, first.member, second.member, first.tier, search_msgs=[first, second])
+        return "ok"
 
     async def _launch(self, channel, challenger, opponent, tier: str, bot_team: dict | None = None,
                       search_msgs: list | None = None):
@@ -318,7 +352,18 @@ class RankedCog(commands.Cog, name="Ranked"):
         cond = random_match_conditions()
         game.conditions = cond
         game.pitch_type = cond["pitch_type"]
-        active_games[channel.id] = game
+        # a mirrored (cross-server) match is registered under BOTH channel ids
+        chans = list(getattr(channel, "channels", None) or [channel])
+        ids = {ch.id for ch in chans}
+        if len(chans) > 1:
+            game.mirror_ids = ids
+            game.mirror = channel
+        for cid in ids:
+            active_games[cid] = game
+        try:   # anti-alt: remember who faced whom (bot = 0)
+            await asyncio.to_thread(ranked.record_match, challenger.id, opponent.id)
+        except Exception as e:
+            print(f"[ranked] record_match failed: {type(e).__name__}: {e}")
 
         # 1) the searching card turns into "Player found" (the waiting player may be in another channel)
         names = {challenger.id: opponent.display_name, opponent.id: challenger.display_name}
@@ -326,7 +371,7 @@ class RankedCog(commands.Cog, name="Ranked"):
         for e in search_msgs or []:
             opp_name = names.get(e.uid, "")
             text = f"**Player found!**\n\n**{opp_name}**\n**Rank:**  {tier}"
-            if e.channel.id != channel.id:
+            if e.channel.id not in ids:
                 text += f"\n\nGo to {channel.mention}"
             if e.message is not None:
                 flashed = True
@@ -371,6 +416,9 @@ class RankedCog(commands.Cog, name="Ranked"):
                         value=f"{info['wins']}W – {info['losses']}L  ({info['played']} played)", inline=True)
         if pos:
             embed.add_field(name="Global place", value=f"#{pos}", inline=True)
+        if info.get("blacklist_until", 0) > time.time():
+            embed.add_field(name="🚫 Ranked blacklist",
+                            value=f"Ends <t:{int(info['blacklist_until'])}:R>", inline=False)
         embed.add_field(
             name="Tiers",
             value="\n".join(f"{x['emoji']} {x['name']} — {x['min']} ⭐" for x in ranked.TIERS),

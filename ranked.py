@@ -41,6 +41,16 @@ SEARCH_TIMEOUT = 300         # global search gives up after 5 minutes (only if n
 # ("whoever debuted"). Set False to pay it only to Bronze players who played at least 1 ranked match.
 BRONZE_PAYS_ALL_DEBUTED = True
 
+# Matchmaking scope: True = players from ANY server can be matched (the match is shown in both
+# players' channels, see ranked_mirror.py). False = same server only.
+CROSS_SERVER = True
+
+# Anti-alt rules
+MIN_STARS = -5               # stars can go below 0 (only losing on Bronze gets you here); never below this
+BLACKLIST_STARS = -5         # reaching this many stars (Bronze only, since nobody else can) = blacklisted
+BLACKLIST_DAYS = 30          # ranked ban length
+RECENT_OPP_BLOCK = 3         # after facing someone, you can't be matched with them for your next 3 matches
+
 TIERS = [
     {"name": "Bronze",    "emoji": "🟤", "min": 0},
     {"name": "Silver",    "emoji": "⚪", "min": 20},
@@ -99,8 +109,9 @@ def tier_emoji(name: str) -> str:
 
 def next_tier(stars: int):
     """(tier dict, stars still needed) for the next tier, or None at the top (Ruby)."""
+    base = max(stars, 0)   # stars can be negative on Bronze; the next tier is still Silver
     for t in TIERS:
-        if stars < t["min"]:
+        if base < t["min"]:
             return t, t["min"] - stars
     return None
 
@@ -120,13 +131,53 @@ def next_reset_ts(now: datetime | None = None) -> int:
 # ── Database ─────────────────────────────────────────────────────────────────
 # Lives in economy.db. Tables are created on first use (init_economy_db isn't run at start-up).
 
+_PLAYERS_DDL = (
+    "CREATE TABLE IF NOT EXISTS ranked_players ("
+    "user_id INTEGER PRIMARY KEY, stars INTEGER NOT NULL DEFAULT 0, "
+    "played INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, "
+    "losses INTEGER NOT NULL DEFAULT 0, claimed TEXT NOT NULL DEFAULT '', "
+    "blacklist_until REAL NOT NULL DEFAULT 0)"
+)
+_SCHEMA_OK = False
+
+
+def _migrate_players(conn) -> None:
+    """Old databases have `CHECK (stars >= 0)` on ranked_players and no blacklist column.
+    SQLite can't drop a CHECK, so the table is rebuilt once (data kept). Runs once per process."""
+    global _SCHEMA_OK
+    if _SCHEMA_OK:
+        return
+    own_tx = not conn.in_transaction
+    if own_tx:
+        conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ranked_players'").fetchone()
+        sql = (row["sql"] if row else "") or ""
+        if "CHECK" in sql.upper():
+            conn.execute("ALTER TABLE ranked_players RENAME TO ranked_players_old")
+            conn.execute(_PLAYERS_DDL)
+            conn.execute(
+                "INSERT INTO ranked_players (user_id, stars, played, wins, losses, claimed) "
+                "SELECT user_id, stars, played, wins, losses, claimed FROM ranked_players_old"
+            )
+            conn.execute("DROP TABLE ranked_players_old")
+        elif "blacklist_until" not in sql:
+            conn.execute("ALTER TABLE ranked_players ADD COLUMN blacklist_until REAL NOT NULL DEFAULT 0")
+        if own_tx:
+            conn.execute("COMMIT")
+    except BaseException:
+        if own_tx:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+        raise
+    _SCHEMA_OK = True
+
+
 def _ensure(conn) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS ranked_players ("
-        "user_id INTEGER PRIMARY KEY, stars INTEGER NOT NULL DEFAULT 0 CHECK (stars >= 0), "
-        "played INTEGER NOT NULL DEFAULT 0, wins INTEGER NOT NULL DEFAULT 0, "
-        "losses INTEGER NOT NULL DEFAULT 0, claimed TEXT NOT NULL DEFAULT '')"
-    )
+    conn.execute(_PLAYERS_DDL)
+    _migrate_players(conn)
     conn.execute("CREATE TABLE IF NOT EXISTS ranked_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS ranked_notices ("
@@ -136,6 +187,12 @@ def _ensure(conn) -> None:
         "CREATE TABLE IF NOT EXISTS ranked_history ("
         "season TEXT NOT NULL, user_id INTEGER NOT NULL, stars INTEGER NOT NULL, tier TEXT NOT NULL)"
     )
+    # last opponents of every player (opp_id 0 = a bot), used to stop alt farming
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ranked_recent ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, opp_id INTEGER NOT NULL)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ranked_recent_user ON ranked_recent (user_id)")
 
 
 def _row(conn, uid: int):
@@ -300,6 +357,7 @@ def get_player(user_id) -> dict:
             "played": int(r["played"]) if r else 0,
             "wins": int(r["wins"]) if r else 0,
             "losses": int(r["losses"]) if r else 0,
+            "blacklist_until": float(r["blacklist_until"] or 0) if r else 0.0,
         }
     finally:
         conn.close()
@@ -348,7 +406,8 @@ def pop_notices(user_id) -> list[str]:
 # ── Match result ─────────────────────────────────────────────────────────────
 
 def apply_result(winner_id, loser_id) -> dict:
-    """Winner +1 star, loser -1 star (min 0), tier-up rewards for the winner.
+    """Winner +1 star, loser -1 star (min MIN_STARS: Bronze can go negative), tier-up rewards for the winner.
+    A loser who reaches BLACKLIST_STARS is banned from ranked for BLACKLIST_DAYS (info["blacklist_until"]).
     Bot players (negative ids) are skipped. Returns {user_id: info} for the real players:
     info = {won, old, new, delta, tier_old, tier_new, rewards: [text], pending: bool}."""
     out: dict[int, dict] = {}
@@ -362,7 +421,10 @@ def apply_result(winner_id, loser_id) -> dict:
                 continue
             row = _row(conn, uid)
             old = int(row["stars"])
-            new = max(0, old + delta)
+            new = max(MIN_STARS, old + delta)
+            blacklist_until = 0.0
+            if not won and new <= BLACKLIST_STARS:
+                blacklist_until = time.time() + BLACKLIST_DAYS * 86400
             claimed = {t for t in (row["claimed"] or "").split(",") if t}
             rewards: list[str] = []
             pending = False
@@ -377,15 +439,75 @@ def apply_result(winner_id, loser_id) -> dict:
                         rewards.append(f"{t['emoji']} **{t['name']} reached!** " + " · ".join(lines))
             conn.execute(
                 "UPDATE ranked_players SET stars = ?, played = played + 1, wins = wins + ?, "
-                "losses = losses + ?, claimed = ? WHERE user_id = ?",
-                (new, 1 if won else 0, 0 if won else 1, ",".join(sorted(claimed)), uid),
+                "losses = losses + ?, claimed = ?, blacklist_until = CASE WHEN ? > 0 THEN ? ELSE blacklist_until END "
+                "WHERE user_id = ?",
+                (new, 1 if won else 0, 0 if won else 1, ",".join(sorted(claimed)),
+                 blacklist_until, blacklist_until, uid),
             )
             out[uid] = {
                 "won": won, "old": old, "new": new, "delta": new - old,
                 "tier_old": tier_of(old), "tier_new": tier_of(new),
                 "rewards": rewards, "pending": pending,
+                "blacklist_until": int(blacklist_until),
             }
     return out
+
+
+# ── Anti-alt: blacklist + "don't meet the same player again" ─────────────────
+
+def blacklist_remaining(user_id) -> int:
+    """Seconds left on the player's ranked blacklist (0 = free to play).
+    When a ban has just run out, negative stars are reset to 0 so the player starts fresh."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        _ensure(conn)
+        r = conn.execute("SELECT blacklist_until FROM ranked_players WHERE user_id = ?", (uid,)).fetchone()
+        until = float(r["blacklist_until"] or 0) if r else 0.0
+        if until <= 0:
+            return 0
+        left = int(until - time.time())
+        if left > 0:
+            return left
+        conn.execute(
+            "UPDATE ranked_players SET blacklist_until = 0, stars = CASE WHEN stars < 0 THEN 0 ELSE stars END "
+            "WHERE user_id = ?", (uid,),
+        )
+        return 0
+
+
+def record_match(uid_a, uid_b) -> None:
+    """Remember who each real player just faced (a bot counts as opponent 0, so bot games also
+    push old opponents out). Only the last RECENT_OPP_BLOCK matches are kept per player."""
+    a, b = int(uid_a), int(uid_b)
+    with economy._tx() as conn:
+        _ensure(conn)
+        for me, opp in ((a, b), (b, a)):
+            if me <= 0:
+                continue
+            conn.execute("INSERT INTO ranked_recent (user_id, opp_id) VALUES (?, ?)", (me, opp if opp > 0 else 0))
+            conn.execute(
+                "DELETE FROM ranked_recent WHERE user_id = ? AND id NOT IN "
+                "(SELECT id FROM ranked_recent WHERE user_id = ? ORDER BY id DESC LIMIT ?)",
+                (me, me, RECENT_OPP_BLOCK),
+            )
+
+
+def recently_faced(uid_a, uid_b) -> bool:
+    """True if either player still has the other among their last RECENT_OPP_BLOCK opponents."""
+    a, b = int(uid_a), int(uid_b)
+    conn = economy._conn()
+    try:
+        _ensure(conn)
+        r = conn.execute(
+            "SELECT 1 FROM ranked_recent WHERE (user_id = ? AND opp_id = ?) OR (user_id = ? AND opp_id = ?) LIMIT 1",
+            (a, b, b, a),
+        ).fetchone()
+        return r is not None
+    except Exception as e:   # never block matchmaking because of a DB hiccup
+        print(f"[ranked] recently_faced failed: {type(e).__name__}: {e}")
+        return False
+    finally:
+        conn.close()
 
 
 # ── Bot opponents ────────────────────────────────────────────────────────────

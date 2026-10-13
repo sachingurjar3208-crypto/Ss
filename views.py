@@ -376,6 +376,9 @@ async def _ranked_announce(channel, game):
                 line += f"\n⬇️ Dropped to {ranked.tier_emoji(tier)} **{tier}**"
             for text in r["rewards"]:
                 line += f"\n🎉 {text}"
+            if r.get("blacklist_until"):
+                line += (f"\n🚫 Too many losses on Bronze. Blacklisted from ranked "
+                         f"until <t:{int(r['blacklist_until'])}:D>.")
             lines.append(line)
             if r["pending"]:
                 pend.append(uid)
@@ -452,7 +455,16 @@ except ImportError:
     def get_umpire_gif(*args, **kwargs):
         return None
 
-active_games: dict[int, GameState] = {}
+from ranked_mirror import GameRegistry
+
+# channel id -> game. A cross-server ranked match is stored under BOTH channel ids (see ranked_mirror.py).
+active_games: dict[int, GameState] = GameRegistry()
+
+
+def _ch(interaction, game):
+    """The channel to post the next prompt in: the mirror (both players' channels) for a
+    cross-server ranked match, otherwise the channel the button was pressed in (as before)."""
+    return game.__dict__.get("mirror") or interaction.channel
 
 VIEW_TIMEOUT = 300  # 5 minutes per action
 
@@ -1290,7 +1302,7 @@ async def _process_delivery(
         # edit. This ack is cosmetic, so skip it and let the ball finish.
         pass
 
-    channel      = interaction.channel
+    channel      = _ch(interaction, game)
     embed        = build_scoreboard_embed(game)
     innings_over = game.is_innings_over()
 
@@ -1601,7 +1613,7 @@ class TossView(_TimeoutMixin, ui.View):
             loser  = self.game.opponent   if won else self.game.challenger
             self.game.toss_winner_id = winner.id
 
-            channel = interaction.channel
+            channel = _ch(interaction, self.game)
             allowed = _match_ids(self.game)
             coin_face = "**HEADS**" if result == "Head" else "**TAILS**"
             sep       = "──────────────────────"
@@ -1699,7 +1711,7 @@ class BatBowlView(_TimeoutMixin, ui.View):
         self.game.toss_note = f"{bat_team_name} chose to bat first" if bat else f"{bat_team_name} will bat first (opponent chose to bowl)"
 
         sep = "──────────────────────"
-        channel = interaction.channel
+        channel = _ch(interaction, self.game)
         allowed = _match_ids(self.game)
         choice_embed = discord.Embed(title="MATCH IS SET", color=discord.Color.from_rgb(30, 160, 80))
         choice_embed.description = (
@@ -1756,7 +1768,7 @@ class OpenerSelectView(_TimeoutMixin, ui.View):
             return
 
         n1, n2 = _pname(p1), _pname(p2)
-        channel = interaction.channel
+        channel = _ch(interaction, self.game)
         striker_view = StrikerDesignateView(self.game, p1, p2)
         striker_view._channel = channel
         await _advance(
@@ -1803,7 +1815,7 @@ class StrikerDesignateView(_TimeoutMixin, ui.View):
             self.game.batsman_stats[nn] = {"runs": 0, "balls": 0, "fours": 0, "sixes": 0}
             self.game.phase = "select_bowler"
 
-            channel = interaction.channel
+            channel = _ch(interaction, self.game)
             allowed = _match_ids(self.game)
             try:
                 await interaction.response.edit_message(
@@ -1891,7 +1903,7 @@ class BowlerSelectView(_TimeoutMixin, ui.View):
         if bname not in self.game.bowler_stats:
             self.game.bowler_stats[bname] = {"balls": 0, "runs": 0, "wickets": 0}
 
-        channel = interaction.channel
+        channel = _ch(interaction, self.game)
         allowed = _match_ids(self.game)
         try:
             await interaction.response.edit_message(content=f"**{bname}** will bowl.", view=None, embed=None)
@@ -2030,7 +2042,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             self.game.pending_delivery_speed  = speed
             self.game.pending_stage1_choice   = self.stage1_choice
 
-            channel = interaction.channel
+            channel = _ch(interaction, self.game)
             batting_view = BattingView(self.game, stage1_choice=self.stage1_choice, is_free_hit=self.is_free_hit)
             batting_view._channel = channel
             await _post_delivery_prompt(
@@ -2104,7 +2116,7 @@ class BowlingView(_TimeoutMixin, ui.View):
             self.game.pending_delivery_speed = speed
             self.game.pending_stage1_choice  = ""
 
-            channel = interaction.channel
+            channel = _ch(interaction, self.game)
             batting_view = BattingView(self.game, is_free_hit=self.is_free_hit)
             batting_view._channel = channel
             await _post_delivery_prompt(
@@ -2593,7 +2605,7 @@ class ImpactPlayerSwapView(ui.View):
             view=None,
         )
 
-        channel = interaction.channel
+        channel = _ch(interaction, self.game)
         team_name = self.game.teams.get(self.uid, {}).get("name", "Team")
         await channel.send(
             f"🔁 **Impact Player!** {team_name} bring on **{incoming_name}** "
@@ -2660,7 +2672,7 @@ class NextBatsmanView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
         self.stop()
         self.game.striker             = player
         self.game.batsman_stats[name] = {"runs": 0, "balls": 0, "fours": 0, "sixes": 0}
-        channel = interaction.channel
+        channel = _ch(interaction, self.game)
 
         try:
             await interaction.response.edit_message(
@@ -2758,7 +2770,7 @@ class NextBowlerView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
         self.game.current_bowler = bowler
         if bname not in self.game.bowler_stats:
             self.game.bowler_stats[bname] = {"balls": 0, "runs": 0, "wickets": 0}
-        channel = interaction.channel
+        channel = _ch(interaction, self.game)
 
         try:
             await interaction.response.edit_message(
