@@ -53,6 +53,18 @@ SHIELD = [
 # Foreground fit box (design space) for the player cutout.
 FG_BOX = {"x": 430, "y": 215, "w": 690, "h": 880}
 
+# "Transparency" option: the player cutout fades to nothing between these two (ends exactly at the line under the name)
+# design-space y values, so legs / shorts never show behind the name and stats.
+FADE_START_Y, FADE_END_Y = 1050, 1097   # 1097 = the line under the name
+
+NAME_COLORS = {
+    "red": (235, 45, 45, 255), "blue": (65, 135, 255, 255), "yellow": (255, 222, 45, 255),
+    "pink": (255, 105, 180, 255), "green": (60, 205, 95, 255), "orange": (255, 140, 30, 255),
+}
+LINE_COLORS = {
+    "black": (0, 0, 0, 255), "white": (255, 255, 255, 255), "blue": (65, 135, 255, 255),
+}
+
 ROLE_WORD = {"BAT": "BAT", "BOWL": "BOWL", "AR": "AR", "WK": "WK"}
 
 
@@ -86,8 +98,8 @@ def _fit_font(draw: ImageDraw.ImageDraw, text: str, size: float, max_w: float):
     return font
 
 
-def _line(draw: ImageDraw.ImageDraw, x1, y1, x2, y2, width=2) -> None:
-    draw.line([_p(x1, y1), _p(x2, y2)], fill=CREAM, width=width * S)
+def _line(draw: ImageDraw.ImageDraw, x1, y1, x2, y2, width=2, color=CREAM) -> None:
+    draw.line([_p(x1, y1), _p(x2, y2)], fill=color, width=width * S)
 
 
 def _erode(mask: Image.Image, dist: float) -> Image.Image:
@@ -246,7 +258,23 @@ def _draw_player(canvas: Image.Image, card_row, fg) -> None:
             int(ci._col(card_row, "offset_y", 0)) * S,
             int(ci._col(card_row, "scale_pct", 100)),
         )
-        canvas.paste(resized, pos, resized)
+        if ci._col(card_row, "s2_fade_legs", 0) in (1, "1", True):
+            # Multiply the cutout's own alpha by a vertical gradient: 1 above
+            # FADE_START_Y, 0 from FADE_END_Y down (smooth in between).
+            layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+            layer.paste(resized, pos, resized)
+            y0 = int((FADE_START_Y - CROP[1]) * S)
+            y1 = int((FADE_END_Y - CROP[1]) * S)
+            ramp = Image.new("L", (1, canvas.size[1]), 255)
+            for y in range(max(0, y0), canvas.size[1]):
+                t = 1.0 if y >= y1 else (y - y0) / max(1, (y1 - y0))
+                t = t * t * (3 - 2 * t)                    # smoothstep
+                ramp.putpixel((0, y), int(round(255 * (1 - t))))
+            ramp = ramp.resize(canvas.size, Image.NEAREST)
+            layer.putalpha(ImageChops.multiply(layer.getchannel("A"), ramp))
+            canvas.alpha_composite(layer)
+        else:
+            canvas.paste(resized, pos, resized)
     except Exception:
         pass   # a bad cutout must never stop the card
 
@@ -325,10 +353,12 @@ def _draw_name_and_stats(draw: ImageDraw.ImageDraw, card_row) -> None:
     try:
         name = str(card_row["displayname"]).upper()
         font = _fit_font(draw, name, 150, 640)
-        draw.text(_p(640, 1045), name, font=font, fill=CREAM, anchor="ms")
+        name_fill = NAME_COLORS.get(str(ci._col(card_row, "s2_name_color", "")).lower(), CREAM)
+        draw.text(_p(640, 1045), name, font=font, fill=name_fill, anchor="ms")
     except Exception:
         pass
-    _line(draw, 303, 1097, 998, 1097)
+    line_fill = LINE_COLORS.get(str(ci._col(card_row, "s2_line_color", "")).lower(), CREAM)
+    _line(draw, 303, 1097, 998, 1097, color=line_fill)
 
     # 6-stat grid. Numbers are right-aligned so 3-digit values never touch the label.
     font = _lfont(112)
@@ -374,13 +404,10 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
         del canvas
         solid = solid.resize((OUT_W, OUT_H), Image.LANCZOS)
 
-        transparent = ci._col(card_row, "s2_transparent", 1)
-        if transparent in (0, "0", False):
-            out = solid                                   # transparency OFF: solid card
-        else:                                             # transparency ON: shield only
-            alpha = static["mask"].resize((OUT_W, OUT_H), Image.LANCZOS)
-            out = solid.convert("RGBA")
-            out.putalpha(alpha)
+        # Outside of the shield is always see-through (same as the original Style 2).
+        alpha = static["mask"].resize((OUT_W, OUT_H), Image.LANCZOS)
+        out = solid.convert("RGBA")
+        out.putalpha(alpha)
         del solid
 
     buf = io.BytesIO()

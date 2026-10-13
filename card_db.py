@@ -88,7 +88,10 @@ _NEW_CARD_COLUMNS = [
     ("extra_stats", "TEXT"),    # JSON, e.g. {"pwr": 94, "run": 99, "clu": 97}
     ("s2_bg",      "TEXT"),    # Style 2 only: backgrounds.pathname (NULL = built-in purple)
     ("s2_icon",    "TEXT"),    # Style 2 only: "gold" / "bronze" = medal icon in the left column, NULL = none
-    ("s2_transparent", "INTEGER"),  # Style 2 only: NULL or 1 = see-through outside the shield, 0 = solid (opaque)
+    ("s2_transparent", "INTEGER"),  # (old, no longer used - corners are always see-through now)
+    ("s2_name_color", "TEXT"),      # Style 2 only: display-name colour (red/blue/yellow/pink/green/orange), NULL = default cream
+    ("s2_line_color", "TEXT"),      # Style 2 only: colour of the line under the name (black/white/blue), NULL = default cream
+    ("s2_fade_legs", "INTEGER"),    # Style 2 only: 1 = player image fades out above the name (legs/shorts hidden), NULL/0 = full image
 ]
 
 
@@ -313,16 +316,24 @@ def set_card_style(playername: str, style: str) -> bool:
     return True
 
 
-def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET, transparent=_UNSET) -> bool:
+def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET, transparent=_UNSET, fade_legs=_UNSET,
+                       name_color=_UNSET, line_color=_UNSET) -> bool:
     """Style 2 extras. bg: backgrounds.pathname or None (= built-in purple).
-    icon: "gold", "bronze" or None. transparent: True = see-through corners (default),
-    False = solid card. Arguments that are not given are left unchanged."""
+    icon: "gold", "bronze" or None. fade_legs: True = the player cutout fades out above
+    the name so legs / shorts do not show behind the name and stats, False/None = full image.
+    (transparent is the old corner option and is ignored.) Arguments not given are left unchanged."""
     if get_card(playername) is None:
         return False
     sets, vals = [], []
-    if transparent is not _UNSET:
-        sets.append("s2_transparent = ?")
-        vals.append(None if transparent is None else (1 if transparent else 0))
+    if name_color is not _UNSET:
+        sets.append("s2_name_color = ?")
+        vals.append(name_color)
+    if line_color is not _UNSET:
+        sets.append("s2_line_color = ?")
+        vals.append(line_color)
+    if fade_legs is not _UNSET:
+        sets.append("s2_fade_legs = ?")
+        vals.append(1 if fade_legs else 0)
     if bg is not _UNSET:
         sets.append("s2_bg = ?")
         vals.append(bg)

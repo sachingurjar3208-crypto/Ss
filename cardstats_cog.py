@@ -38,8 +38,25 @@ ICON_CHOICES = [
 ]
 
 TRANSPARENCY_CHOICES = [
-    app_commands.Choice(name="On (see-through outside the card)", value="on"),
-    app_commands.Choice(name="Off (solid card, no transparency)", value="off"),
+    app_commands.Choice(name="On (hide legs - player fades out above the name)", value="on"),
+    app_commands.Choice(name="Off (show full player image)", value="off"),
+]
+
+NAME_COLOR_CHOICES = [
+    app_commands.Choice(name="Default (cream)", value="default"),
+    app_commands.Choice(name="Red", value="red"),
+    app_commands.Choice(name="Blue", value="blue"),
+    app_commands.Choice(name="Yellow", value="yellow"),
+    app_commands.Choice(name="Pink", value="pink"),
+    app_commands.Choice(name="Green", value="green"),
+    app_commands.Choice(name="Orange", value="orange"),
+]
+
+LINE_COLOR_CHOICES = [
+    app_commands.Choice(name="Default (cream)", value="default"),
+    app_commands.Choice(name="Black", value="black"),
+    app_commands.Choice(name="White", value="white"),
+    app_commands.Choice(name="Blue", value="blue"),
 ]
 
 ROLE_NAMES = {"BAT": "Batter", "BOWL": "Bowler", "AR": "All-rounder", "WK": "Keeper"}
@@ -75,7 +92,9 @@ class CardStatsCog(commands.Cog):
         style="Card design (default: Style 2)",
         background="Style 2 background (from /bgadder). Type 'default' for the built-in purple",
         icon="Gold / Bronze icon in the left column (Style 2)",
-        transparency="Style 2 transparency on/off (On = see-through corners, Off = solid card)",
+        transparency="Style 2: On = player image fades out above the name (legs/shorts hidden), Off = full image",
+        namecolor="Style 2: colour of the display name (red/blue/yellow/pink/green/orange)",
+        linecolor="Style 2: colour of the line under the display name (black/white/blue)",
         pwr="Power hitting (batter / all-rounder / keeper)",
         run="Running between wickets (batter / keeper)",
         tim="Timing (batter)",
@@ -87,7 +106,8 @@ class CardStatsCog(commands.Cog):
         kee="Wicketkeeping (keeper)",
         cat="Catching (keeper)",
     )
-    @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES, transparency=TRANSPARENCY_CHOICES)
+    @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES, transparency=TRANSPARENCY_CHOICES,
+                      namecolor=NAME_COLOR_CHOICES, linecolor=LINE_COLOR_CHOICES)
     @app_commands.autocomplete(player=playername_autocomplete, background=background_autocomplete)
     @is_owner()
     async def cardstats(
@@ -98,6 +118,8 @@ class CardStatsCog(commands.Cog):
         background: str | None = None,
         icon: app_commands.Choice[str] | None = None,
         transparency: app_commands.Choice[str] | None = None,
+        namecolor: app_commands.Choice[str] | None = None,
+        linecolor: app_commands.Choice[str] | None = None,
         pwr: Stat | None = None,
         run: Stat | None = None,
         tim: Stat | None = None,
@@ -150,10 +172,17 @@ class CardStatsCog(commands.Cog):
             bg_note = (bg_note + " • " if bg_note else "") + f"Icon: {icon.name}"
 
         if transparency is not None:
-            set_style2_options(player, transparent=(transparency.value == "on"))
+            set_style2_options(player, fade_legs=(transparency.value == "on"))
             bg_note = (bg_note + " • " if bg_note else "") + (
-                "Transparency: ON" if transparency.value == "on" else "Transparency: OFF (solid)"
+                "Transparency: ON (legs hidden)" if transparency.value == "on" else "Transparency: OFF (full image)"
             )
+
+        if namecolor is not None:
+            set_style2_options(player, name_color=None if namecolor.value == "default" else namecolor.value)
+            bg_note = (bg_note + " • " if bg_note else "") + f"Name colour: {namecolor.name}"
+        if linecolor is not None:
+            set_style2_options(player, line_color=None if linecolor.value == "default" else linecolor.value)
+            bg_note = (bg_note + " • " if bg_note else "") + f"Line colour: {linecolor.name}"
 
         if to_save:
             set_extra_stats(player, to_save)
