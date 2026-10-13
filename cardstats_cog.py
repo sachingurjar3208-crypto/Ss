@@ -1,0 +1,161 @@
+"""Admin-only /cardstats command: set a card's extra stats and switch it to Style 2.
+
+    /cardstats player:Virat Kohli pwr:94 run:99 tim:95 clu:97 fie:95
+
+- Stats that do not belong to the card's role are ignored (with a note).
+- `style` is optional. Default is Style 2 (new design); "Classic" switches back.
+- /cardmaker and /editcard are NOT changed and keep working as before.
+- Reminder: /refreshcards redraws EVERY card, so cards set to Style 2 are
+  redrawn in the new style there too.
+"""
+
+from __future__ import annotations
+
+import discord
+from discord import app_commands
+from discord.ext import commands
+
+from bot_guard import MaintenanceActive
+from card_db import (
+    init_card_db, get_card, set_card_style, set_extra_stats, effective_role,
+)
+from card_stats import allowed_extra_keys, card_stat_details
+from cardmaker_cog import (
+    MAX_STAT, is_owner, playername_autocomplete, _regenerate_and_send,
+)
+
+STYLE_CHOICES = [
+    app_commands.Choice(name="Style 2 (new design)", value="style2"),
+    app_commands.Choice(name="Classic (old design)", value="classic"),
+]
+
+ROLE_NAMES = {"BAT": "Batter", "BOWL": "Bowler", "AR": "All-rounder", "WK": "Keeper"}
+
+Stat = app_commands.Range[int, 1, MAX_STAT]
+
+
+class CardStatsCog(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        init_card_db()   # makes sure the card_style / extra_stats columns exist
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
+        if isinstance(error, MaintenanceActive):
+            return   # the user was already told about maintenance
+        if isinstance(error, app_commands.CheckFailure):
+            msg = "❌ Only the bot owner or an authorised role can use this command."
+        else:
+            msg = f"⚠️ Something went wrong: `{error}`"
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+
+    @app_commands.command(
+        name="cardstats",
+        description="Set a card's extra stats and switch it to the new Style 2 design",
+    )
+    @app_commands.describe(
+        player="Which card",
+        style="Card design (default: Style 2)",
+        pwr="Power hitting (batter / all-rounder / keeper)",
+        run="Running between wickets (batter / keeper)",
+        tim="Timing (batter)",
+        clu="Clutch (all roles)",
+        fie="Fielding (batter / bowler / all-rounder)",
+        acc="Bowling accuracy (bowler / all-rounder)",
+        swi="Swing (bowler)",
+        pac="Pace / spin (bowler)",
+        kee="Wicketkeeping (keeper)",
+        cat="Catching (keeper)",
+    )
+    @app_commands.choices(style=STYLE_CHOICES)
+    @app_commands.autocomplete(player=playername_autocomplete)
+    @is_owner()
+    async def cardstats(
+        self,
+        interaction: discord.Interaction,
+        player: str,
+        style: app_commands.Choice[str] | None = None,
+        pwr: Stat | None = None,
+        run: Stat | None = None,
+        tim: Stat | None = None,
+        clu: Stat | None = None,
+        fie: Stat | None = None,
+        acc: Stat | None = None,
+        swi: Stat | None = None,
+        pac: Stat | None = None,
+        kee: Stat | None = None,
+        cat: Stat | None = None,
+    ):
+        await interaction.response.defer()
+
+        card = get_card(player)
+        if card is None:
+            await interaction.followup.send(f"❌ No card found for **{player}**.")
+            return
+
+        # Which of the given stats belong to this card's role?
+        role = effective_role(card)
+        allowed = allowed_extra_keys(role)
+        given = {
+            "pwr": pwr, "run": run, "tim": tim, "clu": clu, "fie": fie,
+            "acc": acc, "swi": swi, "pac": pac, "kee": kee, "cat": cat,
+        }
+        given = {k: v for k, v in given.items() if v is not None}
+        to_save = {k: v for k, v in given.items() if k in allowed}
+        ignored = [k.upper() for k in given if k not in allowed]
+
+        if to_save:
+            set_extra_stats(player, to_save)
+        chosen_style = style.value if style is not None else "style2"
+        set_card_style(player, chosen_style)
+
+        # Redraw the card and post it.
+        verb = "Switched to Style 2" if chosen_style == "style2" else "Switched to Classic"
+        if to_save:
+            verb = "Stats saved • " + verb
+        try:
+            await _regenerate_and_send(interaction, player, verb)
+        except Exception as e:
+            await interaction.followup.send(
+                f"⚠️ The card was saved but the image could not be drawn: `{e}`\n"
+                "Most often the **foreground link** is dead. Fix it with `/editcard`, "
+                "then run this command again."
+            )
+            return
+
+        # Small embed: the 6 stats the card shows now.
+        details = card_stat_details(get_card(player))
+        names = [label for label, _, _ in details]
+        lines = []
+        for label, value, derived in details:
+            tag = " *(auto)*" if derived else ""
+            lines.append(f"**{label}** {value}{tag}")
+        embed = discord.Embed(
+            title=f"📊 {card['playername']} — {ROLE_NAMES.get(role, role)}",
+            color=discord.Color.purple(),
+        )
+        embed.add_field(name="Left", value="\n".join(lines[:3]), inline=True)
+        embed.add_field(name="Right", value="\n".join(lines[3:]), inline=True)
+        footer = "(auto) = not set yet, worked out from the card's other numbers."
+        if chosen_style == "classic":
+            footer = "Classic design is on, so these stats are not shown on the card."
+        embed.set_footer(text=footer)
+        if ignored:
+            extra_names = ", ".join(n for n in names if n not in ("BAT", "BOW"))
+            embed.add_field(
+                name="Ignored",
+                value=(
+                    f"{ROLE_NAMES.get(role, role)} cards use {extra_names}.\n"
+                    f"Ignored: {', '.join(ignored)}"
+                ),
+                inline=False,
+            )
+        await interaction.followup.send(embed=embed)
+
+
+async def setup(bot: commands.Bot):
+    await bot.add_cog(CardStatsCog(bot))

@@ -1,0 +1,29 @@
+STYLE 2 CARD + /cardstats  -  what changed
+==========================================
+
+NEW FILES
+  card_stats.py     Stat sets per role (BAT / BOWL / AR / WK) in one dict, STAT_SETS.
+                    card_stat_rows(card), card_stat_details(card), allowed_extra_keys(role).
+                    Unset extra stats are derived from bat / bowl / ovr with a small fixed
+                    variation (-4..+4), so old cards never break.
+  card_style2.py    The Style 2 renderer: build_card_style2(card_row, fg_image) -> 1037x1517 PNG.
+                    Static parts are cached once; one card renders in about 0.5 s.
+  cardstats_cog.py  The admin-only /cardstats command.
+
+CHANGED FILES
+  card_db.py        + columns card_style, extra_stats (auto-migrate on start)
+                    + set_card_style(), set_extra_stats(), get_extra_stats()
+                    + import json
+  card_image.py     generate_card_image(): if card_style == "style2" it uses card_style2.
+                    Everything else is unchanged, so old cards look exactly the same.
+  main.py           "cardstats_cog" added to the cog list.
+
+HOW TO USE
+  /cardstats player:Virat Kohli pwr:94 run:99 tim:95 clu:97 fie:95
+     - saves the stats, switches the card to Style 2 and posts the new card
+     - stats that do not belong to the role are ignored, with a note
+     - style:Classic (old design) switches a card back
+  /refreshcards redraws every card, Style 2 cards included.
+
+Copy these 6 files over your project folder (same names) and restart the bot.
+No new libraries needed. /cardmaker, /editcard and the match engine are untouched.

@@ -8,6 +8,7 @@ Three tables:
 
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import time
@@ -82,6 +83,9 @@ _NEW_CARD_COLUMNS = [
     ("countrylogo_dx",    "INTEGER NOT NULL DEFAULT 0"),
     ("countrylogo_dy",    "INTEGER NOT NULL DEFAULT 0"),
     ("countrylogo_scale", "INTEGER NOT NULL DEFAULT 100"),
+    # ── Style 2 card design (set with /cardstats) ────────────────────────
+    ("card_style",  "TEXT"),    # NULL or "classic" = old look, "style2" = new look
+    ("extra_stats", "TEXT"),    # JSON, e.g. {"pwr": 94, "run": 99, "clu": 97}
 ]
 
 
@@ -283,6 +287,65 @@ def update_card(
         conn.execute(
             f"UPDATE cards SET {set_clause} WHERE playername_key = ?",
             (*updates.values(), playername.strip().lower()),
+        )
+        conn.commit()
+    return True
+
+
+# ── Style 2 card design: style switch + extra stats ──────────────────────
+
+CARD_STYLES = ("classic", "style2")
+
+
+def set_card_style(playername: str, style: str) -> bool:
+    """Switch a card between the old look ("classic") and the new one ("style2")."""
+    if style not in CARD_STYLES or get_card(playername) is None:
+        return False
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE cards SET card_style = ?, updated_at = ? WHERE playername_key = ?",
+            (style, time.time(), playername.strip().lower()),
+        )
+        conn.commit()
+    return True
+
+
+def get_extra_stats(card_row) -> dict:
+    """Extra stats of a card as a dict. Always safe: {} if missing or bad JSON."""
+    try:
+        raw = card_row["extra_stats"]
+    except (IndexError, KeyError):
+        return {}
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for key, value in data.items():
+        try:
+            out[str(key)] = int(value)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def set_extra_stats(playername: str, stats: dict) -> bool:
+    """Merge `stats` into the card's extra_stats JSON (other keys are kept)."""
+    row = get_card(playername)
+    if row is None:
+        return False
+    merged = get_extra_stats(row)
+    for key, value in stats.items():
+        if value is not None:
+            merged[str(key)] = int(value)
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE cards SET extra_stats = ?, updated_at = ? WHERE playername_key = ?",
+            (json.dumps(merged), time.time(), playername.strip().lower()),
         )
         conn.commit()
     return True

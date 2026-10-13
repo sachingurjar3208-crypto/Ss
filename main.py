@@ -64,6 +64,7 @@ async def load_cogs():
     """Dynamically load all cogs from the cogs directory."""
     cog_files = [
         "cardmaker_cog",
+        "cardstats_cog",
         "economy_cog",
         "draft_cog",
         "quest_cog",
