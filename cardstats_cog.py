@@ -105,6 +105,10 @@ class CardStatsCog(commands.Cog):
         pac="Pace / spin (bowler)",
         kee="Wicketkeeping (keeper)",
         cat="Catching (keeper)",
+        trn="Turn (spinner)",
+        flt="Flight / drift (spinner)",
+        var="Variations - googly, doosra, carrom ball (spinner)",
+        ctl="Control (spinner)",
     )
     @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES, transparency=TRANSPARENCY_CHOICES,
                       namecolor=NAME_COLOR_CHOICES, linecolor=LINE_COLOR_CHOICES)
@@ -130,6 +134,10 @@ class CardStatsCog(commands.Cog):
         pac: Stat | None = None,
         kee: Stat | None = None,
         cat: Stat | None = None,
+        trn: Stat | None = None,
+        flt: Stat | None = None,
+        var: Stat | None = None,
+        ctl: Stat | None = None,
     ):
         await interaction.response.defer()
 
@@ -144,6 +152,7 @@ class CardStatsCog(commands.Cog):
         given = {
             "pwr": pwr, "run": run, "tim": tim, "clu": clu, "fie": fie,
             "acc": acc, "swi": swi, "pac": pac, "kee": kee, "cat": cat,
+            "trn": trn, "flt": flt, "var": var, "ctl": ctl,
         }
         given = {k: v for k, v in given.items() if v is not None}
         to_save = {k: v for k, v in given.items() if k in allowed}

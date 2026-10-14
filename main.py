@@ -65,6 +65,7 @@ async def load_cogs():
     cog_files = [
         "cardmaker_cog",
         "cardstats_cog",
+        "style2bulk_cog",
         "economy_cog",
         "draft_cog",
         "quest_cog",
