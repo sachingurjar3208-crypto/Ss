@@ -24,6 +24,7 @@ import quest
 import security
 import squad_logic as sl
 from squad_image import build_team_image, FILENAME as TEAM_IMG_NAME
+from debut_image import build_debut_image, FILENAME as DEBUT_IMG_NAME
 from card_narratives import ROLES, HANDS
 from security import OwnedView, esc
 
@@ -363,6 +364,22 @@ class SquadCog(commands.Cog, name="Squad"):
         default = security.clean_team_name(f"{ctx.author.display_name} XI")[0] or f"Team {ctx.author.id % 10000}"
         if not economy.create_user(ctx.author.id, default):
             await ctx.send("You have already debuted. Use `csprofile` to see your team.")
+            return
+        # Welcome image (falls back to the plain text message below if it can't be drawn)
+        buf = None
+        try:
+            buf = await asyncio.to_thread(
+                build_debut_image, ctx.author.display_name, default, f"{economy.START_PURSE:,}"
+            )
+        except Exception as e:
+            print(f"[csdebut] image failed: {e}")
+        if buf is not None:
+            await ctx.send(
+                f"{DEBUT_EMOJI} {ctx.author.mention} your team **{esc(default)}** is created with "
+                f"**{economy.fmt_coins(economy.START_PURSE)}**.",
+                file=discord.File(buf, filename=DEBUT_IMG_NAME),
+                allowed_mentions=discord.AllowedMentions(users=[ctx.author]),
+            )
             return
         await ctx.send(
             f"{DEBUT_EMOJI} Welcome, **{esc(ctx.author.display_name)}**! Your team **{esc(default)}** is created "
