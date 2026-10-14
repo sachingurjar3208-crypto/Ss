@@ -38,7 +38,8 @@ from card_db import (
     init_card_db,
     card_exists, get_card, create_card, update_card, update_card_offset,
     set_card_image_path, list_playernames, list_all_cards, delete_card,
-    cards_using_background, reassign_cards_background, delete_background,
+    cards_using_background, cards_on_background_any, reassign_cards_background, delete_background,
+    set_card_style,
     background_exists, get_background, add_background, list_backgrounds,
     set_playstyles, update_logo_layout, update_card_layout,
     playstyle_logo_exists, get_playstyle_logo, add_playstyle_logo, list_playstyle_logos,
@@ -507,10 +508,17 @@ class CardMakerCog(commands.Cog):
     @app_commands.describe(
         keep="Pathname that survives (e.g. csbase) — every card ends up using this name",
         replace_with="Pathname whose artwork takes over `keep`'s slot, then gets deleted (e.g. tester)",
+        style="Card design for every card on this background (default: leave each card as it is)",
     )
+    @app_commands.choices(style=[
+        app_commands.Choice(name="Leave as it is", value="keep"),
+        app_commands.Choice(name="New style (Style 2) - random stats just below OVR", value="style2"),
+        app_commands.Choice(name="Old style (Classic)", value="classic"),
+    ])
     @app_commands.autocomplete(keep=background_autocomplete, replace_with=background_autocomplete)
     @is_owner()
-    async def bgmerge(self, interaction: discord.Interaction, keep: str, replace_with: str):
+    async def bgmerge(self, interaction: discord.Interaction, keep: str, replace_with: str,
+                      style: app_commands.Choice[str] | None = None):
         await interaction.response.defer()
 
         if keep.strip().lower() == replace_with.strip().lower():
@@ -551,7 +559,27 @@ class CardMakerCog(commands.Cog):
         # 4) Redraw every card now sitting on `keep` so their generated PNG
         #    picks up the new artwork. Cards with a dead foreground link will
         #    fail silently here — that's a separate, pre-existing problem.
-        affected = sorted(set(already_on_keep) | set(cards_using_background(keep_bg["pathname"])))
+        affected = sorted(
+            set(already_on_keep) | set(cards_using_background(keep_bg["pathname"]))
+            | set(cards_on_background_any(keep_bg["pathname"]))
+        )
+
+        # 4a) Optional: switch every one of those cards to the chosen design.
+        style_line = None
+        style_value = style.value if style is not None else "keep"
+        if style_value == "style2":
+            from style2bulk_logic import apply_style2_bulk
+            n_ok = 0
+            for name in affected:
+                try:
+                    if apply_style2_bulk(name, bg=keep_bg["pathname"], fade_legs=True) is not None:
+                        n_ok += 1
+                except Exception:
+                    pass
+            style_line = f"🎨 {n_ok}/{len(affected)} card(s) switched to the new style (Style 2)."
+        elif style_value == "classic":
+            n_ok = sum(1 for name in affected if set_card_style(name, "classic"))
+            style_line = f"🎨 {n_ok}/{len(affected)} card(s) switched back to the old style (Classic)."
         refreshed, skipped = [], []
         for name in affected:
             if await _regenerate_silently(name):
@@ -564,6 +592,8 @@ class CardMakerCog(commands.Cog):
             f"📇 {moved_count} card(s) switched from `{new_bg['pathname']}` to `{keep_bg['pathname']}`.",
             f"🔄 Redrew {len(refreshed)}/{len(affected)} card(s) using `{keep_bg['pathname']}`.",
         ]
+        if style_line:
+            summary.insert(2, style_line)
         if skipped:
             summary.append(
                 f"⚠️ Skipped {len(skipped)} (likely a dead `foregroundlink` — fix with `/editcard` then "

@@ -655,16 +655,34 @@ def cards_using_background(pathname: str) -> list[str]:
         return [r["playername"] for r in rows]
 
 
+def cards_on_background_any(pathname: str) -> list[str]:
+    """Playernames of cards that use this background in EITHER design:
+    Classic (`background`) or Style 2 (`s2_bg`)."""
+    key = pathname.strip().lower()
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT playername FROM cards WHERE LOWER(background) = ? OR LOWER(s2_bg) = ?",
+            (key, key),
+        ).fetchall()
+        return [r["playername"] for r in rows]
+
+
 def reassign_cards_background(old_pathname: str, new_pathname: str) -> int:
-    """Point every card using old_pathname at new_pathname instead. Returns how many rows changed."""
+    """Point every card using old_pathname at new_pathname instead (Classic `background`
+    and Style 2 `s2_bg`). Returns how many cards changed."""
     old_key = old_pathname.strip().lower()
     with _conn() as conn:
         cur = conn.execute(
             "UPDATE cards SET background = ?, updated_at = ? WHERE LOWER(background) = ?",
             (new_pathname.strip(), time.time(), old_key),
         )
+        n = cur.rowcount
+        cur2 = conn.execute(
+            "UPDATE cards SET s2_bg = ?, updated_at = ? WHERE LOWER(s2_bg) = ?",
+            (new_pathname.strip(), time.time(), old_key),
+        )
         conn.commit()
-        return cur.rowcount
+        return max(n, cur2.rowcount)
 
 
 def delete_background(pathname: str) -> sqlite3.Row | None:

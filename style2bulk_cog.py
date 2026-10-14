@@ -1,7 +1,8 @@
 """Admin-only /style2bulk: move up to 10 existing cards to Style 2 in one go.
 
-    /style2bulk background:bronze icon:Bronze icon transparency:On
-      -> a box opens: type the player names, one per line (max 10), press Submit.
+    /style2bulk players:Virat Kohli, Jasprit Bumrah background:bronze icon:Bronze icon
+      (max 10 names, separated by commas). If `players` is left empty, a text box opens
+      instead: one name per line, then Submit.
 
 For every card it
   - switches it to Style 2 with the chosen background / icon / colours,
@@ -39,6 +40,74 @@ MAX_CARDS = 10
 FILES_PER_MESSAGE = 3          # keeps every Discord message well under the upload size limit
 
 
+async def _run_bulk(interaction: discord.Interaction, opts: dict, names_text: str) -> None:
+    """Does the whole job. `interaction` must already be deferred."""
+
+    seen, wanted = set(), []
+    for line in names_text.replace(",", "\n").replace(";", "\n").splitlines():
+        n = line.strip()
+        if n and n.lower() not in seen:
+            seen.add(n.lower())
+            wanted.append(n)
+    if not wanted:
+        await interaction.followup.send("❌ No player names given.")
+        return
+    if len(wanted) > MAX_CARDS:
+        await interaction.followup.send(
+            f"❌ {len(wanted)} names given, the limit is {MAX_CARDS} per run. Send the rest in a second run."
+        )
+        return
+
+    done, missing, failed = [], [], []
+    for name in wanted:
+        try:
+            info = apply_style2_bulk(name, **opts)
+        except Exception as e:
+            failed.append(f"{name} (`{e}`)")
+            continue
+        if info is None:
+            missing.append(name)
+            continue
+        if await _regenerate_silently(info["playername"]):
+            done.append(info)
+        else:
+            failed.append(f"{info['playername']} (image not drawn - check its foreground link / background)")
+
+    # Summary text
+    lines = []
+    for info in done:
+        stats = " · ".join(f"{label} {value}" for label, value in info["rows"])
+        lines.append(f"**{info['playername']}** ({info['set']}, OVR {info['ovr']}) — {stats}")
+    header = f"✅ **{len(done)}** card(s) moved to Style 2"
+    if missing:
+        header += f"\n❌ Not found: {', '.join(missing)}"
+    if failed:
+        header += "\n⚠️ Problem: " + "; ".join(failed)
+    text = header + ("\n\n" + "\n".join(lines) if lines else "")
+    if len(text) > 1900:
+        text = text[:1900] + "…"
+    await interaction.followup.send(text)
+
+    # Images, a few per message
+    batch: list[discord.File] = []
+    for info in done:
+        card = get_card(info["playername"])
+        path = (card["image_path"] if card is not None else None) or str(
+            GENERATED_DIR / f"{info['playername'].strip().lower().replace(' ', '_')}.png"
+        )
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            continue
+        batch.append(discord.File(io.BytesIO(data), filename=f"{info['playername']}.png"))
+        if len(batch) == FILES_PER_MESSAGE:
+            await interaction.followup.send(files=batch)
+            batch = []
+    if batch:
+        await interaction.followup.send(files=batch)
+
+
 class _NamesModal(discord.ui.Modal, title="Style 2 - player names"):
     names = discord.ui.TextInput(
         label=f"Player names, one per line (max {MAX_CARDS})",
@@ -54,70 +123,7 @@ class _NamesModal(discord.ui.Modal, title="Style 2 - player names"):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
-
-        seen, wanted = set(), []
-        for line in str(self.names.value).splitlines():
-            n = line.strip()
-            if n and n.lower() not in seen:
-                seen.add(n.lower())
-                wanted.append(n)
-        if not wanted:
-            await interaction.followup.send("❌ No player names given.")
-            return
-        if len(wanted) > MAX_CARDS:
-            await interaction.followup.send(
-                f"❌ {len(wanted)} names given, the limit is {MAX_CARDS} per run. Send the rest in a second run."
-            )
-            return
-
-        done, missing, failed = [], [], []
-        for name in wanted:
-            try:
-                info = apply_style2_bulk(name, **self.opts)
-            except Exception as e:
-                failed.append(f"{name} (`{e}`)")
-                continue
-            if info is None:
-                missing.append(name)
-                continue
-            if await _regenerate_silently(info["playername"]):
-                done.append(info)
-            else:
-                failed.append(f"{info['playername']} (image not drawn - check its foreground link / background)")
-
-        # Summary text
-        lines = []
-        for info in done:
-            stats = " · ".join(f"{label} {value}" for label, value in info["rows"])
-            lines.append(f"**{info['playername']}** ({info['set']}, OVR {info['ovr']}) — {stats}")
-        header = f"✅ **{len(done)}** card(s) moved to Style 2"
-        if missing:
-            header += f"\n❌ Not found: {', '.join(missing)}"
-        if failed:
-            header += "\n⚠️ Problem: " + "; ".join(failed)
-        text = header + ("\n\n" + "\n".join(lines) if lines else "")
-        if len(text) > 1900:
-            text = text[:1900] + "…"
-        await interaction.followup.send(text)
-
-        # Images, a few per message
-        batch: list[discord.File] = []
-        for info in done:
-            card = get_card(info["playername"])
-            path = (card["image_path"] if card is not None else None) or str(
-                GENERATED_DIR / f"{info['playername'].strip().lower().replace(' ', '_')}.png"
-            )
-            try:
-                with open(path, "rb") as f:
-                    data = f.read()
-            except OSError:
-                continue
-            batch.append(discord.File(io.BytesIO(data), filename=f"{info['playername']}.png"))
-            if len(batch) == FILES_PER_MESSAGE:
-                await interaction.followup.send(files=batch)
-                batch = []
-        if batch:
-            await interaction.followup.send(files=batch)
+        await _run_bulk(interaction, self.opts, str(self.names.value))
 
     async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
         msg = f"⚠️ Something went wrong: `{error}`"
@@ -151,6 +157,7 @@ class Style2BulkCog(commands.Cog):
         description="Move up to 10 cards to Style 2 at once (background + random stats just below OVR)",
     )
     @app_commands.describe(
+        players="Player names, separated by commas (max 10). Leave empty to get a text box instead",
         background="Style 2 background for ALL these cards (from /bgadder). 'default' = built-in purple",
         icon="Gold / Bronze icon in the left column",
         transparency="On = player image fades out above the name (legs hidden), Off = full image. Default: On",
@@ -167,6 +174,7 @@ class Style2BulkCog(commands.Cog):
     async def style2bulk(
         self,
         interaction: discord.Interaction,
+        players: str | None = None,
         background: str | None = None,
         icon: app_commands.Choice[str] | None = None,
         transparency: app_commands.Choice[str] | None = None,
@@ -200,7 +208,11 @@ class Style2BulkCog(commands.Cog):
         if linecolor is not None:
             opts["line_color"] = None if linecolor.value == "default" else linecolor.value
 
-        await interaction.response.send_modal(_NamesModal(opts))
+        if players is not None and players.strip():
+            await interaction.response.defer()
+            await _run_bulk(interaction, opts, players)
+        else:
+            await interaction.response.send_modal(_NamesModal(opts))
 
 
 async def setup(bot: commands.Bot):
