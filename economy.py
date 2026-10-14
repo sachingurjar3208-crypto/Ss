@@ -1330,6 +1330,24 @@ def top_users(limit: int = 20, by: str = "coins") -> list[dict]:
         conn.close()
 
 
+def economy_snapshot() -> list[dict]:
+    """(Admin) Every user with purse + the list of player keys they own.
+    Each row: user_id, team_name, purse, keys (list[str], lower-case)."""
+    conn = _conn()
+    try:
+        users = conn.execute("SELECT user_id, team_name, purse FROM users").fetchall()
+        owned: dict = {}
+        for r in conn.execute("SELECT user_id, player_key FROM owned").fetchall():
+            owned.setdefault(r["user_id"], []).append(str(r["player_key"]).strip().lower())
+        return [
+            {"user_id": u["user_id"], "team_name": u["team_name"], "purse": int(u["purse"]),
+             "keys": owned.get(u["user_id"], [])}
+            for u in users
+        ]
+    finally:
+        conn.close()
+
+
 # ── Impact Player subs (bench players nominated for in-match substitution) ──
 
 def get_impact_subs(user_id) -> dict[int, str]:

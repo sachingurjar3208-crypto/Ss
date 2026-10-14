@@ -13,6 +13,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 import discord
 from discord.ext import commands
 
@@ -62,6 +64,7 @@ class AdminCog(commands.Cog):
             "`admin player reset @user all`\n"
             "`admin reset all @user`\n"
             "`admin user top [20-50] [coins|cards]`\n"
+            "`admin economy leaderboard [1-50] [networth|coins|cards]`\n"
             "`admin voucher give @user <number>`\n"
             "`admin voucher remove @user <number>`\n"
             "`admin voucher check @user`\n"
@@ -293,6 +296,70 @@ class AdminCog(commands.Cog):
                 description="\n".join(lines[start:start + 25]),
                 color=discord.Color.gold(),
             )
+            await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+
+    # -- economy leaderboard ---------------------------------------------
+    @admin.group(name="economy", invoke_without_command=True)
+    @owner_or_admin()
+    async def economy_group(self, ctx: commands.Context):
+        await ctx.send("Usage: `admin economy leaderboard [1-50] [networth|coins|cards]`")
+
+    @economy_group.command(name="leaderboard", aliases=["lb", "top"])
+    @owner_or_admin()
+    async def economy_leaderboard(self, ctx: commands.Context, count: int = 10, by: str = "networth"):
+        """Richest users. Net worth = coins + sell value of every card they own."""
+        by = by.lower()
+        if by not in ("networth", "coins", "cards"):
+            await ctx.send("Usage: `admin economy leaderboard [1-50] [networth|coins|cards]`")
+            return
+        count = max(1, min(50, count))
+        snap = await asyncio.to_thread(economy.economy_snapshot)
+        if not snap:
+            await ctx.send("No users yet.")
+            return
+        values = {c["playername_key"].strip().lower(): sl.sell_value(c) for c in card_db.list_all_cards()}
+        rows = []
+        for u in snap:
+            card_value = sum(values.get(k, 0) for k in u["keys"])
+            rows.append({
+                **u, "cards": len(u["keys"]), "card_value": card_value,
+                "networth": u["purse"] + card_value,
+            })
+        key = {"networth": "networth", "coins": "purse", "cards": "cards"}[by]
+        rows.sort(key=lambda r: (-r[key], -r["networth"]))
+        total_coins = sum(r["purse"] for r in rows)
+        total_cards = sum(r["cards"] for r in rows)
+        total_value = sum(r["card_value"] for r in rows)
+        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+        lines = []
+        for i, r in enumerate(rows[:count], 1):
+            lines.append(
+                f"{medals.get(i, f'`{i:>2}.`')} <@{r['user_id']}> · **{esc(r['team_name'])}**\n"
+                f"      💎 Net worth **{economy.fmt_coins(r['networth'])}**\n"
+                f"      🪙 {economy.fmt_coins(r['purse'])} · 🃏 {r['cards']} cards "
+                f"({economy.fmt_coins(r['card_value'])})"
+            )
+        label = {"networth": "net worth", "coins": "coins", "cards": "cards"}[by]
+        title = f"💰 Economy leaderboard — top {min(count, len(rows))} by {label}"
+        first = True
+        for start in range(0, len(lines), 10):   # 10 users per embed stays far below 4096 chars
+            embed = discord.Embed(
+                title=title if first else f"{title} (cont.)",
+                description="\n".join(lines[start:start + 10]),
+                color=discord.Color.gold(),
+            )
+            if first:
+                embed.add_field(
+                    name="Whole economy",
+                    value=(
+                        f"👥 Users: **{len(rows):,}**\n"
+                        f"🪙 Coins in circulation: **{economy.fmt_coins(total_coins)}**\n"
+                        f"🃏 Cards owned: **{total_cards:,}** (worth {economy.fmt_coins(total_value)})\n"
+                        f"💎 Total: **{economy.fmt_coins(total_coins + total_value)}**"
+                    ),
+                    inline=False,
+                )
+                first = False
             await ctx.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
 
 

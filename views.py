@@ -168,12 +168,6 @@ async def _advance(
         kwargs["embed"] = embed
     kwargs["view"] = view  # explicit, even if None — clears old buttons on edit
 
-    try:
-        await interaction.response.edit_message(**kwargs)
-        return
-    except Exception as e:
-        print(f"[match recovery] in-place edit failed ({type(e).__name__}: {e}) — sending a fresh message instead")
-
     async def _send():
         send_kwargs = dict(kwargs)
         if view is None:
@@ -181,6 +175,26 @@ async def _advance(
         if file is not None:
             send_kwargs["file"] = file
         await channel.send(**send_kwargs)
+
+    # Ranked (mirrored) match: the old prompt's buttons are stripped from BOTH channels by
+    # ranked_mirror._after_view as soon as that prompt's view stops. If we put the NEW buttons
+    # onto the old message with an in-place edit, that cleanup lands afterwards and wipes them
+    # ("striker buttons disappear"). So post the next prompt as a fresh message instead
+    # (the mirror also shows it to both players) and just acknowledge the click.
+    if view is not None and type(channel).__name__ == "MirrorChannel":
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+        except Exception:
+            pass
+        await _run_safely(_send, allowed_ids=allowed_ids, notify_channel=channel)
+        return
+
+    try:
+        await interaction.response.edit_message(**kwargs)
+        return
+    except Exception as e:
+        print(f"[match recovery] in-place edit failed ({type(e).__name__}: {e}) — sending a fresh message instead")
 
     await _run_safely(_send, allowed_ids=allowed_ids, notify_channel=channel)
 

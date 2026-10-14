@@ -406,7 +406,18 @@ class EconomyCog(commands.Cog, name="Economy"):
         else:
             lines.append(f"🎴 No player cards with rating {lo}-{hi} are available yet.")
         lines.append(f"Balance: **{economy.fmt_coins(res['balance'])}**")
-        await ctx.send("\n".join(lines))
+        text = "\n".join(lines)
+        shown = card_db.get_card(res["card"]) if res["card"] else None
+        if shown is not None and shown["image_path"]:
+            # Reward text + the card image in ONE message (daily, weekly and monthly).
+            embed = discord.Embed(
+                description=text,
+                color={"daily": discord.Color.blue(), "weekly": discord.Color.purple(),
+                       "monthly": discord.Color.gold()}.get(kind, discord.Color.blue()),
+            )
+            await card_cache.send_embed(ctx, embed, shown["image_path"])
+        else:
+            await ctx.send(text)
         if res.get("pending"):
             await send_next_pending(ctx, ctx.author.id)
         if kind == "daily":
