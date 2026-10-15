@@ -1,5 +1,5 @@
-"""`ping` - shows only the message round-trip latency."""
-import time
+"""`ping` - shows message latency directly, with no placeholder message."""
+import datetime
 
 from discord.ext import commands
 
@@ -11,11 +11,10 @@ class PingCog(commands.Cog):
     @commands.command(name="ping")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def ping(self, ctx: commands.Context):
-        """Message latency: time to send a message and get it back."""
-        t0 = time.perf_counter()
-        msg = await ctx.send("Pinging...")
-        ms = round((time.perf_counter() - t0) * 1000)
-        await msg.edit(content=f"Pong! Message latency: **{ms} ms**")
+        """Time from the user's message being created to the bot handling it."""
+        now = datetime.datetime.now(datetime.timezone.utc)
+        ms = max(0, round((now - ctx.message.created_at).total_seconds() * 1000))
+        await ctx.send(f"Message latency: **{ms} ms**")
 
 
 async def setup(bot: commands.Bot):
