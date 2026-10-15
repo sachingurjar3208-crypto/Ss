@@ -11,6 +11,8 @@ from discord.ext import commands
 import card_image as _card_image_startup_check
 import security
 from bot_guard import ADMIN_GUILD_ID, GuardedTree, MaintenancePrefixBlocked, maintenance_prefix_check
+import logging
+logging.basicConfig(level=logging.WARNING)
 
 # Bot setup
 intents = discord.Intents.default()
@@ -73,7 +75,6 @@ async def load_cogs():
         "stadium_cog",
         "admin_cog",
         "stats_cog",
-        "ping_cog",
         "maintenance_cog",
         "cooldown_cog",
         "ranked_cog",
