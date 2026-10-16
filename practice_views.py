@@ -321,6 +321,19 @@ async def _practice_process_delivery_inner(
         if gif:
             gif_urls.append(gif)
 
+    # Commentary GIFs set with /addgif (player-specific first, else universal, random pick)
+    try:
+        from gif_store import collect_ball_gifs
+        gif_urls += collect_ball_gifs(
+            outcome=outcome, shot_button=shot_button, batter=sname, bowler=bname,
+            runs_before=striker_runs_before,
+            runs_after=game.batsman_stats.get(sname, {}).get("runs", 0),
+            bowler_wkts_before=bowler_wickets_before,
+            bowler_wkts_after=game.bowler_stats.get(bname, {}).get("wickets", 0),
+        )
+    except Exception as _ge:
+        print(f"[gif] skipped ({type(_ge).__name__}: {_ge})")
+
     ump_event = {"4": "four", "6": "six", "W": "out", "Wd": "wide", "NB": "noball", "NB+1": "noball"}.get(outcome)
     if ump_event:
         ump_gif = get_umpire_gif(ump_event)

@@ -773,6 +773,19 @@ class _TimeoutMixin:
             except discord.InteractionResponded:
                 pass
             return False
+        # Stale-prompt guard: after `csresume` a NEW prompt is sent and becomes
+        # the game's live view. Buttons on any older message must do nothing.
+        if game is not None:
+            live = game.__dict__.get("_live_view")
+            if live is not None and live is not self and not live.is_finished():
+                try:
+                    await interaction.response.send_message(
+                        "⚠️ Ye purana prompt hai — naye message ke buttons use karo.",
+                        ephemeral=True,
+                    )
+                except discord.InteractionResponded:
+                    pass
+                return False
         return True
 
     def _get_leaver_id(self, game) -> int | None:
@@ -1279,6 +1292,19 @@ async def _process_delivery(
             gif = get_player_media(bname, "wicket")
         if gif:
             gif_urls.append(gif)
+
+    # Commentary GIFs set with /addgif (player-specific first, else universal, random pick)
+    try:
+        from gif_store import collect_ball_gifs
+        gif_urls += collect_ball_gifs(
+            outcome=outcome, shot_button=shot_button, batter=sname, bowler=bname,
+            runs_before=striker_runs_before,
+            runs_after=game.batsman_stats.get(sname, {}).get("runs", 0),
+            bowler_wkts_before=bowler_wickets_before,
+            bowler_wkts_after=game.bowler_stats.get(bname, {}).get("wickets", 0),
+        )
+    except Exception as _ge:
+        print(f"[gif] skipped ({type(_ge).__name__}: {_ge})")
 
     # Umpire GIFs (global — fire for every player on top of player GIFs)
     _umpire_event = {
