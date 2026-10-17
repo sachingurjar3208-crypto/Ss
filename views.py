@@ -773,6 +773,16 @@ class _TimeoutMixin:
             except discord.InteractionResponded:
                 pass
             return False
+        try:
+            import security as _sec
+            if _sec.is_banned(interaction.user.id):
+                try:
+                    await interaction.response.send_message("🚫 You are blacklisted from using this bot.", ephemeral=True)
+                except discord.InteractionResponded:
+                    pass
+                return False
+        except ImportError:
+            pass
         # Stale-prompt guard: after `csresume` a NEW prompt is sent and becomes
         # the game's live view. Buttons on any older message must do nothing.
         if game is not None:

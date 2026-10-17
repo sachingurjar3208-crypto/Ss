@@ -25,7 +25,7 @@ import emojis
 import quest
 import security
 import squad_logic as sl
-from bot_guard import ADMIN_GUILD_ID
+from bot_guard import ADMIN_GUILD_ID, OWNER_ID
 from security import esc
 
 ADMIN_ROLE_IDS = {1556267277249155156, *security.FULL_ADMIN_ROLE_IDS}
@@ -50,6 +50,15 @@ def owner_or_admin():
     return commands.check(predicate)
 
 
+def owner_only():
+    """Only the bot owner (OWNER_ID)."""
+    async def predicate(ctx: commands.Context) -> bool:
+        if ctx.author.id == OWNER_ID:
+            return True
+        raise commands.NotOwner("Only the bot owner can use this.")
+    return commands.check(predicate)
+
+
 class AdminCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -68,8 +77,52 @@ class AdminCog(commands.Cog):
             "`admin voucher give @user <number>`\n"
             "`admin voucher remove @user <number>`\n"
             "`admin voucher check @user`\n"
-            "`admin quest reset @user`"
+            "`admin quest reset @user`\n"
+            "`admin blacklist add @user <reason>`  (owner)\n"
+            "`admin blacklist remove @user <reason>`  (owner)"
         )
+
+    # -- blacklist (owner only) -------------------------------------------
+    @admin.group(name="blacklist", invoke_without_command=True)
+    @owner_only()
+    async def blacklist(self, ctx: commands.Context):
+        await ctx.send("Usage: `admin blacklist add @user <reason>` or `admin blacklist remove @user <reason>`")
+
+    @blacklist.command(name="add")
+    @owner_only()
+    async def blacklist_add(self, ctx: commands.Context, member: discord.User, *, reason: str):
+        if member.bot or member.id == OWNER_ID or member.id == ctx.author.id:
+            await ctx.send("❌ Can't blacklist that user.")
+            return
+        reason = security.clean_input(reason, 150)
+        if security.is_banned(member.id):
+            await ctx.send(f"ℹ️ **{esc(member.display_name)}** is already blacklisted.")
+            return
+        security.ban_user(member.id, reason)
+        await ctx.send(f"🚫 Blacklisted **{esc(member.display_name)}**.\n**Reason:** {esc(reason)}")
+        await self._blacklist_log(ctx, member, "🚫 Blacklist ADD", discord.Color.dark_red(), reason)
+
+    @blacklist.command(name="remove")
+    @owner_only()
+    async def blacklist_remove(self, ctx: commands.Context, member: discord.User, *, reason: str):
+        reason = security.clean_input(reason, 150)
+        if not security.is_banned(member.id):
+            await ctx.send(f"ℹ️ **{esc(member.display_name)}** is not blacklisted.")
+            return
+        security.unban_user(member.id)
+        await ctx.send(f"✅ Removed **{esc(member.display_name)}** from the blacklist.\n**Reason:** {esc(reason)}")
+        await self._blacklist_log(ctx, member, "✅ Blacklist REMOVE", discord.Color.green(), reason)
+
+    async def _blacklist_log(self, ctx, member, title, color, reason):
+        try:
+            from log_cog import post_log
+            e = discord.Embed(title=title, color=color, timestamp=discord.utils.utcnow())
+            e.add_field(name="User", value=f"{member.mention} (`{member.id}`)", inline=True)
+            e.add_field(name="By", value=f"{ctx.author.mention}", inline=True)
+            e.add_field(name="Reason", value=reason or "-", inline=False)
+            await post_log(self.bot, e)
+        except Exception as ex:
+            print(f"[log] blacklist log failed: {ex}")
 
     # -- cards -----------------------------------------------------------
     @admin.group(name="card", invoke_without_command=True)

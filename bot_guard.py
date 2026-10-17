@@ -109,6 +109,16 @@ class GuardedTree(app_commands.CommandTree):
     """Slash-command tree that blocks every command during maintenance."""
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        try:
+            import security
+            if interaction.user.id != OWNER_ID and security.is_banned(interaction.user.id):
+                try:
+                    await interaction.response.send_message("🚫 You are blacklisted from using this bot.", ephemeral=True)
+                except discord.HTTPException:
+                    pass
+                raise MaintenanceActive()      # already answered: stay quiet
+        except ImportError:
+            pass
         if maintenance_on() and not is_staff(interaction.user):
             try:
                 await interaction.response.send_message(maintenance_text(), ephemeral=True)

@@ -74,6 +74,7 @@ async def load_cogs():
         "squad_cog",
         "stadium_cog",
         "gif_cog",
+        "log_cog",
         "admin_cog",
         "stats_cog",
         "ping_cog",
