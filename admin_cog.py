@@ -3,6 +3,8 @@
     admin card give @user <card name>
     admin coin give @user <coins>
     admin coin remove @user <coins>
+    admin pack give @user gold silver debut bronze   (1 of each; add a number after a pack for more)
+    admin pack reset @user [pack ...]                (no pack = remove ALL packs)
     admin player reset @user all      (cards only)
     admin reset all @user             (coins -> 0, all cards removed AND debut reset)
     admin user top [20-50] [coins|cards]   (owner / admin role only)
@@ -71,6 +73,8 @@ class AdminCog(commands.Cog):
             "`admin card give @user <card name>`\n"
             "`admin coin give @user <coins>`\n"
             "`admin coin remove @user <coins>`\n"
+            "`admin pack give @user <pack> [qty] <pack> [qty] ...`\n"
+            "`admin pack reset @user [<pack> [qty] ...]`\n"
             "`admin player reset @user all`\n"
             "`admin reset all @user`\n"
             "`admin user top [20-50] [coins|cards]`\n"
@@ -185,6 +189,89 @@ class AdminCog(commands.Cog):
             f"✅ {esc(member.display_name)} {verb} **{economy.fmt_coins(abs(amount))}**. "
             f"Balance: **{economy.fmt_coins(bal)}**."
         )
+
+    # -- packs -----------------------------------------------------------
+    PACK_MAX_QTY = 100
+
+    @staticmethod
+    def _parse_packs(tokens: tuple[str, ...]) -> tuple[list[tuple[str, int | None]] | None, str | None]:
+        """Turn `gold silver 3 debut` into [("gold", None), ("silver", 3), ("debut", None)].
+        A number must come right after a pack name. Returns (entries, error)."""
+        entries: list[tuple[str, int | None]] = []
+        for raw in tokens:
+            tok = security.clean_input(raw, 20).lower()
+            if tok in sl.PACKS:
+                entries.append((tok, None))
+            elif tok.isdigit():
+                if not entries or entries[-1][1] is not None:
+                    return None, f"A number (`{tok}`) must come right after a pack name, e.g. `gold 3`."
+                qty = int(tok)
+                if not 1 <= qty <= AdminCog.PACK_MAX_QTY:
+                    return None, f"Quantity must be 1-{AdminCog.PACK_MAX_QTY}."
+                entries[-1] = (entries[-1][0], qty)
+            else:
+                return None, f"`{esc(tok)}` isn't a pack. Packs: " + ", ".join(f"`{k}`" for k in sl.PACKS) + "."
+        return entries, None
+
+    @admin.group(name="pack", invoke_without_command=True)
+    @admin_only()
+    async def pack(self, ctx: commands.Context):
+        await ctx.send(
+            "`admin pack give @user gold silver debut bronze`  (1 of each, add a number after a pack for more, e.g. `gold 3`)\n"
+            "`admin pack reset @user`  (remove ALL their packs)\n"
+            "`admin pack reset @user gold silver 2`  (all gold, and 2 silver)"
+        )
+
+    @pack.command(name="give")
+    @admin_only()
+    async def pack_give(self, ctx: commands.Context, member: discord.Member, *packs: str):
+        if member.bot:
+            await ctx.send("❌ Bots can't own packs.")
+            return
+        if not packs:
+            await ctx.send("Usage: `admin pack give @user gold silver debut bronze`")
+            return
+        entries, err = self._parse_packs(packs)
+        if err:
+            await ctx.send(f"❌ {err}")
+            return
+        if not economy.user_exists(member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        given: dict[str, int] = {}
+        for key, qty in entries:
+            n = qty or 1
+            economy.add_pack(member.id, key, n)
+            given[key] = given.get(key, 0) + n
+        text = ", ".join(f"{n}× `{sl.PACKS[k]['label']}`" for k, n in given.items())
+        await ctx.send(f"✅ Gave {esc(member.display_name)}: {text}.")
+
+    @pack.command(name="reset")
+    @admin_only()
+    async def pack_reset(self, ctx: commands.Context, member: discord.Member, *packs: str):
+        if member.bot:
+            await ctx.send("❌ Bots can't own packs.")
+            return
+        entries, err = self._parse_packs(packs)
+        if err:
+            await ctx.send(f"❌ {err}")
+            return
+        if not economy.user_exists(member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        if not entries:   # no pack named -> remove everything they hold
+            entries = [(k, None) for k in economy.get_packs(member.id)]
+        removed: dict[str, int] = {}
+        for key, qty in entries:
+            n = economy.remove_pack(member.id, key, qty)
+            if n:
+                removed[key] = removed.get(key, 0) + n
+        if not removed:
+            await ctx.send(f"ℹ️ {esc(member.display_name)} had no matching packs.")
+            return
+        label = lambda k: sl.PACKS[k]["label"] if k in sl.PACKS else k
+        text = ", ".join(f"{n}× `{label(k)}`" for k, n in removed.items())
+        await ctx.send(f"✅ Removed from {esc(member.display_name)}: {text}.")
 
     # -- players ---------------------------------------------------------
     @admin.group(name="player", invoke_without_command=True)

@@ -848,6 +848,24 @@ def add_pack(user_id, pack_type: str, qty: int = 1) -> None:
         )
 
 
+def remove_pack(user_id, pack_type: str, qty: int | None = None) -> int:
+    """(Admin) Take packs away. qty=None removes every pack of that type.
+    Returns how many were actually removed (never goes below zero)."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        row = conn.execute(
+            "SELECT qty FROM packs WHERE user_id = ? AND pack_type = ?", (uid, pack_type)
+        ).fetchone()
+        have = int(row["qty"]) if row else 0
+        take = have if qty is None else min(have, int(qty))
+        if take > 0:
+            conn.execute(
+                "UPDATE packs SET qty = qty - ? WHERE user_id = ? AND pack_type = ?",
+                (take, uid, pack_type),
+            )
+        return take
+
+
 def get_packs(user_id) -> dict[str, int]:
     conn = _conn()
     try:
