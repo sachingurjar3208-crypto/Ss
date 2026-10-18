@@ -18,8 +18,8 @@ NARRATIVES: dict[str, str] = {
     "Swing Master": "Swing specialist: batters struggle to hit sixes and wickets come more often on swing deliveries.",
     "Breakthrough": "Game changer batter (Maxwell / Russell / Pollard type): hits more sixes and can win the match in a chase, but is slightly more likely to get out.",
     "Yorker King": "Bowler who nails yorkers: +30% wickets on yorkers.",
-    "Lethal Pace": "Express pace bowler: +25% wickets and -8% runs off pace deliveries.",
-    "Aggressive": "Attacking batter: +10% fours/sixes, -10% dot balls.",
+    "Lethal Pace": "Express pace bowler: +25% wickets and -8% 1s-4s off pace deliveries, but concedes +15% sixes.",
+    "Aggressive": "Attacking batter: +25% fours/sixes, -10% dot balls.",
     "Balanced": "Steady all-round approach: no bonus, no penalty.",
     "Low Batting Quality": (
         "Weak batter: can't hit sixes or fours, mostly 1-2-3 runs; "
@@ -28,11 +28,11 @@ NARRATIVES: dict[str, str] = {
     "Low Bowling Quality": (
         "Weak bowler: easy to hit sixes against, and very low chance of taking wickets."
     ),
-    "Cover Drive Specialist": "On the Drive shot: +40% fours, +10% 1-2-3 runs, -20% wicket chance.",
-    "Chase Master": "Thrives when chasing: +15% scoring in the 2nd innings.",
+    "Cover Drive Specialist": "On the Drive shot: +40% fours, +10% 1-2-3 runs.",
+    "Chase Master": "Thrives when chasing: +25% scoring in the 2nd innings.",
     "Early Breaker": "Bowler who strikes early: +30% wickets in the first overs of the match.",
     "Googly Master": "Leg-spin wizard: +35% wickets on Googly and Leg Break deliveries.",
-    "Mr360": "360-degree batter: +25% fours, +15% sixes, -10% wicket chance on Sweep, Reverse-Sweep, Flick and Lofted shots.",
+    "Mr360": "360-degree batter: +25% fours, +15% sixes on Sweep, Reverse-Sweep, Flick and Lofted shots.",
     "Mystery": "Mystery bowler: +30% wickets and -8% boundaries on Mystery-button deliveries.",
     "Spell Finisher": "Bowler who saves his best for his last over(s): +25% wickets, -10% runs (last 1 over, last 2 if he bowls 4).",
     "Mind Games": "Trickster bowler: +25% wickets when the delivery type changes from the previous ball.",

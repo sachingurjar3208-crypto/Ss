@@ -4,7 +4,7 @@
     admin coin give @user <coins>
     admin coin remove @user <coins>
     admin player reset @user all      (cards only)
-    admin reset all @user             (coins -> 0 AND all cards removed)
+    admin reset all @user             (coins -> 0, all cards removed AND debut reset)
     admin user top [20-50] [coins|cards]   (owner / admin role only)
     admin voucher give @user <n>
     admin voucher remove @user <n>
@@ -225,7 +225,8 @@ class AdminCog(commands.Cog):
         res = economy.reset_everything(member.id)
         await ctx.send(
             f"✅ Full reset for {esc(member.display_name)}: removed **{res['cards']}** card(s) "
-            f"and **{economy.fmt_coins(res['coins'])}**. Their packs, XI and captain were cleared too."
+            f"and **{economy.fmt_coins(res['coins'])}**. Their packs, XI and captain were cleared too. "
+            f"Their debut was reset as well, so they can use `csdebut` again."
         )
 
     # -- vouchers --------------------------------------------------------

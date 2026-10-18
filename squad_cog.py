@@ -30,8 +30,9 @@ from security import OwnedView, esc
 
 PAGE_SIZE = 10
 
-# Emoji shown in the csdebut welcome message.
-DEBUT_EMOJI = "<:24693:1554672842694729899>"
+# Main server invite shown in the csdebut welcome message (clickable blue link).
+MAIN_SERVER_INVITE = "https://discord.gg/UjgyV56tkT"
+JOIN_MAIN_LINK = f"[Join Main server]({MAIN_SERVER_INVITE})"
 
 # Only members with this role see the player emojis in csstarterpack.
 PREMIUM_ROLE_ID = 1556957776415035423
@@ -365,6 +366,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if not economy.create_user(ctx.author.id, default):
             await ctx.send("You have already debuted. Use `csprofile` to see your team.")
             return
+        economy.add_pack(ctx.author.id, "debut", 1)   # one-time: create_user only succeeds once per user
         # Welcome image (falls back to the plain text message below if it can't be drawn)
         buf = None
         try:
@@ -375,15 +377,17 @@ class SquadCog(commands.Cog, name="Squad"):
             print(f"[csdebut] image failed: {e}")
         if buf is not None:
             await ctx.send(
-                f"{DEBUT_EMOJI} {ctx.author.mention} your team **{esc(default)}** is created with "
-                f"**{economy.fmt_coins(economy.START_PURSE)}**.",
+                f"{ctx.author.mention} your team **{esc(default)}** is created with "
+                f"**{economy.fmt_coins(economy.START_PURSE)}** {JOIN_MAIN_LINK}\n"
+                f"You also got 1 `debut pack`. Open it with `csopen debut` in the main server.",
                 file=discord.File(buf, filename=DEBUT_IMG_NAME),
                 allowed_mentions=discord.AllowedMentions(users=[ctx.author]),
             )
             return
         await ctx.send(
-            f"{DEBUT_EMOJI} Welcome, **{esc(ctx.author.display_name)}**! Your team **{esc(default)}** is created "
-            f"with **{economy.fmt_coins(economy.START_PURSE)}**.\n"
+            f"Welcome, **{esc(ctx.author.display_name)}**! Your team **{esc(default)}** is created "
+            f"with **{economy.fmt_coins(economy.START_PURSE)}** {JOIN_MAIN_LINK}\n"
+            f"You also got 1 `debut pack`. Open it with `csopen debut` in the main server.\n"
             f"Next: `csstarterpack` to get your first players, then `csxi` to see your XI.\n"
             f"Change your team name with `csteamname <name>`."
         )

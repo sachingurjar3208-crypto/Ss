@@ -173,7 +173,7 @@ MATCHUP_MATRIX = {
 ATTR_EFFECTS = {
     # ── Batting ──────────────────────────────────────────────────────────────
     "Finisher":         {"death_bat_mult":  1.20},  # +20% scoring in death overs
-    "Aggressive":       {"boundary_mult":   1.10,   # +10% 4s/6s overall
+    "Aggressive":       {"boundary_mult":   1.25,   # +25% 4s/6s overall
                          "dot_reduce":      0.90},  # -10% dot balls
     "Anchor":           {"wkt_reduce":      0.70},  # -30% wicket chance
     "Opener":           {"pp_bat_mult":     1.15},  # +15% scoring in powerplay
@@ -182,7 +182,7 @@ ATTR_EFFECTS = {
                          "wkt_increase":    1.15},  # slightly higher risk
     "Clinical":         {"dot_reduce":      0.85,   # -15% dot balls
                          "single_mult":     1.20},  # +20% singles/rotation
-    "Chase Master":     {"chase_bat_mult":  1.15},  # +15% scoring when chasing
+    "Chase Master":     {"chase_bat_mult":  1.25},  # +25% scoring when chasing
     "Centurion":        {"fifty_bat_mult":  1.10},  # +10% after scoring 50+ runs
     # ── Bowling ──────────────────────────────────────────────────────────────
     "Death Bowler":     {"death_wkt_mult":  1.20,   # +20% wickets in death
@@ -207,10 +207,10 @@ ATTR_EFFECTS = {
     # (Aggressive, Chase Master and Yorker King are defined above; "Swing King"
     #  is an alias of "Swing Master"; "Balanced" is intentionally neutral.)
     "Lethal Pace":      {"pace_wkt_mult":   1.25,   # +25% wickets off pace deliveries
-                         "pace_run_reduce": 0.92},  # -8% runs off pace deliveries
+                         "pace_run_reduce": 0.92,   # -8% 1s/2s/3s/4s off pace deliveries
+                         "pace_six_mult":   1.15},  # +15% sixes conceded off pace deliveries
     "Cover Drive Specialist": {"drive_four_mult":   1.40,   # +40% fours when driving
-                               "drive_run_mult":    1.10,   # +10% 1s/2s/3s when driving
-                               "drive_wkt_reduce":  0.80},  # -20% wicket chance when driving
+                               "drive_run_mult":    1.10},  # +10% 1s/2s/3s when driving (no wicket-chance change)
     "Low Batting Quality":    {"four_mult":   0.20,   # fours ~80% rarer
                                "six_mult":    0.08,   # sixes ~92% rarer
                                "rotate_mult": 1.30},  # more 1s/2s/3s instead
@@ -222,8 +222,7 @@ ATTR_EFFECTS = {
     "Early Breaker":   {"early_wkt_mult":   1.30},  # +30% wickets in the first overs of the match
     "Googly Master":   {"googly_wkt_mult":  1.35},  # +35% wickets on Googly and Leg Break
     "Mr360":           {"four_mult":        1.25,   # +25% fours on 360-style shots
-                        "six_mult":         1.15,   # +15% sixes on 360-style shots
-                        "wkt_reduce":       0.90},  # -10% wicket chance on those shots
+                        "six_mult":         1.15},  # +15% sixes on 360-style shots (no wicket-chance change)
     "Mystery":         {"wkt_mult":         1.30,   # +30% wickets on Mystery-button deliveries
                         "boundary_reduce":  0.92},  # -8% fours/sixes against them
     "Spell Finisher":  {"wkt_mult":         1.25,   # +25% wickets in the bowler's final over(s)
@@ -470,7 +469,6 @@ def calculate_outcome(
         cd = ATTR_EFFECTS["Cover Drive Specialist"]
         w["4"] = w["4"] * cd["drive_four_mult"]
         for k in ("1", "2", "3"): w[k] = w[k] * cd["drive_run_mult"]
-        w["W"] = w["W"] * cd["drive_wkt_reduce"]
 
     # LOW BATTING QUALITY: almost no fours/sixes, mostly 1-2-3 runs
     if "Low Batting Quality" in batsman_attrs:
@@ -493,7 +491,6 @@ def calculate_outcome(
         m360 = ATTR_EFFECTS["Mr360"]
         w["4"] = w["4"] * m360["four_mult"]
         w["6"] = w["6"] * m360["six_mult"]
-        w["W"] = w["W"] * m360["wkt_reduce"]
 
     # ── Bowler attribute effects ─────────────────────────────────────────────
 
@@ -545,7 +542,8 @@ def calculate_outcome(
     if "Lethal Pace" in bowler_attrs and delivery_internal in _PACE_DELIVERIES:
         lp = ATTR_EFFECTS["Lethal Pace"]
         w["W"] = w["W"] * lp["pace_wkt_mult"]
-        for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * lp["pace_run_reduce"]
+        for k in ("1", "2", "3", "4"): w[k] = w[k] * lp["pace_run_reduce"]
+        w["6"] = w["6"] * lp["pace_six_mult"]
 
     # EARLY BREAKER: +wickets in the first overs of the match
     # (first 3 overs of a 20-over game; scaled down for shorter matches)

@@ -1288,7 +1288,9 @@ def reset_all_cards(user_id) -> int:
 def reset_everything(user_id) -> dict:
     """(Admin) Full wipe of a user's economy and collection: coins set to 0,
     every card and pack removed, XI / captain / impact subs / pending cards cleared.
-    Team name and ban state are kept. Returns {"cards": n, "coins": old_purse}."""
+    The debut is undone too (the user row is deleted), so the user can type csdebut
+    again and gets a fresh team, the starting purse and a new debut pack. Ban state
+    lives in its own table and is kept. Returns {"cards": n, "coins": old_purse}."""
     uid = _uid(user_id)
     with _tx() as conn:
         row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
@@ -1304,12 +1306,12 @@ def reset_everything(user_id) -> dict:
         _ensure_draft_tables(conn)
         conn.execute("DELETE FROM vouchers WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM draft_pity WHERE user_id = ?", (uid,))
-        conn.execute("UPDATE users SET purse = 0, captain_key = NULL WHERE user_id = ?", (uid,))
         if old:
             conn.execute(
                 "INSERT INTO ledger (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, 0, ?)",
                 (uid, -old, "Admin full reset", time.time()),
             )
+        conn.execute("DELETE FROM users WHERE user_id = ?", (uid,))   # un-debut: csdebut works again
         return {"cards": int(n), "coins": old}
 
 

@@ -36,6 +36,9 @@ from squad_cog import _card_line, _in_match, _is_premium, _need_debut
 # after another still worked. Now every economy command shares ONE timer per
 # user: after any of them, the user must wait ECONOMY_COOLDOWN seconds.
 ECONOMY_COOLDOWN = 5
+
+# The free debut pack can only be opened in this server.
+DEBUT_PACK_GUILD_ID = 1556644438917382150
 _econ_bucket = commands.CooldownMapping.from_cooldown(1, ECONOMY_COOLDOWN, commands.BucketType.user)
 
 
@@ -528,14 +531,16 @@ class EconomyCog(commands.Cog, name="Economy"):
         if pack is None:
             lines = []
             for key, spec in sl.PACKS.items():
+                if spec.get("shop") is False:
+                    continue
                 lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · 1 player ({spec['range'][0]}-{spec['range'][1]} OVR)\n`cspack {key}`")
             embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines), color=discord.Color.gold())
             embed.set_footer(text="Buy with cspack <type>, then open with csopen <type>. Duplicates turn into coins.")
             await ctx.send(embed=embed)
             return
         key = security.clean_input(pack, 12).lower()
-        if key not in sl.PACKS:
-            await ctx.send("❌ Pick " + ", ".join(f"`{k}`" for k in sl.PACKS) + ".")
+        if key not in sl.PACKS or sl.PACKS[key].get("shop") is False:
+            await ctx.send("❌ Pick " + ", ".join(f"`{k}`" for k, v in sl.PACKS.items() if v.get("shop") is not False) + ".")
             return
         spec = sl.PACKS[key]
         uid = ctx.author.id
@@ -579,6 +584,9 @@ class EconomyCog(commands.Cog, name="Economy"):
         if key not in have:
             await ctx.send("❌ You don't have that pack.")
             return
+        if key == "debut" and (ctx.guild is None or ctx.guild.id != DEBUT_PACK_GUILD_ID):
+            await ctx.send("🔒 The `debut pack` can only be opened in the main server.")
+            return
         rolled = sl.roll_pack(key)
         if not rolled:
             await ctx.send("⚠️ There are no player cards in the game yet, so packs can't open. Ask the owner to add cards.")
@@ -596,7 +604,10 @@ class EconomyCog(commands.Cog, name="Economy"):
         lines += [_card_line(by_key[k], "  ⚠️ squad full") for k in result.get("pending", [])]
         lines += [_card_line(by_key[k], "  ♻️ duplicate") for k in result["dupes"]]
         spec = sl.PACKS[key]
-        embed = discord.Embed(title=f"{spec['emoji']} {spec['label']} opened!", description="\n".join(lines), color=discord.Color.gold())
+        if key == "debut":
+            embed = discord.Embed(description="`Debut Pack` opened!\n\n" + "\n".join(lines), color=discord.Color.gold())
+        else:
+            embed = discord.Embed(title=f"{spec['emoji']} {spec['label']} opened!", description="\n".join(lines), color=discord.Color.gold())
         if result["refund"]:
             embed.set_footer(text=f"Duplicates gave you back {result['refund']:,} coins")
         await ctx.send(embed=embed)
