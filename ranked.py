@@ -475,6 +475,23 @@ def blacklist_remaining(user_id) -> int:
         return 0
 
 
+def clear_blacklist(user_id) -> bool:
+    """Owner tool: lift a ranked blacklist right now and reset negative stars to 0.
+    Returns True if there was a blacklist (or negative stars) to clear."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        _ensure(conn)
+        r = conn.execute("SELECT blacklist_until, stars FROM ranked_players WHERE user_id = ?", (uid,)).fetchone()
+        if r is None:
+            return False
+        had = float(r["blacklist_until"] or 0) > 0 or int(r["stars"] or 0) < 0
+        conn.execute(
+            "UPDATE ranked_players SET blacklist_until = 0, "
+            "stars = CASE WHEN stars < 0 THEN 0 ELSE stars END WHERE user_id = ?", (uid,),
+        )
+        return had
+
+
 def record_match(uid_a, uid_b) -> None:
     """Remember who each real player just faced (a bot counts as opponent 0, so bot games also
     push old opponents out). Only the last RECENT_OPP_BLOCK matches are kept per player."""

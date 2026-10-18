@@ -20,6 +20,7 @@ from discord.ext import commands
 
 import card_db
 import draft_config as cfg
+import ranked
 import economy
 import emojis
 import quest
@@ -106,11 +107,15 @@ class AdminCog(commands.Cog):
     @owner_only()
     async def blacklist_remove(self, ctx: commands.Context, member: discord.User, *, reason: str):
         reason = security.clean_input(reason, 150)
-        if not security.is_banned(member.id):
+        was_banned = security.is_banned(member.id)
+        ranked_cleared = await asyncio.to_thread(ranked.clear_blacklist, member.id)
+        if not was_banned and not ranked_cleared:
             await ctx.send(f"ℹ️ **{esc(member.display_name)}** is not blacklisted.")
             return
-        security.unban_user(member.id)
-        await ctx.send(f"✅ Removed **{esc(member.display_name)}** from the blacklist.\n**Reason:** {esc(reason)}")
+        if was_banned:
+            security.unban_user(member.id)
+        what = " + ".join(x for x, ok in (("bot blacklist", was_banned), ("ranked blacklist", ranked_cleared)) if ok)
+        await ctx.send(f"✅ Removed **{esc(member.display_name)}** from the {what}.\n**Reason:** {esc(reason)}")
         await self._blacklist_log(ctx, member, "✅ Blacklist REMOVE", discord.Color.green(), reason)
 
     async def _blacklist_log(self, ctx, member, title, color, reason):
