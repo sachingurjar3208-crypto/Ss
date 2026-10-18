@@ -1365,16 +1365,22 @@ async def _process_delivery(
     try:
         # ── Wicket (not the last one) → show DRS ─────────────────────────
         if outcome == "W" and not innings_over:
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
-
             batting_uid = game.batting_user_id
             reviews     = game.drs_reviews.get(batting_uid, 0)
             if batting_uid in getattr(game, "bot_ids", ()):
                 reviews = 0   # a ranked bot never asks for a review
+            # While a review is possible the wicket is NOT final yet, so the
+            # umpire / wicket GIFs are held back and only shown once the
+            # decision is confirmed (see DRSView._flush_held_gifs).
+            await _send_commentary_with_gifs(
+                channel, commentary, embed,
+                [] if reviews > 0 else gif_urls, interaction,
+            )
             if reviews > 0:
                 drs_view = DRSView(
                     game, channel, delivery_internal, shot_internal,
                     commentary=commentary,
+                    held_gifs=gif_urls,
                     pre_wicket_pship_runs=_pre_wicket_pship_runs,
                     pre_wicket_pship_balls=_pre_wicket_pship_balls,
                     pre_wicket_balls_since=_pre_wicket_balls_since,
@@ -2258,8 +2264,10 @@ class DRSView(ui.View):
         pre_wicket_pship_balls: int = 0,
         pre_wicket_balls_since: int = 999,
         pre_wicket_striker=None,
+        held_gifs: list[str] | None = None,
     ):
         super().__init__(timeout=10)
+        self._held_gifs            = list(held_gifs or [])
         self._striker              = pre_wicket_striker
         self.game                  = game
         self.channel               = channel
@@ -2273,6 +2281,16 @@ class DRSView(ui.View):
         self._pship_runs           = pre_wicket_pship_runs
         self._pship_balls          = pre_wicket_pship_balls
         self._balls_since          = pre_wicket_balls_since
+
+    async def _flush_held_gifs(self):
+        """Send the wicket GIFs that were held back. Called ONLY once the OUT
+        decision is final (upheld / accepted / timed out) — never on NOT OUT."""
+        gifs, self._held_gifs = self._held_gifs, []
+        for url in gifs:
+            try:
+                await self.channel.send(url)
+            except Exception:
+                pass
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if active_games.get(interaction.channel_id) is not self.game:
@@ -2411,6 +2429,7 @@ class DRSView(ui.View):
                     await self.channel.send(
                         content=f"{self._out_emoji} **OUT — Decision Upheld!** The batsman must walk."
                     )
+                await self._flush_held_gifs()
                 await _handle_wicket_fall(self.channel, self.game)
         except Exception as e:
             print(f"[match recovery] DRS challenge failed: {type(e).__name__}: {e}")
@@ -2443,6 +2462,7 @@ class DRSView(ui.View):
             )
         except Exception:
             pass  # cosmetic only
+        await self._flush_held_gifs()
         await _safe_next(self.channel, self.game, lambda: _handle_wicket_fall(self.channel, self.game))
 
     async def on_timeout(self):
@@ -2461,6 +2481,7 @@ class DRSView(ui.View):
                 )
             except Exception:
                 pass
+        await self._flush_held_gifs()
         await _safe_next(self.channel, self.game, lambda: _handle_wicket_fall(self.channel, self.game))
 
 
