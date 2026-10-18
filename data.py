@@ -371,6 +371,23 @@ SPIN_BUTTONS_BY_TYPE = {
 }
 
 
+# Text shown ON the delivery buttons. Display only: the game logic (shot guide, matchups,
+# playstyles, commentary) keeps using the original names above, so nothing else changes.
+# Buttons not listed here show their normal name.
+BUTTON_DISPLAY: dict[str, dict[str, str]] = {
+    "Fast":         {"Fast": "Pace", "Slow": "Slower", "Bouncer": "Bumper",
+                     "Full": "Fuller", "Good": "Length"},
+    "Medium Pacer": {"Bouncer": "Bumper", "Full": "Fuller", "Good Length": "Length"},
+    "Off Spin":     {"Offspin": "Offbreak"},
+    "Leg Spin":     {"Legspin": "Legbreak", "Drifter": "Drift"},
+}
+
+
+def button_label(bowling_type, key: str) -> str:
+    """The name to print on a bowler's delivery button (falls back to the original name)."""
+    return BUTTON_DISPLAY.get(bowling_type, {}).get(key, key)
+
+
 def is_two_stage(bowling_type) -> bool:
     return bowling_type in TWO_STAGE_BUTTONS
 

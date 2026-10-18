@@ -300,7 +300,7 @@ from data import (
     TOSS_HEAD_EMOJI, TOSS_TAIL_EMOJI, TIMELINE_EMOJIS,
     FAST_STAGE1, FAST_STAGE2,
     OFF_SPIN_BUTTONS, LEG_SPIN_BUTTONS,
-    is_two_stage, get_two_stage_buttons, get_spin_buttons,
+    is_two_stage, get_two_stage_buttons, get_spin_buttons, button_label,
     BATTING_BUTTONS, SHOT_BUTTON_MAP,
     get_delivery_speed, resolve_delivery, BOWLING_TYPE_ICON,
     DELIVERY_BUTTON_MAP,
@@ -2025,6 +2025,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
         self.stage1_choice = ""
         self._stage1_btns: list[ui.Button] = []
         self._stage2_btns: list[ui.Button] = []
+        self._stage2_keys: list[str] = []   # original (logic) names, same order as _stage2_btns
 
         # Fast bowler and Medium pacer share this view; only the buttons / colours differ.
         self.btype = (game.current_bowler or {}).get("bowling_type", "Fast")
@@ -2036,16 +2037,17 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
 
         for label in stage1_labels:
             style = self._s1_styles.get(label, discord.ButtonStyle.secondary)
-            btn   = ui.Button(label=label, style=style, row=0)
+            btn   = ui.Button(label=button_label(self.btype, label), style=style, row=0)
             btn.callback = self._make_stage1_callback(label)
             self._stage1_btns.append(btn)
             self.add_item(btn)
 
         for label in stage2_labels:
             # Locked + grey until step 1 is chosen
-            btn = ui.Button(label=label, style=discord.ButtonStyle.secondary, row=1, disabled=True)
+            btn = ui.Button(label=button_label(self.btype, label), style=discord.ButtonStyle.secondary, row=1, disabled=True)
             btn.callback = self._make_stage2_callback(label)
             self._stage2_btns.append(btn)
+            self._stage2_keys.append(label)
             self.add_item(btn)
 
     def _make_stage1_callback(self, stage1_label: str):
@@ -2066,9 +2068,9 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
                 b.disabled = True
                 b.style    = discord.ButtonStyle.secondary
             # Row 1 -> unlock with the normal colours
-            for b in self._stage2_btns:
+            for b, key in zip(self._stage2_btns, self._stage2_keys):
                 b.disabled = False
-                b.style    = self._s2_styles.get(b.label, discord.ButtonStyle.secondary)
+                b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
 
             try:
                 # view only — keeps the existing message text/embed as it is
@@ -2152,7 +2154,7 @@ class BowlingView(_TimeoutMixin, ui.View):
         styles  = _ORTHODOX_STYLES if btype == "Orthodox" else _SPIN_STYLES
         for i, label in enumerate(buttons):
             style = styles.get(label, discord.ButtonStyle.secondary)
-            btn   = ui.Button(label=label, style=style, row=i // 3)
+            btn   = ui.Button(label=button_label(btype, label), style=style, row=i // 3)
             btn.callback = self._make_callback(label)
             self.add_item(btn)
 

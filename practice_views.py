@@ -19,7 +19,7 @@ from data import (
     TIMELINE_EMOJIS,
     FAST_STAGE1, FAST_STAGE2,
     OFF_SPIN_BUTTONS, LEG_SPIN_BUTTONS,
-    is_two_stage, get_two_stage_buttons, get_spin_buttons,
+    is_two_stage, get_two_stage_buttons, get_spin_buttons, button_label,
     BATTING_BUTTONS, SHOT_BUTTON_MAP,
     get_delivery_speed, resolve_delivery,
     DELIVERY_BUTTON_MAP,
@@ -1097,6 +1097,7 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
         self.stage1_choice = ""
         self._stage1_btns: list = []
         self._stage2_btns: list = []
+        self._stage2_keys: list = []   # original (logic) names, same order as _stage2_btns
 
         self.btype = (game.current_bowler or {}).get("bowling_type", "Fast")
         s1_labels, s2_labels = get_two_stage_buttons(self.btype)
@@ -1106,15 +1107,16 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
             self._s1_styles, self._s2_styles = self._S1_STYLES, self._S2_STYLES
 
         for label in s1_labels:
-            btn = ui.Button(label=label, style=self._s1_styles.get(label, discord.ButtonStyle.secondary), row=0)
+            btn = ui.Button(label=button_label(self.btype, label), style=self._s1_styles.get(label, discord.ButtonStyle.secondary), row=0)
             btn.callback = self._make_stage1_callback(label)
             self._stage1_btns.append(btn)
             self.add_item(btn)
 
         for label in s2_labels:
-            btn = ui.Button(label=label, style=discord.ButtonStyle.secondary, row=1, disabled=True)
+            btn = ui.Button(label=button_label(self.btype, label), style=discord.ButtonStyle.secondary, row=1, disabled=True)
             btn.callback = self._make_stage2_callback(label)
             self._stage2_btns.append(btn)
+            self._stage2_keys.append(label)
             self.add_item(btn)
 
     def _make_stage1_callback(self, stage1: str):
@@ -1132,9 +1134,9 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
             for b in self._stage1_btns:
                 b.disabled = True
                 b.style    = discord.ButtonStyle.secondary
-            for b in self._stage2_btns:
+            for b, key in zip(self._stage2_btns, self._stage2_keys):
                 b.disabled = False
-                b.style    = self._s2_styles.get(b.label, discord.ButtonStyle.secondary)
+                b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
             try:
                 await interaction.response.edit_message(view=self)
             except Exception as e:
@@ -1199,7 +1201,7 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
                             "Doosra": discord.ButtonStyle.success, "Carrom": discord.ButtonStyle.primary,
                             "Slider": discord.ButtonStyle.success})
         for i, label in enumerate(buttons):
-            btn          = ui.Button(label=label, style=_STYLES.get(label, discord.ButtonStyle.secondary), row=i // 3)
+            btn          = ui.Button(label=button_label(btype, label), style=_STYLES.get(label, discord.ButtonStyle.secondary), row=i // 3)
             btn.callback = self._make_callback(label)
             self.add_item(btn)
 
