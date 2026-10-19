@@ -991,7 +991,7 @@ async def _send_commentary_with_gifs(
 
     for url in gif_urls:
         try:
-            await channel.send(url)
+            await _send_gif_item(channel, url)
         except Exception:
             pass
 
@@ -1322,9 +1322,12 @@ async def _process_delivery(
         "Wd": "wide", "NB": "noball", "NB+1": "noball",
     }.get(outcome)
     if _umpire_event:
-        ump_gif = get_umpire_gif(_umpire_event)
-        if ump_gif:
-            gif_urls.append(ump_gif)
+        if UMPIRE_BANNER:
+            gif_urls.append(f"umpire:{_umpire_event}")
+        else:
+            ump_gif = get_umpire_gif(_umpire_event)
+            if ump_gif:
+                gif_urls.append(ump_gif)
 
     # Batting milestone GIFs (50, 100, 150, …)
     if outcome in ("1", "2", "3", "4", "6"):
@@ -1543,6 +1546,24 @@ async def _start_second_innings(channel, game: GameState):
     await _send_opener_prompt(channel, game)
 
 
+# ── Umpire banner (generated GIF for four / six / out / wide / noball) ───────
+UMPIRE_BANNER = True   # False = go back to the GIF links saved in the umpire_media table
+
+
+async def _send_gif_item(channel, item: str) -> None:
+    """gif_urls holds plain URLs, or "umpire:<event>" for the generated umpire banner."""
+    if item.startswith("umpire:"):
+        try:
+            from umpire_gif import umpire_file
+            f = await umpire_file(item[7:])
+            if f is not None:
+                await channel.send(file=f)
+        except Exception as e:
+            print(f"[umpire_gif] skipped ({type(e).__name__}: {e})")
+        return
+    await channel.send(item)
+
+
 # ── MATCH STARTING banner (animated GIF, made on the fly) ────────────────────
 def _banner_names(game: GameState) -> tuple[str, str]:
     """Team names for the banner: the XI's team name, else the player's display name."""
@@ -1561,6 +1582,9 @@ async def _send_match_banner(channel, game: GameState) -> None:
         f = await match_start_file(a, b)
         if f is not None:
             await channel.send(file=f)
+        if UMPIRE_BANNER:   # pre-render the umpire banners in the background
+            from umpire_gif import warm
+            asyncio.create_task(warm())
     except Exception as e:
         print(f"[match_banner] skipped ({type(e).__name__}: {e})")
 
@@ -2314,7 +2338,7 @@ class DRSView(ui.View):
         gifs, self._held_gifs = self._held_gifs, []
         for url in gifs:
             try:
-                await self.channel.send(url)
+                await _send_gif_item(self.channel, url)
             except Exception:
                 pass
 
