@@ -1543,6 +1543,28 @@ async def _start_second_innings(channel, game: GameState):
     await _send_opener_prompt(channel, game)
 
 
+# ── MATCH STARTING banner (animated GIF, made on the fly) ────────────────────
+def _banner_names(game: GameState) -> tuple[str, str]:
+    """Team names for the banner: the XI's team name, else the player's display name."""
+    out = []
+    for m in (game.challenger, game.opponent):
+        t = game.teams.get(m.id) or {}
+        out.append(str(t.get("name") or getattr(m, "display_name", "") or "Team"))
+    return out[0], out[1]
+
+
+async def _send_match_banner(channel, game: GameState) -> None:
+    """Posts the MATCH STARTING GIF. Cosmetic only: any failure is skipped, the match goes on."""
+    try:
+        from match_start_gif import match_start_file
+        a, b = _banner_names(game)
+        f = await match_start_file(a, b)
+        if f is not None:
+            await channel.send(file=f)
+    except Exception as e:
+        print(f"[match_banner] skipped ({type(e).__name__}: {e})")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Accept / Decline
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1578,6 +1600,7 @@ class AcceptDeclineView(ui.View):
             pass  # cosmetic only — the toss below is sent regardless
 
         async def _send_toss():
+            await _send_match_banner(channel, self.game)
             toss_embed = _build_toss_embed(self.game)
             toss_view  = TossView(self.game)
             toss_view._channel = channel
@@ -1712,6 +1735,7 @@ async def start_toss(channel, game: GameState) -> None:
     allowed = _match_ids(game)
 
     async def _send_toss():
+        await _send_match_banner(channel, game)
         toss_embed = _build_toss_embed(game)
         toss_view  = TossView(game)
         toss_view._channel = channel
