@@ -13,7 +13,8 @@ How it works
   collected by members with STARPASS_PREMIUM_ROLE_ID. Getting that role gives a one-time
   1000 credit bonus per season.
 - Rewards are fixed (see default_reward). An admin can change single levels with
-  /starpass-rewardadd; those changes are saved per season in starpass_reward.
+  /starpass-rewardadd at any time (even after players collected them); those changes are
+  saved per season in starpass_reward. A season ended by mistake comes back with /seasonreopen.
 - Collecting is ONE database transaction: the claim rows, the credits and the rewards are
   saved together or not at all, and a claim row is unique per (season, user, level, row),
   so pressing the button many times can never pay twice.
@@ -223,6 +224,48 @@ def end_season() -> dict | None:
         return _season_dict(row)
 
 
+def reopen_season(season_no: int | None = None, days: int | None = None,
+                  replace_running: bool = False) -> dict | str:
+    """Admin: bring an ended (or expired) season back. Returns the season dict or an error message.
+
+    season_no        the season number (Season 1 = 1). Empty = the latest season that is not running.
+    days             run it for this many days from now. Empty = keep the old end time; if that
+                     time is already over, `days` is required.
+    replace_running  another season is running right now (for example Season 2): it is paused
+                     (NOT deleted, all its credits/claims stay and it can be reopened later)
+                     and the chosen season takes its place. Only ONE season runs at a time.
+    """
+    now = time.time()
+    with economy._tx() as conn:
+        _ensure(conn)
+        running = _active(conn)
+        if season_no is None:
+            q = "SELECT * FROM starpass_season "
+            if running is not None:
+                q += "WHERE id != %d " % int(running["id"])
+            row = conn.execute(q + "ORDER BY id DESC LIMIT 1").fetchone()
+        else:
+            row = conn.execute("SELECT * FROM starpass_season WHERE id = ?", (int(season_no),)).fetchone()
+        if row is None:
+            return "I could not find that season."
+        if running is not None and int(running["id"]) == int(row["id"]):
+            return f"{row['name']} is already running."
+        if running is not None and not replace_running:
+            s = _season_dict(running)
+            return (f"{s['name']} is running right now. To bring back {row['name']} set "
+                    f"replace_running to True (the running season is only paused, nothing is deleted).")
+        if days is not None:
+            end_ts = now + int(days) * DAY
+        elif float(row["end_ts"]) > now:
+            end_ts = float(row["end_ts"])
+        else:
+            return f"The time of {row['name']} is already over. Enter the days option to run it again."
+        if running is not None:
+            conn.execute("UPDATE starpass_season SET active = 0 WHERE id = ?", (running["id"],))
+        conn.execute("UPDATE starpass_season SET active = 1, end_ts = ? WHERE id = ?", (end_ts, row["id"]))
+        return _season_dict(conn.execute("SELECT * FROM starpass_season WHERE id = ?", (row["id"],)).fetchone())
+
+
 # ── Rewards ──────────────────────────────────────────────────────────────────
 
 def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | None = None) -> str | dict:
@@ -243,13 +286,8 @@ def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | 
             return "There is no Star Pass running right now. Start one with /starpassmaker first."
         if not 1 <= int(level) <= int(season["levels"]):
             return f"This season has levels 1 to {season['levels']}."
-        taken = conn.execute(
-            "SELECT COUNT(*) AS n FROM starpass_claim WHERE season_id = ? AND level = ? AND row = ?",
-            (season["id"], int(level), row),
-        ).fetchone()["n"]
-        if int(taken):
-            return (f"{int(taken)} player(s) already collected the {row} reward of level {int(level)}, "
-                    f"so it can no longer be changed this season.")
+        # Admins may change a reward at any time, even after players collected it: those who
+        # already collected keep what they got, everybody who collects later gets the new reward.
         conn.execute(
             "INSERT OR REPLACE INTO starpass_reward (season_id, level, row, kind, qty, player_key) "
             "VALUES (?, ?, ?, ?, ?, ?)",

@@ -8,6 +8,7 @@ Admin slash commands (visible to admins only, exist only in the main server):
     /starpassmaker          start a season: duration 10D / 15D / 30D and the number of levels
     /starpass-rewardadd     change the reward of one level (Free or Premium row)
     /starpassend            end the running season right now
+    /seasonreopen           bring an ended season back (for example Season 1 ended by mistake)
 
 Credits come from daily quests (quest.py), levels and rewards are in starpass.py and the
 image is drawn by starpass_image.py. Members with STARPASS_PREMIUM_ROLE_ID get 1000 credits
@@ -321,6 +322,33 @@ class StarPassCog(commands.Cog, name="StarPass"):
             await interaction.response.send_message("No Star Pass is running.", ephemeral=True)
         else:
             await interaction.response.send_message(f"{ended['name']} has been ended.", ephemeral=True)
+
+    # ── Admin: /seasonreopen ─────────────────────────────────────────────────
+    @app_commands.command(name="seasonreopen", description="Bring an ended Star Pass season back")
+    @app_commands.describe(
+        season="Season number to reopen (1 = Season 1). Empty = the latest ended season",
+        days="Run it for this many days from now (needed if its time is already over)",
+        replace_running="Another season is running (e.g. Season 2): pause it and bring this one back",
+    )
+    @admin_only()
+    async def seasonreopen(
+        self,
+        interaction: discord.Interaction,
+        season: app_commands.Range[int, 1, 1000] | None = None,
+        days: app_commands.Range[int, 1, 60] | None = None,
+        replace_running: bool = False,
+    ):
+        await interaction.response.defer(ephemeral=True)
+        res = await asyncio.to_thread(starpass.reopen_season, season, days, replace_running)
+        if isinstance(res, str):
+            await interaction.followup.send(res, ephemeral=True)
+            return
+        embed = discord.Embed(title="Star Pass reopened", color=EMBED_COLOR)
+        embed.add_field(name="Season", value=res["name"])
+        embed.add_field(name="Levels", value=str(res["levels"]))
+        embed.add_field(name="Ends", value=f"<t:{int(res['end_ts'])}:R>")
+        embed.set_footer(text="Everything players earned and collected in this season is still saved.")
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ── Admin: /starpass-rewardadd ───────────────────────────────────────────
     @app_commands.command(name="starpass-rewardadd", description="Change the reward of one Star Pass level")
