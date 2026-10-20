@@ -334,10 +334,16 @@ class StarPassCog(commands.Cog, name="StarPass"):
     async def seasonreopen(
         self,
         interaction: discord.Interaction,
-        season: app_commands.Range[int, 1, 1000] | None = None,
-        days: app_commands.Range[int, 1, 60] | None = None,
+        season: int | None = None,
+        days: int | None = None,
         replace_running: bool = False,
     ):
+        if season is not None and not 1 <= season <= 1000:
+            await interaction.response.send_message("Season must be between 1 and 1000.", ephemeral=True)
+            return
+        if days is not None and not 1 <= days <= 60:
+            await interaction.response.send_message("Days must be between 1 and 60.", ephemeral=True)
+            return
         await interaction.response.defer(ephemeral=True)
         res = await asyncio.to_thread(starpass.reopen_season, season, days, replace_running)
         if isinstance(res, str):
