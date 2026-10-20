@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import economy
+import starpass
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 QUEST_VOUCHER = 1            # vouchers for finishing ALL quests of the day (paid once)
@@ -263,6 +264,9 @@ def track(user_id, metrics: dict) -> list[str]:
             if cur.rowcount == 1:
                 finished.append(qid)
         if finished:
+            # Star Pass credits, paid in this SAME transaction (quest_done rows are unique, so a
+            # quest can never pay credits twice). Does nothing when no season is running.
+            starpass.award_quest_credits(conn, uid, len(finished))
             n_done = conn.execute(
                 "SELECT COUNT(*) AS n FROM quest_done WHERE user_id = ? AND day = ?", (uid, day)
             ).fetchone()["n"]

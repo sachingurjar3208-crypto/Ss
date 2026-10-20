@@ -19,6 +19,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
 intents.dm_messages = True
+intents.members = True      # Star Pass: needed to see when the Premium role is given (enable "Server Members Intent" in the Developer Portal)
 
 # GuardedTree blocks every slash command during /maintenance; the check below does the same for text commands.
 bot = commands.Bot(command_prefix="", intents=intents, tree_cls=GuardedTree)
@@ -71,6 +72,7 @@ async def load_cogs():
         "economy_cog",
         "draft_cog",
         "quest_cog",
+        "starpass_cog",
         "squad_cog",
         "stadium_cog",
         "gif_cog",

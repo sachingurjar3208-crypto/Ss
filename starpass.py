@@ -1,0 +1,466 @@
+"""Star Pass system (pure logic + database, no Discord code).
+
+How it works
+- An admin starts a season with /starpassmaker (length 10D / 15D / 30D and a number of levels).
+  Only ONE season can run at a time. When its time is up it simply disappears: every
+  function below treats an expired season as "no Star Pass running".
+- Daily quests give STARPASS_QUEST_CREDITS credits each (quest.py calls
+  award_quest_credits() inside the SAME database transaction that marks the quest done,
+  so a quest can never pay credits twice).
+- Credits add up and decide how many levels are open. Level 1 is open for everybody.
+  Level 2-15 cost 300 credits each, Level 16 and up cost 400 credits each.
+- Every level has a FREE reward and a PREMIUM reward. The Premium row can only be
+  collected by members with STARPASS_PREMIUM_ROLE_ID. Getting that role gives a one-time
+  1000 credit bonus per season.
+- Rewards are fixed (see default_reward). An admin can change single levels with
+  /starpass-rewardadd; those changes are saved per season in starpass_reward.
+- Collecting is ONE database transaction: the claim rows, the credits and the rewards are
+  saved together or not at all, and a claim row is unique per (season, user, level, row),
+  so pressing the button many times can never pay twice.
+
+Tables (created automatically, see ensure_tables):
+    starpass_season  one row per season
+    starpass_reward  admin overrides: (season, level, row) -> reward
+    starpass_user    credits + "premium bonus given" flag per user per season
+    starpass_claim   what a user has already collected
+"""
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass
+
+import economy
+
+# ── Settings ─────────────────────────────────────────────────────────────────
+STARPASS_PREMIUM_ROLE_ID = 1561987229294006322
+STARPASS_QUEST_CREDITS = 80          # credits for every finished daily quest
+PREMIUM_BONUS_CREDITS = 1000         # one-time bonus per season for the Premium role
+LEVEL_COST_EARLY = 300               # credits for each of levels 2 .. EARLY_LAST_LEVEL
+LEVEL_COST_LATE = 400                # credits for each level after that
+EARLY_LAST_LEVEL = 15
+LEVELS_PER_PAGE = 6
+MAX_LEVELS = 500
+DURATIONS = {"10D": 10, "15D": 15, "30D": 30}
+CSSTARPASS_COOLDOWN = 2 * 60         # normal users; Premium / Star Pass role: none
+DAY = 86_400
+
+FREE, PREMIUM = "free", "premium"
+ROWS = (FREE, PREMIUM)
+
+# Reward kinds
+PACK_KINDS = ("legendary", "gold", "silver", "bronze")
+KINDS = (*PACK_KINDS, "voucher", "coins", "player")
+KIND_LABEL = {
+    "legendary": "Legendary Pack", "gold": "Gold Pack", "silver": "Silver Pack",
+    "bronze": "Bronze Pack", "voucher": "Voucher", "coins": "Coins", "player": "Player Card",
+}
+
+# ── Default rewards (edit here to change what every new season gives) ────────
+# A cycle of 5 levels is repeated, so any number of levels is covered. (kind, quantity)
+FREE_CYCLE = [("coins", 5_000), ("bronze", 1), ("coins", 10_000), ("voucher", 1), ("silver", 1)]
+PREMIUM_CYCLE = [("coins", 20_000), ("silver", 1), ("voucher", 2), ("silver", 1), ("gold", 1)]
+FREE_LAST = ("gold", 1)              # the very last level of a season
+PREMIUM_LAST = ("legendary", 1)
+
+
+@dataclass(frozen=True)
+class Reward:
+    kind: str                 # one of KINDS
+    qty: int = 1
+    player_key: str | None = None    # only for kind == "player"
+    custom: bool = False             # True = set by an admin
+
+    def label(self, player_name: str | None = None) -> str:
+        if self.kind == "coins":
+            return f"{self.qty:,} Coins"
+        if self.kind == "player":
+            return player_name or (self.player_key or "Player Card")
+        base = KIND_LABEL[self.kind]
+        return base if self.qty == 1 else f"{base} x{self.qty}"
+
+
+def default_reward(level: int, row: str, total_levels: int) -> Reward:
+    if level == total_levels and total_levels > 1:
+        kind, qty = FREE_LAST if row == FREE else PREMIUM_LAST
+        return Reward(kind, qty)
+    cycle = FREE_CYCLE if row == FREE else PREMIUM_CYCLE
+    kind, qty = cycle[(level - 1) % len(cycle)]
+    return Reward(kind, qty)
+
+
+# ── Level maths ──────────────────────────────────────────────────────────────
+
+def level_cost(level: int) -> int:
+    """Credits needed to open `level` once the one before it is open. Level 1 is free."""
+    if level <= 1:
+        return 0
+    return LEVEL_COST_EARLY if level <= EARLY_LAST_LEVEL else LEVEL_COST_LATE
+
+
+def credits_for_level(level: int) -> int:
+    """Total credits a user needs to have to hold `level` open."""
+    return sum(level_cost(n) for n in range(2, level + 1))
+
+
+def level_for_credits(credits: int, total_levels: int) -> int:
+    level = 1
+    while level < total_levels and credits >= credits_for_level(level + 1):
+        level += 1
+    return level
+
+
+def progress(credits: int, total_levels: int) -> dict:
+    """{'level', 'into', 'need', 'maxed'}: progress bar numbers toward the next level."""
+    level = level_for_credits(credits, total_levels)
+    if level >= total_levels:
+        return {"level": level, "into": 0, "need": 0, "maxed": True}
+    base = credits_for_level(level)
+    return {"level": level, "into": max(0, credits - base), "need": level_cost(level + 1), "maxed": False}
+
+
+def page_ranges(total_levels: int) -> list[tuple[int, int]]:
+    """[(first, last), ...] 6 levels a page. A single leftover level joins the last page,
+    so 25 levels = 1-6, 7-12, 13-18, 19-25."""
+    n = max(1, int(total_levels))
+    pages = [(s, min(s + LEVELS_PER_PAGE - 1, n)) for s in range(1, n + 1, LEVELS_PER_PAGE)]
+    if len(pages) > 1 and pages[-1][0] == pages[-1][1]:
+        pages[-2] = (pages[-2][0], pages[-1][1])
+        pages.pop()
+    return pages
+
+
+# ── Database ─────────────────────────────────────────────────────────────────
+
+def _ensure(conn) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS starpass_season ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, levels INTEGER NOT NULL, "
+        "start_ts REAL NOT NULL, end_ts REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, "
+        "created_by INTEGER)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS starpass_reward ("
+        "season_id INTEGER NOT NULL, level INTEGER NOT NULL, row TEXT NOT NULL, "
+        "kind TEXT NOT NULL, qty INTEGER NOT NULL DEFAULT 1, player_key TEXT, "
+        "PRIMARY KEY (season_id, level, row))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS starpass_user ("
+        "season_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+        "credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0), "
+        "bonus_given INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (season_id, user_id))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS starpass_claim ("
+        "season_id INTEGER NOT NULL, user_id INTEGER NOT NULL, level INTEGER NOT NULL, "
+        "row TEXT NOT NULL, ts REAL NOT NULL, PRIMARY KEY (season_id, user_id, level, row))"
+    )
+
+
+def ensure_tables() -> None:
+    conn = economy._conn()
+    try:
+        _ensure(conn)
+    finally:
+        conn.close()
+
+
+def _active(conn):
+    """The running season row, or None (also None when the time is up)."""
+    _ensure(conn)
+    return conn.execute(
+        "SELECT * FROM starpass_season WHERE active = 1 AND end_ts > ? ORDER BY id DESC LIMIT 1",
+        (time.time(),),
+    ).fetchone()
+
+
+def _season_dict(row) -> dict:
+    left = max(0.0, float(row["end_ts"]) - time.time())
+    return {
+        "id": int(row["id"]), "name": row["name"], "levels": int(row["levels"]),
+        "start_ts": float(row["start_ts"]), "end_ts": float(row["end_ts"]),
+        "seconds_left": int(left), "days_left": int(-(-left // DAY)),     # rounds up: 0.2 day = 1
+    }
+
+
+def get_active_season() -> dict | None:
+    with economy._tx() as conn:
+        row = _active(conn)
+        return _season_dict(row) if row else None
+
+
+def create_season(levels: int, duration_key: str, admin_id: int = 0) -> dict | str:
+    """Start a new season. Returns the season dict, or an error message (string)."""
+    if duration_key not in DURATIONS:
+        return "Pick a duration of 10D, 15D or 30D."
+    levels = int(levels)
+    if not 1 <= levels <= MAX_LEVELS:
+        return f"The number of levels must be between 1 and {MAX_LEVELS}."
+    now = time.time()
+    with economy._tx() as conn:
+        running = _active(conn)
+        if running is not None:
+            s = _season_dict(running)
+            return (f"{s['name']} is still running with {s['days_left']} day(s) left. "
+                    f"End it first with /starpassend before starting a new one.")
+        n = conn.execute("SELECT COUNT(*) AS n FROM starpass_season").fetchone()["n"]
+        name = f"Season {int(n) + 1}"
+        cur = conn.execute(
+            "INSERT INTO starpass_season (name, levels, start_ts, end_ts, active, created_by) "
+            "VALUES (?, ?, ?, ?, 1, ?)",
+            (name, levels, now, now + DURATIONS[duration_key] * DAY, int(admin_id)),
+        )
+        return _season_dict(conn.execute("SELECT * FROM starpass_season WHERE id = ?", (cur.lastrowid,)).fetchone())
+
+
+def end_season() -> dict | None:
+    """Stop the running season right now. Returns it, or None if nothing was running."""
+    with economy._tx() as conn:
+        row = _active(conn)
+        if row is None:
+            return None
+        conn.execute("UPDATE starpass_season SET active = 0 WHERE id = ?", (row["id"],))
+        return _season_dict(row)
+
+
+# ── Rewards ──────────────────────────────────────────────────────────────────
+
+def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | None = None) -> str | dict:
+    """Admin: change the reward of one level in the running season.
+    Returns the season dict on success or an error message."""
+    if row not in ROWS or kind not in KINDS:
+        return "Invalid reward."
+    qty = int(qty)
+    if kind == "player":
+        qty = 1
+    if qty < 1 or qty > economy.MAX_PURSE:
+        return "The quantity must be at least 1."
+    if kind == "voucher" and qty > economy.MAX_VOUCHERS:
+        return "That is too many vouchers."
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return "There is no Star Pass running right now. Start one with /starpassmaker first."
+        if not 1 <= int(level) <= int(season["levels"]):
+            return f"This season has levels 1 to {season['levels']}."
+        taken = conn.execute(
+            "SELECT COUNT(*) AS n FROM starpass_claim WHERE season_id = ? AND level = ? AND row = ?",
+            (season["id"], int(level), row),
+        ).fetchone()["n"]
+        if int(taken):
+            return (f"{int(taken)} player(s) already collected the {row} reward of level {int(level)}, "
+                    f"so it can no longer be changed this season.")
+        conn.execute(
+            "INSERT OR REPLACE INTO starpass_reward (season_id, level, row, kind, qty, player_key) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (season["id"], int(level), row, kind, qty, player_key),
+        )
+        return _season_dict(season)
+
+
+def _rewards_map(conn, season) -> dict[tuple[int, str], Reward]:
+    out = {}
+    for r in conn.execute("SELECT * FROM starpass_reward WHERE season_id = ?", (season["id"],)):
+        out[(int(r["level"]), r["row"])] = Reward(r["kind"], int(r["qty"]), r["player_key"], True)
+    return out
+
+
+def _reward_for(custom: dict, season, level: int, row: str) -> Reward:
+    return custom.get((level, row)) or default_reward(level, row, int(season["levels"]))
+
+
+# ── Credits ──────────────────────────────────────────────────────────────────
+
+def _add_credits(conn, season_id: int, uid: int, amount: int) -> None:
+    conn.execute(
+        "INSERT INTO starpass_user (season_id, user_id, credits) VALUES (?, ?, ?) "
+        "ON CONFLICT(season_id, user_id) DO UPDATE SET credits = credits + excluded.credits",
+        (season_id, uid, int(amount)),
+    )
+
+
+def award_quest_credits(conn, user_id: int, finished_quests: int) -> int:
+    """Called by quest.track() INSIDE its transaction. Returns the credits given (0 when no
+    season is running). Never raises into the quest code."""
+    try:
+        n = int(finished_quests)
+        if n <= 0:
+            return 0
+        season = _active(conn)
+        if season is None:
+            return 0
+        amount = n * STARPASS_QUEST_CREDITS
+        _add_credits(conn, int(season["id"]), int(user_id), amount)
+        return amount
+    except Exception as e:                      # a Star Pass problem must never break quests
+        print(f"[starpass] could not add quest credits: {type(e).__name__}: {e}")
+        return 0
+
+
+def grant_premium_bonus(user_id: int) -> int:
+    """Give the one-time Premium bonus for the running season. Returns the credits given
+    (0 if no season, or the bonus was already given this season)."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return 0
+        sid = int(season["id"])
+        conn.execute("INSERT OR IGNORE INTO starpass_user (season_id, user_id) VALUES (?, ?)", (sid, uid))
+        cur = conn.execute(
+            "UPDATE starpass_user SET credits = credits + ?, bonus_given = 1 "
+            "WHERE season_id = ? AND user_id = ? AND bonus_given = 0",
+            (PREMIUM_BONUS_CREDITS, sid, uid),
+        )
+        return PREMIUM_BONUS_CREDITS if cur.rowcount == 1 else 0
+
+
+def admin_add_credits(user_id: int, amount: int) -> int | None:
+    """Admin helper: add credits in the running season. Returns the new total or None."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return None
+        _add_credits(conn, int(season["id"]), uid, int(amount))
+        return int(conn.execute(
+            "SELECT credits FROM starpass_user WHERE season_id = ? AND user_id = ?", (season["id"], uid)
+        ).fetchone()["credits"])
+
+
+# ── What the user sees ───────────────────────────────────────────────────────
+
+def _state(level: int, row: str, unlocked: int, premium: bool, claimed: set) -> str:
+    """claimed / ready / locked / premium_locked"""
+    if (level, row) in claimed:
+        return "claimed"
+    if row == PREMIUM and not premium:
+        return "premium_locked"
+    return "ready" if level <= unlocked else "locked"
+
+
+def get_board(user_id: int, premium: bool) -> dict | None:
+    """Everything csstarpass needs for one user, or None when no season is running."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return None
+        sid, total = int(season["id"]), int(season["levels"])
+        u = conn.execute(
+            "SELECT credits FROM starpass_user WHERE season_id = ? AND user_id = ?", (sid, uid)
+        ).fetchone()
+        credits = int(u["credits"]) if u else 0
+        claimed = {
+            (int(r["level"]), r["row"])
+            for r in conn.execute(
+                "SELECT level, row FROM starpass_claim WHERE season_id = ? AND user_id = ?", (sid, uid)
+            )
+        }
+        custom = _rewards_map(conn, season)
+    unlocked = level_for_credits(credits, total)
+    levels = []
+    for lv in range(1, total + 1):
+        entry = {"level": lv}
+        for row in ROWS:
+            entry[row] = {
+                "reward": _reward_for(custom, season, lv, row),
+                "state": _state(lv, row, unlocked, premium, claimed),
+            }
+        levels.append(entry)
+    ready = sum(1 for e in levels for r in ROWS if e[r]["state"] == "ready")
+    return {
+        "season": _season_dict(season), "credits": credits, "unlocked": unlocked,
+        "progress": progress(credits, total), "levels": levels, "ready": ready, "premium": bool(premium),
+    }
+
+
+# ── Collecting ───────────────────────────────────────────────────────────────
+
+def collect(user_id: int, premium: bool, player_values: dict[str, int] | None = None) -> dict | str:
+    """Collect every unlocked, not yet collected reward in ONE transaction.
+
+    `player_values` = {player_key: coin value} used when the user already owns a card
+    (the duplicate is paid out as coins, like pack duplicates).
+    Returns {"items": [...], "coins": n, "vouchers": n, "packs": {...}, "new": [...],
+    "pending": [...], "dupes": [...], "refund": n, "count": n} or an error message.
+    Safe against button spam: a claim row can only be inserted once.
+    """
+    uid = int(user_id)
+    values = player_values or {}
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return "The Star Pass has ended."
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return "You haven't debuted yet."
+        sid, total = int(season["id"]), int(season["levels"])
+        u = conn.execute(
+            "SELECT credits FROM starpass_user WHERE season_id = ? AND user_id = ?", (sid, uid)
+        ).fetchone()
+        unlocked = level_for_credits(int(u["credits"]) if u else 0, total)
+        custom = _rewards_map(conn, season)
+
+        out = {"items": [], "coins": 0, "vouchers": 0, "packs": {}, "new": [], "pending": [],
+               "dupes": [], "refund": 0, "count": 0}
+        for lv in range(1, unlocked + 1):
+            for row in ROWS:
+                if row == PREMIUM and not premium:
+                    continue
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO starpass_claim (season_id, user_id, level, row, ts) "
+                    "VALUES (?, ?, ?, ?, ?)", (sid, uid, lv, row, time.time()),
+                )
+                if cur.rowcount != 1:
+                    continue                      # already collected
+                rw = _reward_for(custom, season, lv, row)
+                _pay(conn, uid, rw, lv, row, out, values)
+                out["count"] += 1
+                out["items"].append((lv, row, rw))
+        if out["count"] == 0:
+            return "There is nothing to collect right now."
+        return out
+
+
+def _pay(conn, uid: int, rw: Reward, level: int, row: str, out: dict, values: dict) -> None:
+    reason = f"Star Pass level {level} ({row})"
+    if rw.kind == "coins":
+        economy._apply_coins(conn, uid, rw.qty, reason)
+        out["coins"] += rw.qty
+    elif rw.kind == "voucher":
+        economy._voucher_change(conn, uid, rw.qty, reason)
+        out["vouchers"] += rw.qty
+    elif rw.kind in PACK_KINDS:
+        conn.execute(
+            "INSERT INTO packs (user_id, pack_type, qty) VALUES (?, ?, ?) "
+            "ON CONFLICT(user_id, pack_type) DO UPDATE SET qty = qty + excluded.qty",
+            (uid, rw.kind, rw.qty),
+        )
+        out["packs"][rw.kind] = out["packs"].get(rw.kind, 0) + rw.qty
+    elif rw.kind == "player" and rw.player_key:
+        key = rw.player_key
+        if key in out["new"] or key in out["pending"]:
+            status = "dupe"
+        else:
+            status = economy._grant(conn, uid, key, "Star Pass")
+        if status == "added":
+            out["new"].append(key)
+        elif status == "pending":
+            out["pending"].append(key)
+        else:
+            out["dupes"].append(key)
+            refund = int(values.get(key, 0))
+            if refund:
+                economy._apply_coins(conn, uid, refund, f"Duplicate refund (Star Pass level {level})")
+                out["refund"] += refund
+
+
+def player_keys_in_pass() -> list[str]:
+    """Every player card used as a reward in the running season (for duplicate pricing)."""
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return []
+        return [r["player_key"] for r in conn.execute(
+            "SELECT player_key FROM starpass_reward WHERE season_id = ? AND kind = 'player' "
+            "AND player_key IS NOT NULL", (season["id"],))]
