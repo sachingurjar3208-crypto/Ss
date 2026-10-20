@@ -23,6 +23,8 @@ from discord.ext import commands
 import card_db
 import economy
 import emojis
+import pack_gif
+import pack_shop_image
 import quest
 import security
 import squad_logic as sl
@@ -536,7 +538,12 @@ class EconomyCog(commands.Cog, name="Economy"):
                 lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · 1 player ({spec['range'][0]}-{spec['range'][1]} OVR)\n`cspack {key}`")
             embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines), color=discord.Color.gold())
             embed.set_footer(text="Buy with cspack <type>, then open with csopen <type>. Duplicates turn into coins.")
-            await ctx.send(embed=embed)
+            shop_file = await pack_shop_image.pack_shop_file(ctx.author.id)
+            if shop_file:
+                embed.set_image(url=f"attachment://{shop_file.filename}")
+                await ctx.send(embed=embed, file=shop_file)
+            else:
+                await ctx.send(embed=embed)
             return
         key = security.clean_input(pack, 12).lower()
         if key not in sl.PACKS or sl.PACKS[key].get("shop") is False:
@@ -610,7 +617,21 @@ class EconomyCog(commands.Cog, name="Economy"):
             embed = discord.Embed(title=f"{spec['emoji']} {spec['label']} opened!", description="\n".join(lines), color=discord.Color.gold())
         if result["refund"]:
             embed.set_footer(text=f"Duplicates gave you back {result['refund']:,} coins")
-        await ctx.send(embed=embed)
+
+        pulled = rolled[0]
+        role_label = ROLES.get(card_db.effective_role(pulled), "Player")
+        gif_file = await pack_gif.pack_file(
+            key,
+            name=pulled["playername"],
+            ovr=pulled["ovr"],
+            role=role_label,
+            stats=(pulled["bat"], pulled["bowl"], pulled["ovr"], pulled["ovr"], pulled["ovr"], pulled["ovr"]),
+        )
+        if gif_file:
+            embed.set_image(url=f"attachment://{gif_file.filename}")
+            await ctx.send(embed=embed, file=gif_file)
+        else:
+            await ctx.send(embed=embed)
         if result.get("pending"):
             await send_next_pending(ctx, ctx.author.id)
         await quest.track_and_notify(ctx, ctx.author.id, {"packs_opened": 1})
