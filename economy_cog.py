@@ -39,6 +39,19 @@ from squad_cog import _card_line, _in_match, _is_premium, _need_debut
 # user: after any of them, the user must wait ECONOMY_COOLDOWN seconds.
 ECONOMY_COOLDOWN = 5
 
+# Any command that opens a "spend coins" confirm button (cspack, csbuy,
+# cssell, cstrade), plus csopen (opens a pack — same pacing, even though it
+# has no confirm button of its own), uses this pair instead of/alongside
+# ECONOMY_COOLDOWN:
+# the buttons grey out at CONFIRM_TIMEOUT, and the user can't issue the same
+# kind of command again for CONFIRM_COOLDOWN seconds — by which point the old
+# buttons are already dead. Without this, a user could fire the command
+# again during the old 5s window, get a SECOND live confirm button while the
+# first was still active, and press both — paying twice but also farming
+# quest counters (packs_bought/packs_opened) faster than intended.
+CONFIRM_TIMEOUT = 10.0
+CONFIRM_COOLDOWN = 15.0
+
 # The free debut pack can only be opened in this server.
 DEBUT_PACK_GUILD_ID = 1556644438917382150
 _econ_bucket = commands.CooldownMapping.from_cooldown(1, ECONOMY_COOLDOWN, commands.BucketType.user)
@@ -58,12 +71,18 @@ def economy_cooldown():
 # Players with a trade waiting for an answer (each can only have one at a time).
 _pending_trade: set[int] = set()
 
+# Players with a cspack/csbuy/cssell confirm button waiting for a press (each
+# can only have ONE at a time — this is what actually blocks the farm, the
+# cooldown above is just pacing on top of it).
+_pending_confirm: set[int] = set()
+
 
 # ── A reusable "are you sure?" button pair ───────────────────────────────────
 
 class ConfirmView(OwnedView):
-    def __init__(self, user_id: int, action: Callable[[], Awaitable[str]], timeout: float = 45.0):
+    def __init__(self, user_id: int, action: Callable[[], Awaitable[str]], timeout: float = CONFIRM_TIMEOUT):
         super().__init__(user_id, timeout=timeout)
+        self.user_id = user_id
         self.action = action
         self.used = False
 
@@ -74,6 +93,7 @@ class ConfirmView(OwnedView):
             return
         self.used = True
         self.stop()
+        _pending_confirm.discard(self.user_id)
         result = await self.action()
         await interaction.response.edit_message(content=result, embed=None, view=None)
 
@@ -81,14 +101,19 @@ class ConfirmView(OwnedView):
     async def cancel(self, interaction: discord.Interaction, button: ui.Button):
         self.used = True
         self.stop()
+        _pending_confirm.discard(self.user_id)
         await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+
+    async def on_timeout(self) -> None:
+        _pending_confirm.discard(self.user_id)
+        await super().on_timeout()
 
 
 # ── csbuy / cssell: card image + two emoji buttons ───────────────────────────
 # The message shows the card image with a green check and a red cross under it.
 # After BUYSELL_TIMEOUT seconds both buttons switch off (greyed out), so
 # pressing them later does nothing.
-BUYSELL_TIMEOUT = 20.0
+BUYSELL_TIMEOUT = CONFIRM_TIMEOUT
 
 
 def _plain_coins(n: int) -> str:
@@ -104,30 +129,44 @@ def _buysell_embed(card, text: str) -> discord.Embed:
 
 
 async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable[[], Awaitable[str]]):
-    """Send the card image + text with the check / cross buttons."""
-    import time as _t
-    view = BuySellView(ctx.author.id, card, action)
-    t0 = _t.perf_counter()
-    embed = _buysell_embed(card, text)
-    path = card["image_path"]
-    url = card_cache.cached_url(path)
-    file = None if url else await card_cache.card_file(path)   # cached link = no upload
-    if not url and file is None:
-        embed = discord.Embed(description=text, color=discord.Color.gold())
-    t1 = _t.perf_counter()
-    if file:
-        view.message = await ctx.send(embed=embed, file=file, view=view)
-        card_cache.remember(path, view.message)
-    else:
-        view.message = await ctx.send(embed=embed, view=view)
-    t2 = _t.perf_counter()
-    how = "cdn-link" if url else ("upload" if file else "no-image")
-    print(f"[timing buy/sell] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  via={how}")
+    """Send the card image + text with the check / cross buttons.
+    Refuses (politely) if this user already has a confirm button waiting —
+    see _pending_confirm above."""
+    if ctx.author.id in _pending_confirm:
+        await ctx.send("❌ You already have a confirmation waiting — finish that first.")
+        return
+    _pending_confirm.add(ctx.author.id)
+    try:
+        import time as _t
+        view = BuySellView(ctx.author.id, card, action)
+        t0 = _t.perf_counter()
+        embed = _buysell_embed(card, text)
+        path = card["image_path"]
+        url = card_cache.cached_url(path)
+        file = None if url else await card_cache.card_file(path)   # cached link = no upload
+        if not url and file is None:
+            embed = discord.Embed(description=text, color=discord.Color.gold())
+        t1 = _t.perf_counter()
+        if file:
+            view.message = await ctx.send(embed=embed, file=file, view=view)
+            card_cache.remember(path, view.message)
+        else:
+            view.message = await ctx.send(embed=embed, view=view)
+        t2 = _t.perf_counter()
+        how = "cdn-link" if url else ("upload" if file else "no-image")
+        print(f"[timing buy/sell] image={t1 - t0:.2f}s  discord_send={t2 - t1:.2f}s  via={how}")
+    except Exception:
+        # The view never made it to Discord (or never got far enough to be
+        # tracked), so nothing will ever release the flag for us — release it
+        # here instead of leaving this user permanently "pending".
+        _pending_confirm.discard(ctx.author.id)
+        raise
 
 
 class BuySellView(OwnedView):
     def __init__(self, user_id: int, card, action: Callable[[], Awaitable[str]]):
         super().__init__(user_id, timeout=BUYSELL_TIMEOUT)
+        self.user_id = user_id
         self.card = card
         self.action = action
         self.used = False
@@ -139,6 +178,7 @@ class BuySellView(OwnedView):
             return
         self.used = True
         self.stop()
+        _pending_confirm.discard(self.user_id)
         result = await self.action()
         await interaction.response.edit_message(embed=_buysell_embed(self.card, result), view=None)
 
@@ -149,7 +189,12 @@ class BuySellView(OwnedView):
             return
         self.used = True
         self.stop()
+        _pending_confirm.discard(self.user_id)
         await interaction.response.edit_message(embed=_buysell_embed(self.card, "Cancelled."), view=None)
+
+    async def on_timeout(self) -> None:
+        _pending_confirm.discard(self.user_id)
+        await super().on_timeout()
 
 
 # ── Squad full (25 players): sell the new card or replace one of your players ─
@@ -526,6 +571,7 @@ class EconomyCog(commands.Cog, name="Economy"):
     # -- packs -----------------------------------------------------------
     @commands.command(name="cspack")
     @economy_cooldown()
+    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     async def cspack(self, ctx: commands.Context, pack: Optional[str] = None):
         """See packs, or buy one: `cspack bronze`."""
         if not await _need_debut(ctx):
@@ -552,6 +598,10 @@ class EconomyCog(commands.Cog, name="Economy"):
         spec = sl.PACKS[key]
         uid = ctx.author.id
 
+        if uid in _pending_confirm:
+            await ctx.send("❌ You already have a confirmation waiting — finish that first.")
+            return
+
         async def do_buy() -> str:
             err = economy.buy_pack(uid, key, spec["price"])
             if err:
@@ -562,13 +612,19 @@ class EconomyCog(commands.Cog, name="Economy"):
                 f"Open it with `csopen {key}`."
             )
 
-        view = ConfirmView(uid, do_buy)
-        view.message = await ctx.send(
-            f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?", view=view
-        )
+        _pending_confirm.add(uid)
+        try:
+            view = ConfirmView(uid, do_buy)
+            view.message = await ctx.send(
+                f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?", view=view
+            )
+        except Exception:
+            _pending_confirm.discard(uid)
+            raise
 
     @commands.command(name="csopen")
     @economy_cooldown()
+    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     async def csopen(self, ctx: commands.Context, pack: Optional[str] = None):
         """Open one of your packs: `csopen bronze`."""
         if not await _need_debut(ctx):
@@ -639,6 +695,7 @@ class EconomyCog(commands.Cog, name="Economy"):
     # -- buy / sell ------------------------------------------------------
     @commands.command(name="csbuy")
     @economy_cooldown()
+    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     async def csbuy(self, ctx: commands.Context, *, player: str):
         """Buy a player: `csbuy Virat Kohli`."""
         if not await _need_debut(ctx):
@@ -672,6 +729,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
     @commands.command(name="cssell")
     @economy_cooldown()
+    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     async def cssell(self, ctx: commands.Context, *, player: str):
         """Sell one of your players for coins."""
         if not await _need_debut(ctx):
@@ -719,7 +777,7 @@ class EconomyCog(commands.Cog, name="Economy"):
     # -- trade -----------------------------------------------------------
     @commands.command(name="cstrade")
     @economy_cooldown()
-    @commands.cooldown(1, 15, commands.BucketType.user)
+    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     async def cstrade(self, ctx: commands.Context, member: discord.Member, *, players: str):
         """Trade players of the SAME OVR (5,000 coins fee each): `cstrade @user my player | their player`."""
         if not await _need_debut(ctx):

@@ -176,9 +176,12 @@ async def _render_screen(uid: int, pool: str, page: int) -> tuple[discord.Embed,
     return _screen_embed(pool), discord.File(buf, filename=draft_image.FILENAME), page
 
 
+DRAFT_VIEW_TIMEOUT = 60.0
+
+
 class DraftView(OwnedView):
     def __init__(self, bot: commands.Bot, user_id: int):
-        super().__init__(user_id, timeout=180.0)
+        super().__init__(user_id, timeout=DRAFT_VIEW_TIMEOUT)
         self.bot = bot
         self.uid = user_id
         self.pool = "A"
