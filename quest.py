@@ -1,7 +1,7 @@
 """Daily Quest system.
 
 Every day (resets at midnight IST) there are 5 quests, the same for everybody:
-3 easy + 1 medium + 1 hard. Finishing ALL of the day's quests gives QUEST_VOUCHER voucher(s)
+3 easy + 2 medium. Finishing ALL of the day's quests gives QUEST_VOUCHER voucher(s)
 (one voucher for the whole day, NOT one per quest).
 The 5 quests change every day and are never the same set as yesterday.
 
@@ -31,7 +31,7 @@ import starpass
 QUEST_VOUCHER = 1            # vouchers for finishing ALL quests of the day (paid once)
 QUEST_MIN_OVERS = 2          # a match shorter than this does not count for quests
 QUEST_PER_OPP_CAP = 3        # matches per day vs the SAME opponent that count
-SLOTS = (("easy", 3), ("medium", 1), ("hard", 1))     # 5 quests a day
+SLOTS = (("easy", 3), ("medium", 2))     # 5 quests a day (no hard quests)
 KEEP_DAYS = 10               # old quest rows are deleted after this many days
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -81,7 +81,6 @@ QUESTS: list[Quest] = [
     Quest("m_runs80",  "medium", "Score 80 runs",                 "runs",           80),
     Quest("m_wkt4",    "medium", "Take 4 wickets",                "wickets",        4),
     Quest("m_bat30",   "medium", "Score 30+ with one batter",     "best_bat",       30),
-    Quest("m_maiden",  "medium", "Bowl a maiden over",            "maidens",        1),
     Quest("m_bowl3",   "medium", "Use 3 different bowlers",       "bowlers_used",   3),
     Quest("m_draft3",  "medium", "Do 3 drafts",                   "drafts",         3),
     Quest("m_10ov",    "medium", "Play a 10+ over match",         "matches_10ov",   1),
@@ -92,20 +91,6 @@ QUESTS: list[Quest] = [
     Quest("m_four8",   "medium", "Hit 8 fours",                   "fours",          8),
     Quest("m_bat25",   "medium", "Score 25+ with one batter",     "best_bat",       25),
     Quest("m_draft2",  "medium", "Do 2 drafts",                   "drafts",         2),
-    # -- hard (a bit harder, still friendly) ---------------------------------
-    Quest("h_win2",    "hard", "Win 2 matches",                   "matches_won",    2),
-    Quest("h_chase",   "hard", "Win a match while chasing",       "chase_wins",     1),
-    Quest("h_defend",  "hard", "Win a match batting first",       "defend_wins",    1),
-    Quest("h_play4",   "hard", "Play 4 matches",                  "matches_played", 4),
-    Quest("h_runs150", "hard", "Score 150 runs",                  "runs",           150),
-    Quest("h_wkt8",    "hard", "Take 8 wickets",                  "wickets",        8),
-    Quest("h_six10",   "hard", "Hit 10 sixes",                    "sixes",          10),
-    Quest("h_bat40",   "hard", "Score 40+ with one batter",       "best_bat",       40),
-    Quest("h_bat35",   "hard", "Score 35+ with one batter",       "best_bat",       35),
-    Quest("h_runs120", "hard", "Score 120 runs",                  "runs",           120),
-    Quest("h_wkt6",    "hard", "Take 6 wickets",                  "wickets",        6),
-    Quest("h_six8",    "hard", "Hit 8 sixes",                     "sixes",          8),
-    Quest("h_play3",   "hard", "Play 3 matches",                  "matches_played", 3),
 ]
 BY_ID: dict[str, Quest] = {q.id: q for q in QUESTS}
 TIER_ORDER = {"easy": 0, "medium": 1, "hard": 2}
@@ -130,7 +115,7 @@ def seconds_to_reset() -> int:
 # ── Picking the day's quests ─────────────────────────────────────────────────
 
 def _pick(day: str, exclude: set[str]) -> list[str]:
-    """3 easy + 1 medium + 1 hard for `day` (same result every time for the same
+    """3 easy + 2 medium for `day` (same result every time for the same
     day and exclude set). Never two quests on the same metric."""
     rng = random.Random(f"csquest:{day}")
     chosen: list[str] = []
