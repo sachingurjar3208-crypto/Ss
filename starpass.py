@@ -493,17 +493,22 @@ def collect(user_id: int, premium: bool, player_values: dict[str, int] | None = 
             for row in ROWS:
                 if row == PREMIUM and not premium:
                     continue
+                rw = _reward_for(custom, season, lv, row)
+                if rw.kind == "player" and rw.player_key and economy._event_disabled(rw.player_key):
+                    out["blocked"] = out.get("blocked", 0) + 1
+                    continue                      # its event is disabled: not collected (and not used up)
                 cur = conn.execute(
                     "INSERT OR IGNORE INTO starpass_claim (season_id, user_id, level, row, ts) "
                     "VALUES (?, ?, ?, ?, ?)", (sid, uid, lv, row, time.time()),
                 )
                 if cur.rowcount != 1:
                     continue                      # already collected
-                rw = _reward_for(custom, season, lv, row)
                 _pay(conn, uid, rw, lv, row, out, values)
                 out["count"] += 1
                 out["items"].append((lv, row, rw))
         if out["count"] == 0:
+            if out.get("blocked"):
+                return "The rewards waiting for you are cards of a disabled event, so they can't be collected right now."
             return "There is nothing to collect right now."
         return out
 

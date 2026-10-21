@@ -225,6 +225,10 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
         if game.innings == 1:
             await _start_second_innings(channel, game)
         else:
+            for _u in (getattr(game, "batting_user_id", None), getattr(game, "bowling_user_id", None)):
+                if _u is not None:
+                    print(f"[quest] uid={_u} match finished through the 'Tap to continue' recovery path - "
+                          f"quest tracking only counted if the lines for this match appeared earlier")
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
             await _send_match_summary(channel, game)
@@ -904,6 +908,9 @@ class _TimeoutMixin:
             except Exception as e:
                 print(f"[economy] penalty deduction failed: {e}")
 
+        for _u in (getattr(game, "batting_user_id", None), getattr(game, "bowling_user_id", None)):
+            if _u is not None:
+                print(f"[quest] uid={_u} NOT COUNTED: match abandoned (a player went AFK), no quest tracking for abandoned matches")
         try:
             await ch.send(
                 "**Match abandoned — a player went AFK.**\n"

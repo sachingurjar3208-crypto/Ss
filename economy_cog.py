@@ -413,7 +413,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send("💎 The weekly reward is for **Premium members** only.")
             return
         lo, hi = economy.REWARD_CARD_OVR[kind]
-        pool = [c for c in card_db.list_all_cards() if lo <= int(c["ovr"]) <= hi]
+        pool = [c for c in card_db.list_obtainable_cards() if lo <= int(c["ovr"]) <= hi]
         res = economy.claim_reward(
             ctx.author.id, kind,
             [c["playername_key"] for c in pool],
@@ -502,7 +502,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         cooldown = economy.CLAIM_COOLDOWN_PREMIUM if premium else economy.CLAIM_COOLDOWN
         by_ovr: dict[int, list[str]] = {}
         values: dict[str, int] = {}
-        for c in card_db.list_all_cards():
+        for c in card_db.list_obtainable_cards():
             by_ovr.setdefault(int(c["ovr"]), []).append(c["playername_key"])
             values[c["playername_key"]] = sl.sell_value(c)
         res = await asyncio.to_thread(economy.claim_card, ctx.author.id, cooldown, by_ovr, values)
@@ -706,6 +706,9 @@ class EconomyCog(commands.Cog, name="Economy"):
         card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
         if card is None:
             await ctx.send(str(err))
+            return
+        if not card_db.is_obtainable(card):
+            await ctx.send("❌ This player isn't available in the shop.")
             return
         if economy.owns(ctx.author.id, card["playername_key"]):
             await ctx.send("You already own this player.")

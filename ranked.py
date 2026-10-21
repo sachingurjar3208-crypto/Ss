@@ -207,7 +207,7 @@ def _user_exists(conn, uid: int) -> bool:
 # ── Rewards ──────────────────────────────────────────────────────────────────
 
 def _cards_index():
-    rows = {c["playername_key"]: c for c in card_db.list_all_cards()}
+    rows = {c["playername_key"]: c for c in card_db.list_obtainable_cards()}
     by_ovr: dict[int, list[str]] = {}
     for k, c in rows.items():
         by_ovr.setdefault(int(c["ovr"]), []).append(k)
@@ -633,6 +633,8 @@ def _player_dict(c) -> dict:
         "bowling_type": card_db.effective_bowling_type(c),
         "role": ENGINE_ROLE[card_db.effective_role(c)],
         "card": sl.card_emoji(c),
+        "flag": c["country_emoji"],
+        "remoji": sl.role_emoji(c),
     }
 
 
@@ -640,7 +642,7 @@ def build_bot_team(tier: str, bot_name: str, overs: int = RANKED_OVERS) -> dict 
     """The bot's playing XI (a legal XI of real cards, rated by tier). None if the game has too few cards."""
     prof = BOT_PROFILES[tier]
     lo, hi = prof["ovr"]
-    cards = list(card_db.list_all_cards())
+    cards = list(card_db.list_obtainable_cards())
     if len(cards) < economy.XI_SIZE:
         return None
     xi = None

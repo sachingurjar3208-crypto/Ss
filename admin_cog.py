@@ -149,6 +149,13 @@ class AdminCog(commands.Cog):
         if found is None:
             await ctx.send(f"❌ {err}")
             return
+        try:
+            import card_db
+            if card_db.is_event_disabled(found):
+                await ctx.send("❌ That card's event is disabled, so nobody can get it. Use `/eventenable` first.")
+                return
+        except Exception:
+            pass
         if economy.give_card(member.id, found["playername_key"]):
             await ctx.send(f"✅ Gave **{esc(found['playername'])}** to {esc(member.display_name)}.")
         else:

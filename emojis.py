@@ -35,6 +35,11 @@ BATTER       = "<:Batter:1558757456337965186>"
 PACER        = "<:Pacer:1558757453846548560>"
 MEDIUMPACER  = "<:Mediumpacer:1558757449878605884>"
 
+# Card marker shown first in every XI row for cards that are NOT part of an event.
+# (Event cards show their own event emoji instead, set with /eventmaker.)
+# If this emoji is animated, write it as <a:Name:ID> instead.
+DEFAULT_CARD_EMOJI = "<:Card:1562083735879295057>"
+
 # Milestone / wicket emojis (animated: <a:...>)
 HALFCENTURY  = "<a:Halfcentury:1558777604042137700>"
 CENTURY      = "<a:Century:1558781921389977650>"

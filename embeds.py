@@ -114,13 +114,11 @@ def _table(headers: list[str], widths: list[int], rows: list[list[str]]) -> str:
 
 
 def build_playing_xi_embed(team: dict) -> discord.Embed:
+    """Playing XI used in every match: grouped by role, one monospace row per player with the
+    card / event emoji, role emoji and flag (see xi_display.py)."""
+    import xi_display as xd
     chem = team.get("chem", 80)
     ovr  = team.get("ovr", 80)
-    embed = discord.Embed(
-        title=team.get("name", "Team"),
-        description=f"OVR **{ovr}**  ·  CHEM **{chem}**",
-        color=discord.Color.dark_blue(),
-    )
 
     _ROLE_TO_BUCKET = {
         "Batsman":       "Batter",
@@ -137,6 +135,8 @@ def build_playing_xi_embed(team: dict) -> discord.Embed:
         ("Bowler",      "Bowlers"),
     ]
 
+    captain = team.get("captain")
+    lines = [f"OVR **{ovr}**  ·  CHEM **{chem}**"]
     for role_key, role_label in role_order:
         players = [
             p for p in team.get("players", [])
@@ -144,19 +144,17 @@ def build_playing_xi_embed(team: dict) -> discord.Embed:
         ]
         if not players:
             continue
-        bonus = _role_bonus(chem, role_key)
-        label = f"{role_label}  (+{bonus})"
-        rows = []
+        lines.append("")
+        lines.append(f"**{role_label}**  (+{_role_bonus(chem, role_key)})")
         for p in players:
-            pn       = _pname(p)
-            bowl_val = str(p.get("bowl", "-")) if p.get("bowling_type") else "  -"
-            name_pad = pn[:16].ljust(16)
-            ovr_val  = p.get("ovr", "?")
-            bat_val  = p.get("bat", "?")
-            rows.append([name_pad, str(ovr_val), str(bat_val), bowl_val])
-        embed.add_field(name=label, value=_table(["PLAYER", "OVR", "BAT", "BOWL"], [16, 3, 3, 4], rows), inline=False)
+            lines.append(xd.player_row(p, captain=bool(captain) and p.get("name") == captain))
 
-    embed.set_footer(text=f"{team.get('name', 'Team')} · Playing XI")
+    embed = discord.Embed(
+        title=team.get("name", "Team"),
+        description="\n".join(lines)[:4000],
+        color=discord.Color.dark_blue(),
+    )
+    embed.set_footer(text=f"{team.get('name', 'Team')} · Playing XI · {xd.COLUMNS_NOTE}")
     return embed
 
 

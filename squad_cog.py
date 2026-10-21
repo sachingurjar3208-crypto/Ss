@@ -93,30 +93,29 @@ def _card_line(card, extra: str = "", emojis: bool = True) -> str:
 
 
 def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
+    """csxi: the XI in batting order, one monospace row per player (see xi_display.py)."""
+    import xi_display as xd
     xi = economy.get_xi(member.id)
-    lines = []
     cap_key = user_row["captain_key"]
+    cards = sl.xi_cards(member.id)
+    lines = [f"Team OVR **{sl.average_ovr(cards)}**  ·  CHEM **{sl.chem_of(cards)}**", ""]
     for slot in range(1, economy.XI_SIZE + 1):
         key = xi.get(slot)
         card = card_db.get_card(key) if key else None
         if card is None:
-            lines.append(f"`{slot:>2}.` — empty —")
+            lines.append(xd.empty_row(slot))
             continue
-        badge = " <:Captain:1558139695177932951>" if card["playername_key"] == cap_key else ""
-        lines.append(
-            f"`{slot:>2}.` **{esc(card['playername'])}** · "
-            f"{card['ovr']} · {ROLES.get(card_db.effective_role(card), '?')}{badge}"
-        )
-    cards = sl.xi_cards(member.id)
+        lines.append(xd.player_row(
+            xd.entry_from_card(card), slot=slot, captain=card["playername_key"] == cap_key,
+        ))
     embed = discord.Embed(
-        title=f"🏏 {esc(user_row['team_name'])} — Playing XI",
+        title=f"{esc(user_row['team_name'])} — Playing XI",
         description="\n".join(lines),
         color=discord.Color.blue(),
     )
     problem = sl.xi_problem(member.id)
     embed.set_footer(text=(
-        f"Team OVR {sl.average_ovr(cards)}"
-        + (f" • ⚠️ {problem}" if problem else " • ✅ Ready to play")
+        (f"⚠️ {problem}" if problem else "✅ Ready to play") + f" • {xd.COLUMNS_NOTE}"
     ))
     return embed
 
@@ -927,6 +926,9 @@ class SquadCog(commands.Cog, name="Squad"):
         card, err = sl.resolve_any(security.clean_input(player))
         if card is None:
             await ctx.send(f"❌ {err}")
+            return
+        if card_db.is_event_disabled(card):
+            await ctx.send("❌ That card's event is disabled, so nobody can get it. Use `/eventenable` first.")
             return
         if economy.give_card(member.id, card["playername_key"]):
             await ctx.send(f"✅ Gave **{esc(card['playername'])}** to {esc(member.display_name)}.")

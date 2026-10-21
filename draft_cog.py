@@ -81,11 +81,13 @@ def get_pools(force: bool = False) -> dict[str, list]:
         row = by_key.get(key)
         if row is None:
             continue                                  # card was deleted from the game
+        if card_db.is_event_disabled(row):
+            continue                                  # its event is switched off: nobody gets it
         pools[pool].append(row)
         weights[key] = weight
     fixed = set(weights)
     pools["C"] = [
-        x for x in card_db.list_all_cards()
+        x for x in card_db.list_obtainable_cards()
         if cfg.POOL_C_OVR_MIN <= int(x["ovr"]) <= cfg.POOL_C_OVR_MAX and x["playername_key"] not in fixed
     ]
     pools["A"].sort(key=lambda x: -int(x["ovr"]))

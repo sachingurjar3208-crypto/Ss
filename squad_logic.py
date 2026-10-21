@@ -48,7 +48,8 @@ TIER_EMOJI = {"elite": "", "rare": "", "common": ""}   # medal emojis removed ev
 
 
 def card_emoji(card) -> str:
-    return TIER_EMOJI[tier_of(card["ovr"])]
+    """Emoji shown first in XI rows: the card's event emoji (/eventmaker), or the default card emoji."""
+    return card_db.card_emoji(card)
 
 
 # Custom role emojis (uploaded in the Discord developer portal, so the bot can
@@ -163,7 +164,7 @@ def roll_pack(pack_type: str) -> list:
     """Pick the single card for one pack. Returns a list with 1 card row
     (empty list only if the game has no cards at all)."""
     spec = PACKS[pack_type]
-    cards = list(card_db.list_all_cards())
+    cards = list(card_db.list_obtainable_cards())   # not obtainable=False, not a disabled event
     if not cards:
         return []
     lo, hi = spec["range"]
@@ -264,7 +265,7 @@ def pick_starter_squad() -> list | None:
     """Exactly 11 modest cards (no top stars) that already form a legal XI:
     1 keeper, 4 batters, 2 all-rounders, 4 bowlers. Falls back to any cards
     if the pool is small. None if there aren't even 11 cards in the game yet."""
-    cards = card_db.list_all_cards()
+    cards = card_db.list_obtainable_cards()
     if len(cards) < economy.XI_SIZE:
         return None
     modest = [c for c in cards if c["ovr"] <= 82] or list(cards)
@@ -373,6 +374,14 @@ def average_ovr(cards: list) -> int:
     return round(sum(c["ovr"] for c in cards) / len(cards)) if cards else 0
 
 
+def chem_of(cards) -> int:
+    """Team chemistry: 70 + 3 per player of the most common country (max 99)."""
+    countries: dict[str, int] = {}
+    for c in cards:
+        countries[c["country"]] = countries.get(c["country"], 0) + 1
+    return min(99, 70 + 3 * max(countries.values(), default=0))
+
+
 def build_match_team(user_id) -> dict:
     """The team dict the match engine expects, built from the user's XI.
     Player 'name' is the card's full name, which is how card narratives
@@ -390,11 +399,10 @@ def build_match_team(user_id) -> dict:
             "bowling_type": card_db.effective_bowling_type(c),
             "role": ENGINE_ROLE[card_db.effective_role(c)],
             "card": card_emoji(c),
+            "flag": c["country_emoji"],
+            "remoji": role_emoji(c),
         })
-    countries: dict[str, int] = {}
-    for c in cards:
-        countries[c["country"]] = countries.get(c["country"], 0) + 1
-    chem = min(99, 70 + 3 * max(countries.values(), default=0))
+    chem = chem_of(cards)
     captain = None
     if user is not None and user["captain_key"]:
         cap = card_db.get_card(user["captain_key"])
@@ -434,6 +442,8 @@ def build_impact_subs_players(user_id) -> list[dict]:
             "bowling_type": card_db.effective_bowling_type(c),
             "role": ENGINE_ROLE[card_db.effective_role(c)],
             "card": card_emoji(c),
+            "flag": c["country_emoji"],
+            "remoji": role_emoji(c),
         }
         for c in cards
     ]

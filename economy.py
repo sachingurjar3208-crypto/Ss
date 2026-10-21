@@ -380,8 +380,38 @@ def _holds(conn: sqlite3.Connection, uid: int, key: str) -> bool:
     )
 
 
+def _event_disabled(key: str) -> bool:
+    """True if this card belongs to an event that was switched off (/eventdisable):
+    nobody may be given it. Never raises (a card-database hiccup must not break the economy)."""
+    try:
+        import card_db
+        return bool(card_db.key_event_disabled(key))
+    except Exception as e:
+        print(f"[events] disabled-event check failed: {type(e).__name__}: {e}")
+        return False
+
+
+def _not_for_sale(key: str) -> str | None:
+    """Reason a card can't be BOUGHT in the shop (event disabled / obtainable = False), else None."""
+    try:
+        import card_db
+        row = card_db.get_card(key)
+        if row is None:
+            return None
+        if card_db.is_event_disabled(row):
+            return "This player belongs to a disabled event and can't be given to anyone right now."
+        if not card_db.is_obtainable(row):
+            return "This player can't be bought. It isn't available in the shop."
+    except Exception as e:
+        print(f"[events] shop check failed: {type(e).__name__}: {e}")
+    return None
+
+
 def _grant(conn: sqlite3.Connection, uid: int, key: str, source: str) -> str:
-    """Give one card. Returns "added", "pending" (squad full) or "dupe"."""
+    """Give one card. Returns "added", "pending" (squad full), "dupe", or "blocked"
+    (the card belongs to a disabled event, so nobody gets it)."""
+    if _event_disabled(key):
+        return "blocked"
     if _holds(conn, uid, key):
         return "dupe"
     now = time.time()
@@ -789,6 +819,9 @@ def set_captain(user_id, player_key: str) -> str | None:
 def buy_card(user_id, player_key: str, price: int) -> str | None:
     """Buy one card. Returns None on success or an error message."""
     uid = _uid(user_id)
+    blocked = _not_for_sale(player_key)
+    if blocked:
+        return blocked
     with _tx() as conn:
         row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
         if row is None:
@@ -1218,6 +1251,8 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
     a, b = _uid(a_id), _uid(b_id)
     if a == b:
         return "You can't trade with yourself."
+    if _event_disabled(a_key) or _event_disabled(b_key):
+        return "A card of a disabled event can't be traded right now."
     with _tx() as conn:
         def has(u, k):
             return conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (u, k)).fetchone() is not None
@@ -1275,6 +1310,8 @@ def banned_ids() -> set[int]:
 
 def give_card(user_id, player_key: str) -> bool:
     uid = _uid(user_id)
+    if _event_disabled(player_key):
+        return False   # the card's event is disabled: nobody gets it (the cogs explain this to the admin)
     with _tx() as conn:
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return False

@@ -36,6 +36,20 @@ KEEP_DAYS = 10               # old quest rows are deleted after this many days
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
+QUEST_LOG = True             # print one "[quest] uid=..." line for every quest decision (grep the user id)
+
+
+def _log(uid, msg: str) -> None:
+    """Debug line for the terminal / log file:  [quest] uid=<id> <what happened>.
+    Never raises. Set QUEST_LOG = False to silence it."""
+    if QUEST_LOG:
+        try:
+            if int(uid) <= 0:
+                return                      # the ranked bot (negative id) - nothing to log
+            print(f"[quest] uid={uid} {msg}")
+        except Exception:
+            pass
+
 
 @dataclass(frozen=True)
 class Quest:
@@ -216,6 +230,7 @@ def track(user_id, metrics: dict) -> list[str]:
     with economy._tx() as conn:
         _ensure(conn)
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            _log(uid, f"NOT COUNTED: user has no row in users table (not debuted) metrics={metrics}")
             return []
         ids = _day_ids(conn, day)
         for m, v in metrics.items():
@@ -248,6 +263,7 @@ def track(user_id, metrics: dict) -> list[str]:
             )
             if cur.rowcount == 1:
                 finished.append(qid)
+        _log(uid, f"day={day} added {metrics} | today's quests={list(ids)} | finished now={finished}")
         if finished:
             # Star Pass credits, paid in this SAME transaction (quest_done rows are unique, so a
             # quest can never pay credits twice). Does nothing when no season is running.
@@ -260,6 +276,9 @@ def track(user_id, metrics: dict) -> list[str]:
                 # per quest, so this block runs exactly once per user per day)
                 economy._voucher_change(conn, uid, QUEST_VOUCHER, "Quest: all daily quests complete")
                 _ALL_DONE.add((uid, day))
+                _log(uid, f"ALL {len(ids)} quests done -> {QUEST_VOUCHER} voucher paid")
+            else:
+                _log(uid, f"{n_done}/{len(ids)} quests done today (voucher needs all {len(ids)})")
         return finished
 
 
@@ -313,6 +332,10 @@ def reset_user_today(user_id) -> int:
 # ── Match hooks (called from views.py / career_stats.py: real matches only) ──
 
 def _is_practice(game) -> bool:
+    """Practice matches never count. A RANKED match always counts, even when the opponent is the
+    bot (nobody was found in the queue), so ranked players can always finish their quests."""
+    if getattr(game, "ranked", False):
+        return False
     return bool(getattr(game, "is_bot_match", False)) or getattr(game, "cpu_difficulty", None) is not None
 
 
@@ -346,6 +369,16 @@ def _gate(game, a, b) -> dict:
                     "SELECT n FROM quest_opp WHERE user_id = ? AND day = ? AND opp_id = ?", (me, day, opp)
                 ).fetchone()["n"]
                 gate[me] = int(n) <= QUEST_PER_OPP_CAP
+                if not gate[me]:
+                    _log(me, f"NOT COUNTED: opponent cap - match #{int(n)} today vs opp {opp} (cap {QUEST_PER_OPP_CAP})")
+    for u in gate:
+        if gate[u]:
+            _log(u, f"match counts for quests (overs={overs})")
+    if a == b:
+        _log(a, "NOT COUNTED: both sides are the same user")
+    elif overs < QUEST_MIN_OVERS:
+        _log(a, f"NOT COUNTED: match has {overs} over(s), quests need {QUEST_MIN_OVERS}+ (opp {b})")
+        _log(b, f"NOT COUNTED: match has {overs} over(s), quests need {QUEST_MIN_OVERS}+ (opp {a})")
     game._quest_gate = gate
     return gate
 
@@ -358,10 +391,17 @@ def _record(uid: int, metrics: dict) -> None:
 def on_innings(game, batting_uid, bowling_uid) -> None:
     """One innings just ended: credit runs / sixes / fours / wickets to the right user."""
     if batting_uid is None or bowling_uid is None or _is_practice(game):
+        if batting_uid is not None and not getattr(game, "_quest_skip_logged", False):
+            game._quest_skip_logged = True
+            for u in (batting_uid, bowling_uid):
+                if u is not None:
+                    _log(u, f"NOT COUNTED: practice / bot match (is_bot_match={getattr(game, 'is_bot_match', None)}, "
+                            f"cpu_difficulty={getattr(game, 'cpu_difficulty', None)}) or a player id is missing")
         return
     gate = _gate(game, batting_uid, bowling_uid)
     bat_uid, bowl_uid = int(batting_uid), int(bowling_uid)
-
+    _log(bat_uid, f"innings {getattr(game, 'innings', '?')} ended: batting side, counts={bool(gate.get(bat_uid))}")
+    _log(bowl_uid, f"innings {getattr(game, 'innings', '?')} ended: bowling side, counts={bool(gate.get(bowl_uid))}")
     if gate.get(bat_uid):
         runs = fours = sixes = best = 0
         for s in (getattr(game, "batsman_stats", None) or {}).values():
@@ -388,6 +428,8 @@ def on_match_end(game, inn1_uid, inn2_uid, t1: int, t2: int) -> None:
     if inn1_uid is None or inn2_uid is None or _is_practice(game):
         return
     gate = _gate(game, inn1_uid, inn2_uid)
+    _log(inn1_uid, f"match ended {t1}-{t2} (batted first), counts={bool(gate.get(int(inn1_uid)))}")
+    _log(inn2_uid, f"match ended {t1}-{t2} (chased), counts={bool(gate.get(int(inn2_uid)))}")
     try:
         overs = int(getattr(game, "overs", 0) or 0)
     except (TypeError, ValueError):

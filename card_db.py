@@ -10,9 +10,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
+
+import emojis
 
 DB_PATH = Path(__file__).parent / "cards_maker.db"
 BACKGROUNDS_DIR = Path(__file__).parent / "backgrounds"
@@ -92,6 +95,9 @@ _NEW_CARD_COLUMNS = [
     ("s2_name_color", "TEXT"),      # Style 2 only: display-name colour (red/blue/yellow/pink/green/orange), NULL = default cream
     ("s2_line_color", "TEXT"),      # Style 2 only: colour of the line under the name (black/white/blue), NULL = default cream
     ("s2_fade_legs", "INTEGER"),    # Style 2 only: 1 = player image fades out above the name (legs/shorts hidden), NULL/0 = full image
+    # ── Events (set with /cardmaker and /editcard, events made with /eventmaker) ──
+    ("event_key",  "TEXT"),                              # NULL = normal card, else events.event_key
+    ("obtainable", "INTEGER NOT NULL DEFAULT 1"),       # 1 = packs / claims / draft / shop, 0 = manual only (Star Pass, admin give)
 ]
 
 
@@ -174,6 +180,7 @@ def init_card_db() -> None:
             )
             """
         )
+        _ensure_events(conn)
         # Migrate older databases: add any card columns that don't exist yet.
         existing = {r["name"] for r in conn.execute("PRAGMA table_info(cards)")}
         for col, ddl in _NEW_CARD_COLUMNS:
@@ -231,6 +238,8 @@ def create_card(
     playstyle1: str | None = None,
     playstyle2: str | None = None,
     bowling_type: str | None = None,
+    event_key: str | None = None,
+    obtainable: bool = True,
 ) -> None:
     now = time.time()
     with _conn() as conn:
@@ -240,14 +249,16 @@ def create_card(
                 playername_key, playername, displayname, foreground_link,
                 background, ovr, bat, bowl, country, country_emoji,
                 offset_x, offset_y, scale_pct, image_path, created_by, created_at, updated_at,
-                role, batting_hand, playstyle1, playstyle2, bowling_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 100, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+                role, batting_hand, playstyle1, playstyle2, bowling_type,
+                event_key, obtainable
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 100, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 playername.strip().lower(), playername.strip(), displayname.strip(),
                 foreground_link.strip(), background.strip(), ovr, bat, bowl,
                 country, country_emoji, created_by, now, now,
                 role, batting_hand, playstyle1, playstyle2, bowling_type,
+                (event_key.strip().lower() if event_key else None), 1 if obtainable else 0,
             ),
         )
         conn.commit()
@@ -296,6 +307,197 @@ def update_card(
         )
         conn.commit()
     return True
+
+
+# ── Events (event cards, event emoji, disabling an event) ────────────────
+#
+# An EVENT is just a name + an emoji. A card can belong to one event (cards.event_key).
+#   - The event emoji is shown first in every XI row for that card (non-event cards
+#     show emojis.DEFAULT_CARD_EMOJI instead).
+#   - /eventdisable switches an event off: its cards can't be given to anybody any more
+#     (packs, claims, draft, shop, trades, Star Pass, admin give - nothing). Cards players
+#     already own stay with them. /eventenable switches it back on.
+# Every card also has `obtainable`: 1 = can come out of packs / claims / draft / shop,
+# 0 = never comes out of those; it can still be added by hand (Star Pass, admin give).
+
+_EVENT_NAME_MAX = 40
+_EVENT_CACHE: dict = {"t": 0.0, "data": {}}
+_EVENT_TTL = 15.0
+_EMOJI_RE = re.compile(r"^<(a?):([A-Za-z0-9_]{2,32}):(\d{15,25})>$")
+
+
+def _ensure_events(conn) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS events (
+            event_key   TEXT PRIMARY KEY,          -- lowercase name
+            eventname   TEXT NOT NULL,             -- name as typed
+            emoji_id    TEXT NOT NULL,             -- Discord emoji id (digits)
+            animated    INTEGER NOT NULL DEFAULT 0,
+            disabled    INTEGER NOT NULL DEFAULT 0,
+            created_by  INTEGER,
+            created_at  REAL
+        )
+        """
+    )
+
+
+def _invalidate_events() -> None:
+    _EVENT_CACHE["t"] = 0.0
+
+
+def _events_map() -> dict:
+    """{event_key: row-as-dict}, cached for a few seconds (the XI code asks for it a lot)."""
+    now = time.time()
+    if _EVENT_CACHE["t"] and now - _EVENT_CACHE["t"] < _EVENT_TTL:
+        return _EVENT_CACHE["data"]
+    data: dict = {}
+    try:
+        with _conn() as conn:
+            _ensure_events(conn)
+            for r in conn.execute("SELECT * FROM events"):
+                data[r["event_key"]] = dict(r)
+    except sqlite3.Error as e:
+        print(f"[events] could not read events: {type(e).__name__}: {e}")
+        return _EVENT_CACHE["data"]
+    _EVENT_CACHE["t"] = now
+    _EVENT_CACHE["data"] = data
+    return data
+
+
+def parse_emoji_input(text: str):
+    """Accepts a bare emoji id (1562083735879295057) or a pasted emoji (<:name:id> / <a:name:id>).
+    Returns (emoji_id, animated_or_None) or None if it isn't an emoji id."""
+    t = (text or "").strip()
+    m = _EMOJI_RE.match(t)
+    if m:
+        return m.group(3), m.group(1) == "a"
+    if t.isdigit() and 15 <= len(t) <= 25:
+        return t, None
+    return None
+
+
+def event_emoji_str(ev: dict) -> str:
+    return f"<{'a' if ev.get('animated') else ''}:evt:{ev['emoji_id']}>"
+
+
+def create_event(eventname: str, emoji_id: str, animated: bool, created_by: int) -> str:
+    """Make an event. Returns "created", or "updated" if the name already existed
+    (then only its emoji is changed)."""
+    name = eventname.strip()[:_EVENT_NAME_MAX]
+    key = name.lower()
+    with _conn() as conn:
+        _ensure_events(conn)
+        exists = conn.execute("SELECT 1 FROM events WHERE event_key = ?", (key,)).fetchone()
+        if exists:
+            conn.execute(
+                "UPDATE events SET emoji_id = ?, animated = ? WHERE event_key = ?",
+                (emoji_id, 1 if animated else 0, key),
+            )
+            result = "updated"
+        else:
+            conn.execute(
+                "INSERT INTO events (event_key, eventname, emoji_id, animated, disabled, created_by, created_at) "
+                "VALUES (?, ?, ?, ?, 0, ?, ?)",
+                (key, name, emoji_id, 1 if animated else 0, created_by, time.time()),
+            )
+            result = "created"
+        conn.commit()
+    _invalidate_events()
+    return result
+
+
+def get_event(eventname: str) -> dict | None:
+    return _events_map().get((eventname or "").strip().lower())
+
+
+def list_events() -> list[dict]:
+    return sorted(_events_map().values(), key=lambda e: e["eventname"].lower())
+
+
+def set_event_disabled(eventname: str, disabled: bool) -> bool:
+    """False if there is no such event."""
+    key = (eventname or "").strip().lower()
+    with _conn() as conn:
+        _ensure_events(conn)
+        cur = conn.execute("UPDATE events SET disabled = ? WHERE event_key = ?", (1 if disabled else 0, key))
+        conn.commit()
+        ok = cur.rowcount > 0
+    _invalidate_events()
+    return ok
+
+
+def count_event_cards(event_key: str) -> int:
+    with _conn() as conn:
+        return int(conn.execute(
+            "SELECT COUNT(*) FROM cards WHERE event_key = ?", ((event_key or "").strip().lower(),)
+        ).fetchone()[0])
+
+
+def _rget(row, key, default=None):
+    """row[key] that doesn't blow up on an old row without the column."""
+    try:
+        v = row[key]
+    except (IndexError, KeyError, TypeError):
+        return default
+    return default if v is None else v
+
+
+def event_of(card) -> dict | None:
+    k = _rget(card, "event_key")
+    return _events_map().get(str(k).strip().lower()) if k else None
+
+
+def card_emoji(card) -> str:
+    """The emoji shown first in XI rows: the card's event emoji, or the default card emoji."""
+    ev = event_of(card)
+    return event_emoji_str(ev) if ev else emojis.DEFAULT_CARD_EMOJI
+
+
+def is_event_disabled(card) -> bool:
+    ev = event_of(card)
+    return bool(ev and int(ev.get("disabled") or 0))
+
+
+def is_obtainable(card) -> bool:
+    """True if the card may come out of packs / claims / draft / shop / rewards."""
+    return int(_rget(card, "obtainable", 1)) != 0 and not is_event_disabled(card)
+
+
+def key_event_disabled(player_key: str) -> bool:
+    """True if this card belongs to a disabled event (so nobody may be given it)."""
+    row = get_card(player_key)
+    return bool(row is not None and is_event_disabled(row))
+
+
+def list_obtainable_cards() -> list[sqlite3.Row]:
+    """Cards that random sources (packs, claims, rewards, starter, draft pool C, shop) may use."""
+    return [c for c in list_all_cards() if is_obtainable(c)]
+
+
+def list_enabled_cards() -> list[sqlite3.Row]:
+    """All cards except those of a disabled event (for pools the admin fills by hand)."""
+    return [c for c in list_all_cards() if not is_event_disabled(c)]
+
+
+def set_card_event(playername: str, event_key: str | None) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE cards SET event_key = ?, updated_at = ? WHERE playername_key = ?",
+            ((event_key.strip().lower() if event_key else None), time.time(), playername.strip().lower()),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def set_card_obtainable(playername: str, obtainable: bool) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE cards SET obtainable = ?, updated_at = ? WHERE playername_key = ?",
+            (1 if obtainable else 0, time.time(), playername.strip().lower()),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 # ── Style 2 card design: style switch + extra stats ──────────────────────

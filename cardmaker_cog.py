@@ -17,6 +17,9 @@
     /panelremover   remove a stats-panel overlay from the panel list
     /panelfixer     move / resize a card's stats-panel overlay
     /panelmerge     move a panel's artwork onto another pathname, then retire the first one (same as /bgmerge)
+    /eventmaker     make an event (name + emoji id). Cards of an event show its emoji first in every XI
+    /eventdisable   switch an event off: nobody can get any card of it any more (/eventenable switches it on)
+    /eventlist      list all events
 
 Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 """
@@ -48,6 +51,8 @@ from card_db import (
     update_panel_layout, set_card_panel, set_style2_options,
     cards_using_panel, reassign_cards_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
+    set_card_event, set_card_obtainable, get_event, list_events, create_event,
+    set_event_disabled, parse_emoji_input, count_event_cards, event_emoji_str,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
 from card_image import generate_card_image, cache_all_foregrounds
@@ -115,6 +120,12 @@ async def panel_autocomplete(interaction: discord.Interaction, current: str):
 async def country_autocomplete(interaction: discord.Interaction, current: str):
     current_l = current.lower()
     names = [name for name, _ in CRICKET_COUNTRIES if current_l in name.lower()]
+    return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+
+async def event_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    names = [e["eventname"] for e in list_events() if cur in e["eventname"].lower()]
     return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
 
@@ -191,6 +202,35 @@ def _missing_logo_note(names) -> str:
     )
 
 
+def _event_note(event_row, obtainable: bool) -> str:
+    """One short line telling the admin what event / obtainable setting the card has now."""
+    ev = "no event" if not event_row else f"event **{event_row['eventname']}** {event_emoji_str(event_row)}"
+    if event_row and int(event_row.get("disabled") or 0):
+        ev += " (⛔ disabled)"
+    how = ("obtainable: **True** (packs and everything else)" if obtainable
+           else "obtainable: **False** (not found anywhere, only added by hand)")
+    return f"🎴 {ev} · {how}"
+
+
+async def _check_emoji(interaction: discord.Interaction, emoji_id: str):
+    """Ask Discord about the emoji so we know if it is animated and that the bot can see it.
+    Returns (animated: bool | None, found: bool). None = couldn't tell."""
+    client = interaction.client
+    try:
+        if hasattr(client, "fetch_application_emoji"):            # Developer Portal (application) emojis
+            em = await client.fetch_application_emoji(int(emoji_id))
+            return bool(em.animated), True
+    except Exception:
+        pass
+    try:
+        em = client.get_emoji(int(emoji_id))                      # emojis of servers the bot is in
+        if em is not None:
+            return bool(em.animated), True
+    except Exception:
+        pass
+    return None, False
+
+
 class CardMakerCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -240,13 +280,16 @@ class CardMakerCog(commands.Cog):
         narrative1="Playstyle 1 (optional) — its logo shows on the card",
         narrative2="Playstyle 2 (optional) — its logo shows on the card",
         bowlingtype="Bowling type for bowlers/all-rounders (Fast / Medium Pacer / Off Spin / Leg Spin / Orthodox; default Fast)",
+        event="Event of this card (from /eventmaker). Its emoji shows in the XI. Empty = normal card",
+        obtainable="True = packs & all sources. False = not found anywhere, only added by hand. Default True",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
         narrative1=NARRATIVE_CHOICES, narrative2=NARRATIVE_CHOICES,
         bowlingtype=BOWLTYPE_CHOICES,
     )
-    @app_commands.autocomplete(background=background_autocomplete, countryflag=country_autocomplete)
+    @app_commands.autocomplete(background=background_autocomplete, countryflag=country_autocomplete,
+                               event=event_autocomplete)
     @is_owner()
     async def cardmaker(
         self,
@@ -264,8 +307,18 @@ class CardMakerCog(commands.Cog):
         narrative1: str | None = None,
         narrative2: str | None = None,
         bowlingtype: str | None = None,
+        event: str | None = None,
+        obtainable: bool = True,
     ):
         await interaction.response.defer()
+
+        event_row = None
+        if event is not None and event.strip():
+            event_row = get_event(event)
+            if event_row is None:
+                names = ", ".join(e["eventname"] for e in list_events()) or "(none yet — use `/eventmaker` first)"
+                await interaction.followup.send(f"❌ Unknown event `{event}`.\nAvailable: {names}")
+                return
 
         if narrative1 and narrative2 and narrative1 == narrative2:
             await interaction.followup.send("❌ narrative1 and narrative2 can't be the same — pick two different playstyles.")
@@ -304,10 +357,13 @@ class CardMakerCog(commands.Cog):
             role=role, batting_hand=battinghand,
             playstyle1=narrative1, playstyle2=narrative2,
             bowling_type=bowlingtype,
+            event_key=event_row["event_key"] if event_row else None,
+            obtainable=obtainable,
         )
 
         try:
             await _regenerate_and_send(interaction, playername, "✅ Card created")
+            await interaction.followup.send(_event_note(event_row, obtainable))
             note = _missing_logo_note([narrative1, narrative2])
             if note:
                 await interaction.followup.send(note.strip())
@@ -336,6 +392,8 @@ class CardMakerCog(commands.Cog):
         narrative2="New playstyle 2 (choose None to remove)",
         bowlingtype="New bowling type (Fast / Medium Pacer / Off Spin / Leg Spin / Orthodox)",
         panel="Stats-panel overlay image (added via /paneladder) — type none to remove",
+        event="Event of this card (from /eventmaker) — type none to remove it from its event",
+        obtainable="True = packs & all sources. False = not found anywhere, only added by hand",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
@@ -347,6 +405,7 @@ class CardMakerCog(commands.Cog):
         background=background_autocomplete,
         countryflag=country_autocomplete,
         panel=panel_autocomplete,
+        event=event_autocomplete,
     )
     @is_owner()
     async def editcard(
@@ -366,6 +425,8 @@ class CardMakerCog(commands.Cog):
         narrative2: str | None = None,
         bowlingtype: str | None = None,
         panel: str | None = None,
+        event: str | None = None,
+        obtainable: bool | None = None,
     ):
         await interaction.response.defer()
 
@@ -434,7 +495,23 @@ class CardMakerCog(commands.Cog):
                 panel_update_pending = True
                 new_panel_value = prow["pathname"]
 
-        if not updates and not slot_updates and not panel_update_pending:
+        # Event: "none" (any case) takes the card out of its event; otherwise it must be a known event.
+        event_update_pending = False
+        new_event_key: str | None = None
+        if event is not None:
+            if event.strip().lower() == "none":
+                event_update_pending = True
+            else:
+                erow = get_event(event)
+                if erow is None:
+                    names = ", ".join(e["eventname"] for e in list_events()) or "(none yet — use `/eventmaker` first)"
+                    await interaction.followup.send(f"❌ Unknown event `{event}`.\nAvailable: {names}")
+                    return
+                event_update_pending = True
+                new_event_key = erow["event_key"]
+
+        if (not updates and not slot_updates and not panel_update_pending
+                and not event_update_pending and obtainable is None):
             await interaction.followup.send("❌ Nothing to change — give at least one field besides playername.")
             return
 
@@ -456,14 +533,116 @@ class CardMakerCog(commands.Cog):
             set_playstyles(playername, **slot_updates)
         if panel_update_pending:
             set_card_panel(playername, new_panel_value)
+        if event_update_pending:
+            set_card_event(playername, new_event_key)
+        if obtainable is not None:
+            set_card_obtainable(playername, obtainable)
 
         try:
             await _regenerate_and_send(interaction, playername, "✏️ Card updated")
+            if event_update_pending or obtainable is not None:
+                now_row = get_card(playername)
+                await interaction.followup.send(_event_note(
+                    get_event(now_row["event_key"]) if now_row["event_key"] else None,
+                    int(now_row["obtainable"]) != 0,
+                ))
             note = _missing_logo_note(list(slot_updates.values()))
             if note:
                 await interaction.followup.send(note.strip())
         except Exception as e:
             await interaction.followup.send(f"⚠️ Card updated in the database, but image regeneration failed: `{e}`")
+
+    # ── /eventmaker, /eventdisable, /eventenable, /eventlist ─────────────
+    @app_commands.command(name="eventmaker", description="Make an event (name + emoji) for event cards")
+    @app_commands.describe(
+        eventname="Event name, e.g. Diwali 2026",
+        emojiid="Emoji id (digits) of the emoji shown first in the XI for this event's cards",
+        animated="Only if the emoji is animated and the bot could not find it itself (default No)",
+    )
+    @is_owner()
+    async def eventmaker(self, interaction: discord.Interaction, eventname: str, emojiid: str,
+                         animated: bool = False):
+        await interaction.response.defer()
+        name = eventname.strip()
+        if not name or len(name) > 40:
+            await interaction.followup.send("❌ The event name must be 1–40 characters.")
+            return
+        if name.lower() == "none":
+            await interaction.followup.send("❌ `none` is reserved (it removes a card from its event). Pick another name.")
+            return
+        parsed = parse_emoji_input(emojiid)
+        if parsed is None:
+            await interaction.followup.send("❌ That doesn't look like an emoji id. Paste only the digits, e.g. `1562083735879295057`.")
+            return
+        emoji_id, anim_from_text = parsed
+        anim_found, found = await _check_emoji(interaction, emoji_id)
+        if anim_found is not None:
+            is_anim = anim_found
+        elif anim_from_text is not None:
+            is_anim = anim_from_text
+        else:
+            is_anim = animated
+        result = create_event(name, emoji_id, is_anim, interaction.user.id)
+        ev = get_event(name)
+        shown = event_emoji_str(ev)
+        verb = "created" if result == "created" else "updated (emoji changed)"
+        msg = (f"✅ Event **{ev['eventname']}** {verb}. Emoji: {shown}\n"
+               f"Give it to cards with `/cardmaker event:` or `/editcard event:`.")
+        if not found:
+            msg += ("\n⚠️ I couldn't check this emoji. If it shows as plain text above, the id is wrong, "
+                    "or the bot can't use it (it must be a Developer Portal emoji or from a server the bot is in).")
+        await interaction.followup.send(msg)
+
+    @app_commands.command(name="eventdisable",
+                          description="Switch an event off: nobody can get any card of it any more")
+    @app_commands.describe(eventname="Which event to disable")
+    @app_commands.autocomplete(eventname=event_autocomplete)
+    @is_owner()
+    async def eventdisable(self, interaction: discord.Interaction, eventname: str):
+        await interaction.response.defer()
+        ev = get_event(eventname)
+        if ev is None:
+            await interaction.followup.send(f"❌ No event called `{eventname}`. See `/eventlist`.")
+            return
+        if int(ev.get("disabled") or 0):
+            await interaction.followup.send(f"ℹ️ **{ev['eventname']}** is already disabled.")
+            return
+        set_event_disabled(eventname, True)
+        n = count_event_cards(ev["event_key"])
+        await interaction.followup.send(
+            f"⛔ Event **{ev['eventname']}** disabled. Its {n} card(s) can't be given to anybody now "
+            f"(packs, claims, draft, shop, trades, Star Pass, admin give). Cards players already own stay with them.\n"
+            f"Switch it back on with `/eventenable`."
+        )
+
+    @app_commands.command(name="eventenable", description="Switch a disabled event back on")
+    @app_commands.describe(eventname="Which event to enable")
+    @app_commands.autocomplete(eventname=event_autocomplete)
+    @is_owner()
+    async def eventenable(self, interaction: discord.Interaction, eventname: str):
+        await interaction.response.defer()
+        ev = get_event(eventname)
+        if ev is None:
+            await interaction.followup.send(f"❌ No event called `{eventname}`. See `/eventlist`.")
+            return
+        if not int(ev.get("disabled") or 0):
+            await interaction.followup.send(f"ℹ️ **{ev['eventname']}** is already enabled.")
+            return
+        set_event_disabled(eventname, False)
+        await interaction.followup.send(f"✅ Event **{ev['eventname']}** is enabled again.")
+
+    @app_commands.command(name="eventlist", description="List all events and how many cards each has")
+    @is_owner()
+    async def eventlist(self, interaction: discord.Interaction):
+        evs = list_events()
+        if not evs:
+            await interaction.response.send_message("No events yet. Make one with `/eventmaker`.")
+            return
+        lines = []
+        for e in evs:
+            state = "⛔ disabled" if int(e.get("disabled") or 0) else "✅ enabled"
+            lines.append(f"{event_emoji_str(e)} **{e['eventname']}** · {count_event_cards(e['event_key'])} card(s) · {state}")
+        await interaction.response.send_message("\n".join(lines)[:1900])
 
     # ── /csrarity ────────────────────────────────────────────────────
     @app_commands.command(
