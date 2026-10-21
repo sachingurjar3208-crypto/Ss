@@ -354,7 +354,8 @@ def _draw_name_and_stats(draw: ImageDraw.ImageDraw, card_row) -> None:
         name = str(card_row["displayname"]).upper()
         font = _fit_font(draw, name, 150, 640)
         name_fill = NAME_COLORS.get(str(ci._col(card_row, "s2_name_color", "")).lower(), CREAM)
-        draw.text(_p(640, 1045), name, font=font, fill=name_fill, anchor="ms")
+        draw.text(_p(640, 1045), name, font=font, fill=name_fill, anchor="ms",
+                  stroke_width=max(2, round(font.size * 0.05)), stroke_fill=(0, 0, 0))
     except Exception:
         pass
     line_fill = LINE_COLORS.get(str(ci._col(card_row, "s2_line_color", "")).lower(), CREAM)

@@ -418,7 +418,9 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
         name_px -= 2
         name_font = _font(name_path, name_px)
     name_pos = (DISPLAYNAME_POS[0] + name_dx, DISPLAYNAME_POS[1] + name_dy)
-    draw.text(name_pos, name_text, font=name_font, fill=NAME_COLOR, anchor="ls")
+    # Black outline around the display name so it stays readable on any background.
+    draw.text(name_pos, name_text, font=name_font, fill=NAME_COLOR, anchor="ls",
+              stroke_width=max(2, round(name_px * 0.06)), stroke_fill=(0, 0, 0))
 
     # ── Role + side ordering ───────────────────────────────────────────
     # Higher stat becomes the "primary" side (shown on the LEFT), matching
