@@ -1,5 +1,5 @@
 """Economy commands: csbal, csdaily, csweekly, csmonthly, cspack, csopen,
-csbuy, cssell, cstrade, csleaderboard.
+csbuy, cssell, csms, cstrade, csleaderboard.
 
 Safety notes
 - Anything that spends coins or gives a player away asks for a button
@@ -13,6 +13,8 @@ Safety notes
 from __future__ import annotations
 
 import asyncio
+import functools
+import time
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -31,7 +33,7 @@ import squad_logic as sl
 import card_cache
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
-from squad_cog import _card_line, _in_match, _is_premium, _need_debut
+from squad_cog import _card_line, _in_match, _is_premium, _need_debut, squad_order
 
 # ── One shared 5 second cooldown for ALL economy commands ────────────────────
 # Each command used to have its own timer, so spamming csbal/csopen/csbuy one
@@ -54,18 +56,80 @@ CONFIRM_COOLDOWN = 15.0
 
 # The free debut pack can only be opened in this server.
 DEBUT_PACK_GUILD_ID = 1556644438917382150
-_econ_bucket = commands.CooldownMapping.from_cooldown(1, ECONOMY_COOLDOWN, commands.BucketType.user)
+# csbuy / cssell only need a 2 second gap. csms (multi sell) has its own
+# 15 second cooldown per user, the same in every server and channel.
+BUYSELL_COOLDOWN = 2
+MULTISELL_COOLDOWN = 15.0
+MULTISELL_TIMEOUT = 20.0     # the Sell / Cancel buttons switch off after this
+
+# When each user last used an economy command (monotonic seconds).
+_last_econ: dict[int, float] = {}
+
+# Users whose economy command is running RIGHT NOW (opening a pack, claiming...).
+_running: set[int] = set()
+
+
+def has_pending(uid: int) -> bool:
+    """True while this user has a confirm button / trade waiting for an answer."""
+    return uid in _pending_confirm or uid in _pending_trade
+
+
+def is_busy(uid: int) -> bool:
+    """True while ANY economy command or draft of this user is pending."""
+    return has_pending(uid) or uid in _running
+
+
+def economy_gate(seconds: float = ECONOMY_COOLDOWN):
+    """Shared gate for every economy command (and csdraft).
+
+    1. If the user already has a command pending (confirm button open, trade
+       waiting, pack opening, draft running) no other command can start. This
+       is what stops farming by firing several commands at once.
+    2. One timer per user shared by all economy commands: after any economy
+       command the user waits `seconds` before the next one. seconds=0 only
+       does the pending check (used by csdraft, which has its own cooldown).
+    """
+    async def predicate(ctx: commands.Context) -> bool:
+        uid = ctx.author.id
+        if is_busy(uid):
+            if security._notice_allowed(uid, 3):
+                await ctx.send("You already have a command pending. Finish it first.")
+            raise commands.CheckFailure("pending command")
+        if seconds > 0:
+            now = time.monotonic()
+            wait = seconds - (now - _last_econ.get(uid, 0.0))
+            if wait > 0:
+                # security.py's error handler shows "is on cooldown. Try again in Xs".
+                raise commands.CommandOnCooldown(commands.Cooldown(1, seconds), wait, commands.BucketType.user)
+            if len(_last_econ) > 5000:   # keep the dict small
+                for k in [k for k, t in _last_econ.items() if now - t > 600]:
+                    _last_econ.pop(k, None)
+            _last_econ[uid] = now
+        return True
+    return commands.check(predicate)
 
 
 def economy_cooldown():
-    async def predicate(ctx: commands.Context) -> bool:
-        bucket = _econ_bucket.get_bucket(ctx.message)
-        retry_after = bucket.update_rate_limit() if bucket else None
-        if retry_after:
-            # security.py's error handler shows "Wait Xs before using this again".
-            raise commands.CommandOnCooldown(bucket, retry_after, commands.BucketType.user)
-        return True
-    return commands.check(predicate)
+    """Old name, kept so nothing else breaks. Same as economy_gate(5)."""
+    return economy_gate(ECONOMY_COOLDOWN)
+
+
+def exclusive(fn):
+    """Marks the user as busy while the command body runs, so no second
+    economy command can start in the meantime (even if two messages race)."""
+    @functools.wraps(fn)
+    async def wrapper(self, ctx, *args, **kwargs):
+        uid = ctx.author.id
+        if uid in _running:
+            if security._notice_allowed(uid, 3):
+                await ctx.send("You already have a command pending. Finish it first.")
+            return
+        _running.add(uid)
+        try:
+            return await fn(self, ctx, *args, **kwargs)
+        finally:
+            _running.discard(uid)
+    return wrapper
 
 
 # Players with a trade waiting for an answer (each can only have one at a time).
@@ -191,6 +255,54 @@ class BuySellView(OwnedView):
         self.stop()
         _pending_confirm.discard(self.user_id)
         await interaction.response.edit_message(embed=_buysell_embed(self.card, "Cancelled."), view=None)
+
+    async def on_timeout(self) -> None:
+        _pending_confirm.discard(self.user_id)
+        await super().on_timeout()
+
+
+# ── csms: multi sell ─────────────────────────────────────────────────────────
+
+class MultiSellView(OwnedView):
+    """Sell / Cancel buttons for csms. Nothing is sold until Sell is pressed."""
+
+    def __init__(self, bot, user_id: int, items: list, bench_order: list):
+        super().__init__(user_id, timeout=MULTISELL_TIMEOUT)
+        self.bot = bot
+        self.user_id = user_id
+        self.items = items
+        self.bench_order = bench_order
+        self.total = sum(v for _, v in items)
+        self.used = False
+
+    @ui.button(label="Sell", style=discord.ButtonStyle.danger)
+    async def sell(self, interaction: discord.Interaction, button: ui.Button):
+        if self.used:  # a second click can never sell twice
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        _pending_confirm.discard(self.user_id)
+        if _in_match(self.bot, self.user_id):
+            await interaction.response.edit_message(content="You can't sell players during a match.", embed=None, view=None)
+            return
+        err, total = await asyncio.to_thread(economy.sell_cards, self.user_id, self.items, self.bench_order)
+        if err:
+            await interaction.response.edit_message(content=err, embed=None, view=None)
+            return
+        await interaction.response.edit_message(
+            content=f"Sold {len(self.items)} players for {_plain_coins(total)}.", embed=None, view=None
+        )
+
+    @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: ui.Button):
+        if self.used:
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        _pending_confirm.discard(self.user_id)
+        await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
 
     async def on_timeout(self) -> None:
         _pending_confirm.discard(self.user_id)
@@ -406,6 +518,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         )
 
     # -- rewards ---------------------------------------------------------
+    @exclusive
     async def _claim(self, ctx: commands.Context, kind: str):
         if not await _need_debut(ctx):
             return
@@ -494,6 +607,7 @@ class EconomyCog(commands.Cog, name="Economy"):
     # -- csclaim: free card every hour (Premium: every 35 min) -------------
     @commands.command(name="csclaim")
     @economy_cooldown()
+    @exclusive
     async def csclaim(self, ctx: commands.Context):
         """Claim a free random player card every hour (Premium: every 35 min)."""
         if not await _need_debut(ctx):
@@ -625,6 +739,7 @@ class EconomyCog(commands.Cog, name="Economy"):
     @commands.command(name="csopen")
     @economy_cooldown()
     @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
+    @exclusive
     async def csopen(self, ctx: commands.Context, pack: Optional[str] = None):
         """Open one of your packs: `csopen bronze`."""
         if not await _need_debut(ctx):
@@ -694,8 +809,7 @@ class EconomyCog(commands.Cog, name="Economy"):
 
     # -- buy / sell ------------------------------------------------------
     @commands.command(name="csbuy")
-    @economy_cooldown()
-    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
+    @economy_gate(BUYSELL_COOLDOWN)
     async def csbuy(self, ctx: commands.Context, *, player: str):
         """Buy a player: `csbuy Virat Kohli`."""
         if not await _need_debut(ctx):
@@ -731,8 +845,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         )
 
     @commands.command(name="cssell")
-    @economy_cooldown()
-    @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
+    @economy_gate(BUYSELL_COOLDOWN)
     async def cssell(self, ctx: commands.Context, *, player: str):
         """Sell one of your players for coins."""
         if not await _need_debut(ctx):
@@ -763,6 +876,71 @@ class EconomyCog(commands.Cog, name="Economy"):
             f"Sell {esc(card['playername'])} ({card['ovr']} OVR) for {_plain_coins(value)}?",
             do_sell,
         )
+
+    @commands.command(name="csms", cooldown_after_parsing=True)
+    @economy_gate(ECONOMY_COOLDOWN)
+    @commands.cooldown(1, MULTISELL_COOLDOWN, commands.BucketType.user)
+    async def csms(self, ctx: commands.Context, start: int, end: Optional[int] = None):
+        """Multi sell by squad number: `csms 1 20` sells players 1 to 20 of `cssquad`."""
+        if not await _need_debut(ctx):
+            return
+        uid = ctx.author.id
+
+        async def refuse(text: str):
+            self.csms.reset_cooldown(ctx)   # a refused command shouldn't cost the 15 seconds
+            await ctx.send(text)
+
+        if _in_match(self.bot, uid):
+            await refuse("You can't sell players during a match.")
+            return
+        if end is None:
+            end = start
+        if start < 1 or end < start:
+            await refuse("Usage: `csms <from> <to>`, for example `csms 1 20`. Numbers are the ones shown in `cssquad`.")
+            return
+        cards = squad_order(await asyncio.to_thread(sl.owned_cards, uid))
+        n = len(cards)
+        if end > n:
+            await refuse(f"Your squad has only {n} players. Check the numbers in `cssquad`.")
+            return
+        chosen = cards[start - 1:end]
+        if n - len(chosen) < economy.MIN_SQUAD:
+            can = max(0, n - economy.MIN_SQUAD)
+            await refuse(f"You must keep at least {economy.MIN_SQUAD} players. Right now you can sell at most {can}.")
+            return
+        if uid in _pending_confirm:
+            await refuse("You already have a confirmation waiting. Finish that first.")
+            return
+
+        items = [(c["playername_key"], sl.sell_value(c)) for c in chosen]
+        total = sum(v for _, v in items)
+        chosen_keys = {k for k, _ in items}
+        bench_order = [c["playername_key"] for c in cards if c["playername_key"] not in chosen_keys]
+        xi_keys = set(economy.get_xi(uid).values())
+        in_xi = sum(1 for k in chosen_keys if k in xi_keys)
+
+        lines = [
+            f"{start + i}. {esc(c['playername'])} ({c['ovr']} OVR) - {_plain_coins(v)}"
+            for i, (c, (_, v)) in enumerate(zip(chosen, items))
+        ]
+        text = (
+            "Are you sure you want to sell these cards?\n\n"
+            + "\n".join(lines)
+            + f"\n\nPlayers: {len(items)}\nTotal coins: {_plain_coins(total)}"
+            + f"\nYour coins now: {_plain_coins(economy.get_balance(uid))}"
+        )
+        if in_xi:
+            text += f"\n\n{in_xi} of these players are in your XI. The best bench players will take their place."
+        embed = discord.Embed(description=text[:4000], color=discord.Color.gold())
+        embed.set_footer(text=f"Press Sell within {int(MULTISELL_TIMEOUT)} seconds, or it is cancelled.")
+
+        _pending_confirm.add(uid)
+        try:
+            view = MultiSellView(self.bot, uid, items, bench_order)
+            view.message = await ctx.send(embed=embed, view=view)
+        except Exception:
+            _pending_confirm.discard(uid)
+            raise
 
     # -- cards waiting because the squad was full ---------------------------
     @commands.command(name="cspending")

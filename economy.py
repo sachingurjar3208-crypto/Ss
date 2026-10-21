@@ -872,6 +872,59 @@ def sell_card(user_id, player_key: str, value: int, replacement_key: str | None)
         return None
 
 
+def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) -> tuple[str | None, int]:
+    """Sell many cards in ONE transaction (all or nothing).
+
+    items       -> [(player_key, coins), ...]
+    bench_order -> the user's remaining cards, best OVR first. Slots that open
+                   up in the XI are refilled from this list.
+    Returns (error, total_coins). error is None on success.
+    """
+    uid = _uid(user_id)
+    keys = [k for k, _ in items]
+    if not keys or len(set(keys)) != len(keys):
+        return "Nothing to sell.", 0
+    with _tx() as conn:
+        marks = ",".join("?" * len(keys))
+        have = conn.execute(
+            f"SELECT COUNT(*) AS n FROM owned WHERE user_id = ? AND player_key IN ({marks})", (uid, *keys)
+        ).fetchone()["n"]
+        if have != len(keys):
+            return "Your squad changed. Please run the command again.", 0
+        count = conn.execute("SELECT COUNT(*) AS n FROM owned WHERE user_id = ?", (uid,)).fetchone()["n"]
+        if count - len(keys) < MIN_SQUAD:
+            return f"You must keep at least {MIN_SQUAD} players.", 0
+        _ensure_impact_subs_table(conn)
+        freed_slots: list[int] = []
+        for key in keys:
+            row = conn.execute("SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
+            if row is not None:
+                freed_slots.append(int(row["slot"]))
+            conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, key))
+            conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, key))
+            conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, key))
+            conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, key))
+        # best remaining bench players take the vacated XI spots
+        for slot in sorted(freed_slots):
+            for cand in bench_order:
+                if cand in keys:
+                    continue
+                owned_ok = conn.execute(
+                    "SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, cand)
+                ).fetchone()
+                in_xi = conn.execute(
+                    "SELECT 1 FROM xi WHERE user_id = ? AND player_key = ?", (uid, cand)
+                ).fetchone()
+                if owned_ok and not in_xi:
+                    conn.execute(
+                        "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, cand)
+                    )
+                    break
+        total = sum(int(v) for _, v in items)
+        _apply_coins(conn, uid, total, f"Multi sell ({len(keys)} players)")
+        return None, total
+
+
 def add_pack(user_id, pack_type: str, qty: int = 1) -> None:
     with _tx() as conn:
         conn.execute(

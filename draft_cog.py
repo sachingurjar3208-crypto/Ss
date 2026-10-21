@@ -48,7 +48,7 @@ import quest
 import security
 import squad_logic as sl
 from bot_guard import ADMIN_GUILD_ID, is_staff
-from economy_cog import economy_cooldown, send_next_pending
+from economy_cog import economy_cooldown, economy_gate, has_pending, send_next_pending, _running
 from security import OwnedView, esc
 from squad_cog import _card_line, _in_match, _need_debut, premium_cooldown
 
@@ -57,7 +57,7 @@ _rng = secrets.SystemRandom()
 POOLS = ("A", "B", "C")
 MIN_GAP = 2.0                                   # seconds between two drafts of one user
 
-_busy: set[int] = set()                         # users with a draft running right now
+_busy = _running                                # shared with economy_cog: a running draft blocks every other economy command
 _last_draft: dict[int, float] = {}
 
 
@@ -250,6 +250,9 @@ class DraftView(OwnedView):
         if uid in _busy or now - _last_draft.get(uid, 0.0) < MIN_GAP:
             await interaction.response.defer()          # ignore spam clicks silently
             return
+        if has_pending(uid):                            # a confirm button / trade is still waiting
+            await interaction.response.send_message("You already have a command pending. Finish it first.", ephemeral=True)
+            return
         _busy.add(uid)
         try:
             await interaction.response.defer()
@@ -378,6 +381,7 @@ class DraftCog(commands.Cog, name="Draft"):
             print(f"[draft] could not load pools: {e}")
 
     @commands.command(name="csdraft")
+    @economy_gate(0)                    # blocked while another economy command is pending
     @premium_cooldown(2 * 60)           # normal users: 2 min, Premium: none
     async def csdraft(self, ctx: commands.Context):
         """Open the Draft screen."""

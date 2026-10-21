@@ -83,6 +83,12 @@ async def _need_debut(ctx: commands.Context) -> bool:
     return False
 
 
+def squad_order(cards: list) -> list:
+    """The one squad order used everywhere: best OVR first, ties by name.
+    `cssquad` numbers and `csms <from> <to>` both use this, so numbers match."""
+    return sorted(cards, key=lambda c: (-int(c["ovr"]), c["playername_key"]))
+
+
 def _card_line(card, extra: str = "", emojis: bool = True) -> str:
     role = ROLES.get(card_db.effective_role(card), "?")
     if emojis:
@@ -136,8 +142,8 @@ class SquadView(OwnedView):
         start = self.page * PAGE_SIZE
         chunk = self.cards[start:start + PAGE_SIZE]
         lines = [
-            _card_line(c, "  ✅ XI" if c["playername_key"] in self.in_xi else "")
-            for c in chunk
+            f"`{start + i + 1}.` " + _card_line(c, "  ✅ XI" if c["playername_key"] in self.in_xi else "")
+            for i, c in enumerate(chunk)
         ] or ["No players yet."]
         embed = discord.Embed(
             title=f"<:Squademoji:1558139700156571801> {esc(self.owner_name)} — Squad ({len(self.cards)} players)",
@@ -446,7 +452,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if user is None:
             await ctx.send(f"**{esc(target.display_name)}** hasn't debuted yet.")
             return
-        cards = sorted(sl.owned_cards(target.id), key=lambda c: -c["ovr"])
+        cards = squad_order(sl.owned_cards(target.id))
         view = SquadView(ctx.author.id, user["team_name"], cards, set(economy.get_xi(target.id).values()))
         view.message = await ctx.send(embed=view.build(), view=view)
 
