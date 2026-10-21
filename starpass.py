@@ -29,12 +29,16 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import economy
 
 # ── Settings ─────────────────────────────────────────────────────────────────
 STARPASS_PREMIUM_ROLE_ID = 1561987229294006322
 STARPASS_QUEST_CREDITS = 80          # credits for every finished daily quest
+STARPASS_RANKED_CREDITS = 50         # credits for every finished RANKED match (each real player)
+STARPASS_RANKED_MATCHES_PER_DAY = 6  # only the first 6 ranked matches of the day (IST) pay credits
+STARPASS_RANKED_VS_BOT = True        # False = ranked matches against the bot pay no credits
 PREMIUM_BONUS_CREDITS = 1000         # one-time bonus per season for the Premium role
 LEVEL_COST_EARLY = 300               # credits for each of levels 2 .. EARLY_LAST_LEVEL
 LEVEL_COST_LATE = 400                # credits for each level after that
@@ -150,6 +154,11 @@ def _ensure(conn) -> None:
         "season_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
         "credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0), "
         "bonus_given INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (season_id, user_id))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS starpass_ranked_daily ("
+        "user_id INTEGER NOT NULL, day TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (user_id, day))"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS starpass_claim ("
@@ -333,6 +342,45 @@ def award_quest_credits(conn, user_id: int, finished_quests: int) -> int:
     except Exception as e:                      # a Star Pass problem must never break quests
         print(f"[starpass] could not add quest credits: {type(e).__name__}: {e}")
         return 0
+
+
+_IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def award_ranked_match_credits(user_ids) -> dict:
+    """A ranked match just finished: give STARPASS_RANKED_CREDITS to every real player, but only
+    for their first STARPASS_RANKED_MATCHES_PER_DAY ranked matches of the day (IST).
+    One database transaction, so a crash can never pay without counting. Does nothing when no
+    season is running. Returns {user_id: {"credits": x, "n": matches_counted_today}} for the
+    players who were paid (empty dict if nobody was)."""
+    out: dict = {}
+    now = datetime.now(_IST)
+    day = now.strftime("%Y-%m-%d")
+    cutoff = (now - timedelta(days=10)).strftime("%Y-%m-%d")
+    with economy._tx() as conn:
+        season = _active(conn)
+        if season is None:
+            return out
+        conn.execute("DELETE FROM starpass_ranked_daily WHERE day < ?", (cutoff,))
+        for uid in {int(u) for u in user_ids if u is not None}:
+            if uid <= 0:                       # bot players have negative ids
+                continue
+            if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+                continue
+            row = conn.execute(
+                "SELECT n FROM starpass_ranked_daily WHERE user_id = ? AND day = ?", (uid, day)
+            ).fetchone()
+            n = int(row["n"]) if row else 0
+            if n >= STARPASS_RANKED_MATCHES_PER_DAY:
+                continue
+            conn.execute(
+                "INSERT INTO starpass_ranked_daily (user_id, day, n) VALUES (?, ?, 1) "
+                "ON CONFLICT(user_id, day) DO UPDATE SET n = n + 1",
+                (uid, day),
+            )
+            _add_credits(conn, int(season["id"]), uid, STARPASS_RANKED_CREDITS)
+            out[uid] = {"credits": STARPASS_RANKED_CREDITS, "n": n + 1}
+    return out
 
 
 def grant_premium_bonus(user_id: int) -> int:

@@ -407,6 +407,29 @@ async def _ranked_announce(channel, game):
         print(f"[ranked] announce failed: {type(e).__name__}: {e}")
 
 
+async def _ranked_credits_announce(channel, game):
+    """Tell the players how many Star Pass credits the ranked match gave. Never raises."""
+    try:
+        res = game.__dict__.get("ranked_credits")
+        if not res or game.__dict__.get("_ranked_credits_announced"):
+            return
+        game._ranked_credits_announced = True
+        import starpass
+        lines = []
+        for who in (game.challenger, game.opponent):
+            r = res.get(who.id)
+            if r:
+                lines.append(
+                    f"{who.mention}: **+{r['credits']}** Star Pass credits "
+                    f"({r['n']}/{starpass.STARPASS_RANKED_MATCHES_PER_DAY} ranked matches today)"
+                )
+        if lines:
+            await channel.send(embed=discord.Embed(
+                title="Star Pass", description="\n".join(lines), color=discord.Color.from_rgb(212, 175, 55)))
+    except Exception as e:
+        print(f"[starpass] ranked credits announce failed: {type(e).__name__}: {e}")
+
+
 def _save_match_record(game):
     """Derive winner/loser and persist to match_records. Ignores ties."""
     t1 = game.runs[0]
@@ -422,6 +445,15 @@ def _save_match_record(game):
         quest.on_match_end(game, inn1_uid, inn2_uid, t1, t2)
     except Exception as e:
         print(f"[quest] match tracking failed: {type(e).__name__}: {e}")
+    # Star Pass credits for finished RANKED matches (once per game; ties count as played).
+    if getattr(game, "ranked", False) and not game.__dict__.get("_ranked_credits_done"):
+        game._ranked_credits_done = True
+        try:
+            import starpass
+            if starpass.STARPASS_RANKED_VS_BOT or not getattr(game, "is_bot_match", False):
+                game.ranked_credits = starpass.award_ranked_match_credits([inn1_uid, inn2_uid])
+        except Exception as e:
+            print(f"[starpass] ranked credits failed: {type(e).__name__}: {e}")
     if t1 == t2:
         if getattr(game, "ranked", False):   # ranked tie: no star change
             game.ranked_result = {}
@@ -1417,6 +1449,7 @@ async def _process_delivery(
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
                 await _ranked_announce(channel, game)
+                await _ranked_credits_announce(channel, game)
                 await _send_match_summary(channel, game)
                 await _flush_quest_notes(channel, game)
                 active_games.pop(channel.id, None)
@@ -1484,6 +1517,7 @@ async def _handle_wicket_fall(channel, game: GameState):
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
             await _ranked_announce(channel, game)
+            await _ranked_credits_announce(channel, game)
             await _flush_quest_notes(channel, game)
             active_games.pop(channel.id, None)
         return
