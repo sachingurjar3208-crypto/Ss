@@ -1,3 +1,4 @@
+import math
 import random
 from data import DELIVERY_BUTTON_MAP, SHOT_BUTTON_MAP
 
@@ -314,36 +315,33 @@ def calculate_outcome(
     m = MATCHUP_MATRIX.get((delivery_internal, shot_internal), {"bat": 1.0, "wkt": 1.0})
 
     # ── Bat / Bowl rating scaling ─────────────────────────────────────────────
-    # 70 = average benchmark.  Ratings DIRECTLY drive the multipliers — OVR is
-    # intentionally NOT used here.  A bat=99 batter is dramatically stronger
-    # than a bat=15 bowler trying to slog; a bowl=94 bowler is a major threat.
-    bat_factor = max(0.20, batsman_bat / 70.0)   # bat=99 → 1.41 | bat=15 → 0.21 (capped 0.20)
-    wkt_factor = max(0.20, bowler_bowl  / 70.0)  # bowl=94→ 1.34 | bowl=0 → 0.20
+    # Ratings DIRECTLY drive the result and every single point counts
+    # (OVR is intentionally NOT used here). The factors are exponential, so
+    # each extra bat/bowl point is worth roughly +2.5-3% on top of the last one:
+    #   bat 70 -> 1.00 | 85 -> ~1.45 | 86 -> ~1.49 | 95 -> ~1.9 | 50 -> ~0.6 | 30 -> ~0.37
+    # A weak batter scores slowly and gets many dots, a weak bowler almost never
+    # takes a wicket, a strong bowler squeezes runs, a strong batter survives longer.
+    bat_factor  = min(3.0,  max(0.08, math.exp((batsman_bat - 70) * 0.025)))
+    wkt_factor  = min(3.0,  max(0.08, math.exp((bowler_bowl - 70) * 0.032)))
+    # a good bowler also dries up the scoring, a poor one gets hit more
+    run_squeeze = min(1.35, max(0.70, wkt_factor ** -0.30))
+    # batting skill makes it harder to get out
+    bat_safety  = min(1.6,  max(0.65, bat_factor ** -0.40))
 
     w = dict(BASE_WEIGHTS)
 
-    # Runs: all scoring chances scale with bat ability
-    for k in ("1", "2", "3", "4", "6"):
-        w[k] = max(0.3, w[k] * m["bat"] * bat_factor)
+    # Runs: all scoring chances scale with bat ability (and shrink vs a good bowler).
+    # Boundaries react a bit more strongly to bat ability than singles/twos.
+    for k in ("1", "2", "3"):
+        w[k] = max(0.05, w[k] * m["bat"] * bat_factor * run_squeeze)
+    for k in ("4", "6"):
+        w[k] = max(0.02, w[k] * m["bat"] * (bat_factor ** 1.25) * run_squeeze)
 
     # Dot balls: inverse of bat — weak batters face far more dots
-    w["0"] = max(1.0, w["0"] / bat_factor)
+    w["0"] = max(1.0, w["0"] / bat_factor / run_squeeze)
 
-    # Wickets: scale with bowl ability
-    w["W"] = max(0.3, w["W"] * m["wkt"] * wkt_factor)
-
-    # ── Extra six power (only TRULY elite batters, bat > 82) ─────────────────
-    # bat=99 → ×1.50 bonus; bat=90 → ×1.24; bat=82 → ×1.0 (no bonus).
-    # Threshold raised from 65 → 82 so mid-tier 80-OVR players don't get an
-    # automatic six bonus just for being above the seeded minimum.
-    six_power = 1.0 + max(0.0, (batsman_bat - 82) / 34.0)
-    w["6"] = max(0.3, w["6"] * six_power)
-
-    # ── Extra wicket power (only elite bowlers, bowl > 65) ───────────────────
-    # Gentler formula so stacking with matchup multipliers stays realistic.
-    # bowl=99 → ×1.49;  bowl=80 → ×1.21;  bowl=65 → ×1.0 (no bonus)
-    wkt_power = 1.0 + max(0.0, (bowler_bowl - 65) / 70.0)
-    w["W"] = max(0.3, w["W"] * wkt_power)
+    # Wickets: scale with bowl ability (and fall for better batters)
+    w["W"] = max(0.03, w["W"] * m["wkt"] * wkt_factor * bat_safety)
 
     # ── Phase modifiers ──────────────────────────────────────────────────────
     # BUG FIX #2: thresholds were hardcoded for 20-over matches (powerplay <6,
@@ -362,7 +360,7 @@ def calculate_outcome(
 
     for key, mult in PHASE_MODIFIERS.get(phase, {}).items():
         if key in w:
-            w[key] = max(0.5, w[key] * mult)
+            w[key] = max(0.03, w[key] * mult)
 
     # ── New-batsman vulnerability (first 8 balls) ────────────────────────────
     if balls_since_wicket < 8:
@@ -519,7 +517,7 @@ def calculate_outcome(
     # SWING MASTER: +wickets on swing deliveries
     if "Swing Master" in bowler_attrs and delivery_internal in _SWING_DELIVERIES:
         w["W"] = w["W"] * ATTR_EFFECTS["Swing Master"]["swing_wkt_mult"]
-        w["6"] = max(0.3, w["6"] * ATTR_EFFECTS["Swing Master"]["swing_six_mult"])
+        w["6"] = max(0.02, w["6"] * ATTR_EFFECTS["Swing Master"]["swing_six_mult"])
 
     # SWING KING: +wickets on swing deliveries
     if "Swing King" in bowler_attrs and delivery_internal in _SWING_DELIVERIES:
@@ -601,7 +599,7 @@ def calculate_outcome(
     # post-bat_factor baseline. Prevents pathological stacking when an
     # elite batter with Power Hitter + Pinch Hitter faces a weak bowler
     # in the powerplay/death.
-    _six_cap = BASE_WEIGHTS["6"] * bat_factor * _six_cap_mult
+    _six_cap = BASE_WEIGHTS["6"] * (bat_factor ** 1.25) * _six_cap_mult
     if w["6"] > _six_cap:
         w["6"] = _six_cap
 
@@ -623,12 +621,20 @@ def calculate_outcome(
     # but we treat it as neutral — no bonus, no penalty — to avoid punishing
     # batters for combinations the guide intentionally does not cover.
     if is_recommended_shot:
-        w["W"] = max(0.3, w["W"] * 0.75)
+        w["W"] = max(0.03, w["W"] * 0.75)
         w["4"] = w["4"] * 1.15
         w["6"] = w["6"] * 1.10
     elif guide_entry_exists:
         # Guide covered this delivery but batter ignored it → wrong-shot penalty
         w["W"] = w["W"] * 1.25
+
+    # ── DEFEND is a defensive shot: it can NEVER give a 4, a 6 or a 3 ────────
+    # (a defended ball only dies for 0 / a quick single / 2, or the batter is
+    #  beaten). Boundaries stay impossible no matter what playstyles stack up.
+    if shot_internal == "Defend":
+        w["4"] = 0.0
+        w["6"] = 0.0
+        w["3"] = 0.0
 
     # ── Global wicket cap ─────────────────────────────────────────────────────
     # No matter how stacked the multipliers get, P(W) cannot exceed ~14%.

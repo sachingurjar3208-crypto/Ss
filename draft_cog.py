@@ -81,8 +81,8 @@ def get_pools(force: bool = False) -> dict[str, list]:
         row = by_key.get(key)
         if row is None:
             continue                                  # card was deleted from the game
-        if card_db.is_event_disabled(row):
-            continue                                  # its event is switched off: nobody gets it
+        # Admin-picked Pool A / B cards are always allowed, even if the card is
+        # unobtainable or belongs to an event (disabled or not).
         pools[pool].append(row)
         weights[key] = weight
     fixed = set(weights)

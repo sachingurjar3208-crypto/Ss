@@ -407,10 +407,10 @@ def _not_for_sale(key: str) -> str | None:
     return None
 
 
-def _grant(conn: sqlite3.Connection, uid: int, key: str, source: str) -> str:
+def _grant(conn: sqlite3.Connection, uid: int, key: str, source: str, allow_disabled: bool = False) -> str:
     """Give one card. Returns "added", "pending" (squad full), "dupe", or "blocked"
     (the card belongs to a disabled event, so nobody gets it)."""
-    if _event_disabled(key):
+    if not allow_disabled and _event_disabled(key):
         return "blocked"
     if _holds(conn, uid, key):
         return "dupe"
@@ -1165,7 +1165,8 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
             if key in seen:
                 status = "dupe"
             else:
-                status = _grant(conn, uid, key, f"Draft pool {pool}")
+                status = _grant(conn, uid, key, f"Draft pool {pool}",
+                                allow_disabled=pool in ("A", "B"))
                 seen.add(key)
             refund = 0
             if status == "dupe":
