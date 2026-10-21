@@ -427,6 +427,37 @@ def set_event_disabled(eventname: str, disabled: bool) -> bool:
     return ok
 
 
+def rename_event(eventname: str, newname: str) -> tuple[str, dict | None]:
+    """Rename an event. The event key is the lowercase name and cards point at it, so the
+    events row AND every card of that event are moved to the new key in one transaction.
+    Returns (status, event_row): "ok" | "missing" (no such event) | "empty" (blank new name)
+    | "exists" (another event already has that name) | "same" (name is already exactly this)."""
+    old_key = (eventname or "").strip().lower()
+    name = (newname or "").strip()[:_EVENT_NAME_MAX].strip()
+    if not name:
+        return "empty", None
+    new_key = name.lower()
+    with _conn() as conn:
+        _ensure_events(conn)
+        row = conn.execute("SELECT * FROM events WHERE event_key = ?", (old_key,)).fetchone()
+        if row is None:
+            return "missing", None
+        if row["eventname"] == name:
+            return "same", dict(row)
+        if new_key != old_key and conn.execute(
+            "SELECT 1 FROM events WHERE event_key = ?", (new_key,)
+        ).fetchone():
+            return "exists", None
+        conn.execute("UPDATE events SET event_key = ?, eventname = ? WHERE event_key = ?",
+                     (new_key, name, old_key))
+        if new_key != old_key:
+            conn.execute("UPDATE cards SET event_key = ? WHERE event_key = ?", (new_key, old_key))
+        conn.commit()
+        updated = dict(conn.execute("SELECT * FROM events WHERE event_key = ?", (new_key,)).fetchone())
+    _invalidate_events()
+    return "ok", updated
+
+
 def count_event_cards(event_key: str) -> int:
     with _conn() as conn:
         return int(conn.execute(

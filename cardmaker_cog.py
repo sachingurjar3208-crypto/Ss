@@ -20,6 +20,7 @@
     /eventmaker     make an event (name + emoji id). Cards of an event show its emoji first in every XI
     /eventdisable   switch an event off: nobody can get any card of it any more (/eventenable switches it on)
     /eventlist      list all events
+    /rename         rename an event (cards of that event move to the new name automatically)
 
 Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 """
@@ -51,7 +52,7 @@ from card_db import (
     update_panel_layout, set_card_panel, set_style2_options,
     cards_using_panel, reassign_cards_panel,
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
-    set_card_event, set_card_obtainable, get_event, list_events, create_event,
+    set_card_event, set_card_obtainable, get_event, list_events, create_event, rename_event,
     set_event_disabled, parse_emoji_input, count_event_cards, event_emoji_str,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
@@ -643,6 +644,28 @@ class CardMakerCog(commands.Cog):
             state = "⛔ disabled" if int(e.get("disabled") or 0) else "✅ enabled"
             lines.append(f"{event_emoji_str(e)} **{e['eventname']}** · {count_event_cards(e['event_key'])} card(s) · {state}")
         await interaction.response.send_message("\n".join(lines)[:1900])
+
+    @app_commands.command(name="rename", description="Rename an event (all its cards keep the event)")
+    @app_commands.describe(eventname="Which event to rename (pick from the list)",
+                           newname="The new name for this event")
+    @app_commands.autocomplete(eventname=event_autocomplete)
+    @is_owner()
+    async def rename(self, interaction: discord.Interaction, eventname: str, newname: str):
+        await interaction.response.defer()
+        status, ev = rename_event(eventname, newname)
+        if status == "missing":
+            await interaction.followup.send(f"❌ No event called `{eventname}`. See `/eventlist`.")
+        elif status == "empty":
+            await interaction.followup.send("❌ The new name can't be empty.")
+        elif status == "exists":
+            await interaction.followup.send(f"❌ An event called `{newname.strip()}` already exists. Pick a different name.")
+        elif status == "same":
+            await interaction.followup.send(f"ℹ️ That event is already called **{ev['eventname']}**.")
+        else:
+            n = count_event_cards(ev["event_key"])
+            await interaction.followup.send(
+                f"✅ Event renamed: `{eventname}` → {event_emoji_str(ev)} **{ev['eventname']}** · {n} card(s) moved with it."
+            )
 
     # ── /csrarity ────────────────────────────────────────────────────
     @app_commands.command(
