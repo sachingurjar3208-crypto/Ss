@@ -20,7 +20,8 @@
     /eventmaker     make an event (name + emoji id). Cards of an event show its emoji first in every XI
     /eventdisable   switch an event off: nobody can get any card of it any more (/eventenable switches it on)
     /eventlist      list all events
-    /rename         rename an event (cards of that event move to the new name automatically)
+    /rename card    rename a card's player name (frees the old name for a new card)
+    /rename event   rename an event (cards of that event move to the new name automatically)
 
 Only OWNER_ID may run any of these — everyone else gets a plain refusal.
 """
@@ -65,7 +66,7 @@ import aiohttp
 # Owner / admin role / server id now live in bot_guard.py (one place for the whole bot).
 # Members with the admin role can use every command in this file
 # (/cardmaker, /editcard, /bgadder, /foregroundfix ...), same as the owner.
-from bot_guard import ADMIN_ROLE_IDS as ALLOWED_ROLE_IDS, MaintenanceActive, OWNER_ID, admin_only
+from bot_guard import ADMIN_ROLE_IDS as ALLOWED_ROLE_IDS, MaintenanceActive, OWNER_ID, admin_only, is_staff, ADMIN_GUILD_ID
 MAX_STAT = 150
 MIN_SCALE_PCT = 10
 MAX_SCALE_PCT = 400
@@ -131,9 +132,21 @@ async def event_autocomplete(interaction: discord.Interaction, current: str):
 
 
 async def playername_autocomplete(interaction: discord.Interaction, current: str):
+    # Shows "Virat Kohli · 95 OVR · RCB Event" so cards with similar names can be told apart.
+    # The value is still the exact playername, so the right card is always the one edited.
     current_l = current.lower()
-    names = [n for n in list_playernames() if current_l in n.lower()]
-    return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+    ev_names = {e["event_key"]: e["eventname"] for e in list_events()}
+    out = []
+    for c in list_all_cards():
+        n = c["playername"]
+        if current_l not in n.lower():
+            continue
+        ev = ev_names.get((c["event_key"] or "").lower()) if c["event_key"] else None
+        label = f"{n} · {c['ovr']} OVR" + (f" · {ev}" if ev else "")
+        out.append(app_commands.Choice(name=label[:100], value=n[:100]))
+        if len(out) >= 25:
+            break
+    return out
 
 
 async def _regenerate_silently(playername: str) -> bool:
@@ -265,15 +278,23 @@ class CardMakerCog(commands.Cog):
         else:
             await interaction.response.send_message(msg, ephemeral=True)
 
-    # ── /renamecard ──────────────────────────────────────────────────
-    @app_commands.command(name="renamecard", description="Change a card's player name (card image and owners stay the same)")
+    # ── /rename card  and  /rename event ─────────────────────────────
+    # One command group: /rename card playername:<card> newname:<new name>
+    #                    /rename event eventname:<event> newname:<new name>
+    rename = app_commands.Group(
+        name="rename", description="Rename a card or an event",
+        guild_only=True, default_permissions=discord.Permissions(),
+    )
+    app_commands.guilds(ADMIN_GUILD_ID)(rename)      # only exists in your server (like admin_only)
+
+    @rename.command(name="card", description="Change a card's player name (image + owners stay; old name becomes free again)")
     @app_commands.describe(
         playername="Card to rename (pick from the list)",
-        newname="The new player name",
+        newname="The new player name, e.g. Virat Kohli Season 1",
     )
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @is_owner()
-    async def renamecard(self, interaction: discord.Interaction, playername: str, newname: str):
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def rename_card(self, interaction: discord.Interaction, playername: str, newname: str):
         await interaction.response.defer()
         import card_rename
         card = get_card(playername)
@@ -282,9 +303,14 @@ class CardMakerCog(commands.Cog):
         if err:
             await interaction.followup.send(f"❌ {err}")
             return
+        clean = " ".join(newname.split())
         await interaction.followup.send(
-            f"✅ Renamed **{old_shown}** → **{' '.join(newname.split())}**.\n"
-            f"Card image and its corner name are unchanged, and everyone who owns it still has it."
+            f"✅ Renamed **{old_shown}** → **{clean}**.\n"
+            f"Card image and its corner name are unchanged, and everyone who owns it still has it.\n"
+            f"The name **{old_shown}** is free now: you can make a new card with it using `/cardmaker`. "
+            f"Both cards stay the same real player (only one of them fits in an XI)."
+            if clean.lower() != old_shown.strip().lower() else
+            f"✅ Name updated to **{clean}**."
         )
 
     # ── /cardmaker ───────────────────────────────────────────────────
@@ -670,12 +696,12 @@ class CardMakerCog(commands.Cog):
             lines.append(f"{event_emoji_str(e)} **{e['eventname']}** · {count_event_cards(e['event_key'])} card(s) · {state}")
         await interaction.response.send_message("\n".join(lines)[:1900])
 
-    @app_commands.command(name="rename", description="Rename an event (all its cards keep the event)")
+    @rename.command(name="event", description="Rename an event (all its cards keep the event)")
     @app_commands.describe(eventname="Which event to rename (pick from the list)",
                            newname="The new name for this event")
     @app_commands.autocomplete(eventname=event_autocomplete)
-    @is_owner()
-    async def rename(self, interaction: discord.Interaction, eventname: str, newname: str):
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def rename_event_cmd(self, interaction: discord.Interaction, eventname: str, newname: str):
         await interaction.response.defer()
         status, ev = rename_event(eventname, newname)
         if status == "missing":

@@ -54,16 +54,14 @@ def rename_card(old_name: str, new_name: str) -> tuple[str | None, int]:
         conn.execute("BEGIN IMMEDIATE")
         try:
             if new_key != old_key:
-                # If other cards were grouped under this card's old name, keep them grouped.
+                # Keep the real-player identity: the renamed card stays in the group of its
+                # old name (e.g. "virat kohli"), so a NEW card called Virat Kohli and this
+                # renamed one are the same real player (XI takes only one of them).
                 if not card["player_group"]:
-                    shared = conn.execute(
-                        "SELECT 1 FROM main.cards WHERE player_group = ? LIMIT 1", (old_key,)
-                    ).fetchone()
-                    if shared:
-                        conn.execute(
-                            "UPDATE main.cards SET player_group = ? WHERE playername_key = ?",
-                            (old_key, old_key),
-                        )
+                    conn.execute(
+                        "UPDATE main.cards SET player_group = ? WHERE playername_key = ?",
+                        (old_key, old_key),
+                    )
 
                 for schema in ("main", "eco", "cg"):
                     tables = [r[0] for r in conn.execute(

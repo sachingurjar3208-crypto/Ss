@@ -269,6 +269,151 @@ class BuySellView(OwnedView):
         await super().on_timeout()
 
 
+# ── csbuy browser: same name, many cards (◀ ▶) ─────────────────────────────
+# `csbuy virat kohli` shows every Virat Kohli card (normal, event, renamed ...).
+# ✅ buys the card on screen, ❌ cancels, ◀ ▶ flip through the cards.
+
+def _buy_text(card) -> str:
+    text = f"**Price:** `{sl.buy_price(card):,}` {emojis.COIN}"
+    if not card_db.is_obtainable(card):
+        text += "\n⚠️ This card type is not available for purchase"
+    return text
+
+
+def find_buy_cards(text: str) -> list:
+    """Every card that matches the typed name, exact name first, then the rest of the
+    same real player (group), then other name matches. No duplicates."""
+    found = list(card_db.find_cards(text, limit=24))
+    out, seen = [], set()
+
+    def add(c):
+        k = c["playername_key"]
+        if k not in seen:
+            seen.add(k)
+            out.append(c)
+
+    for c in found:
+        add(c)
+    if found:
+        for c in card_db.list_group_cards(card_db.group_key(found[0])):
+            add(c)
+    return out[:25]
+
+
+class BuyBrowseView(OwnedView):
+    def __init__(self, user_id: int, cards: list, index: int = 0):
+        super().__init__(user_id, timeout=BUYSELL_TIMEOUT)
+        self.user_id = user_id
+        self.cards = cards
+        self.index = index
+        self.used = False
+        if len(cards) < 2:
+            self.remove_item(self.prev_b)
+            self.remove_item(self.next_b)
+        self._sync_buttons()
+
+    @property
+    def card(self):
+        return self.cards[self.index]
+
+    def _sync_buttons(self) -> None:
+        # Cards nobody may buy: the tick stays visible but grey and dead.
+        locked = not card_db.is_obtainable(self.card)
+        self.yes.disabled = locked
+        self.yes.style = discord.ButtonStyle.secondary if locked else discord.ButtonStyle.success
+
+    def _embed(self) -> discord.Embed:
+        return _buysell_embed(self.card, _buy_text(self.card))
+
+    async def _show(self, interaction: discord.Interaction) -> None:
+        self._sync_buttons()
+        embed, path = self._embed(), self.card["image_path"]
+        if card_cache.cached_url(path) or not path:
+            await interaction.response.edit_message(embed=embed, view=self)
+            return
+        await interaction.response.defer()
+        file = await card_cache.card_file(path)
+        if file is None:
+            await interaction.edit_original_response(
+                embed=discord.Embed(description=_buy_text(self.card), color=discord.Color.gold()),
+                attachments=[], view=self)
+            return
+        msg = await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
+        card_cache.remember(path, msg)
+
+    @ui.button(emoji="✅", style=discord.ButtonStyle.success, row=0)
+    async def yes(self, interaction: discord.Interaction, button: ui.Button):
+        if self.used:
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        _pending_confirm.discard(self.user_id)
+        uid, card = self.user_id, self.card
+        key = card["playername_key"]
+        if _in_match(interaction.client, uid):
+            result = "You can't buy players during a match."
+        elif not card_db.is_obtainable(card):
+            result = LOCKED_CARD_TEXT
+        elif economy.owns(uid, key):
+            result = "You already own this player."
+        elif economy.squad_count(uid) >= economy.SQUAD_MAX:
+            result = (f"❌ Your squad is full (**{economy.SQUAD_MAX}/{economy.SQUAD_MAX}**). "
+                      f"Sell a player first with `cssell`.")
+        else:
+            price = sl.buy_price(card)
+            e = economy.buy_card(uid, key, price)
+            result = str(e) if e else f"Bought {esc(card['playername'])} for {_plain_coins(price)}."
+        await interaction.response.edit_message(embed=_buysell_embed(card, result), view=None)
+
+    @ui.button(emoji="❌", style=discord.ButtonStyle.danger, row=0)
+    async def no(self, interaction: discord.Interaction, button: ui.Button):
+        if self.used:
+            await interaction.response.defer()
+            return
+        self.used = True
+        self.stop()
+        _pending_confirm.discard(self.user_id)
+        await interaction.response.edit_message(embed=_buysell_embed(self.card, "Cancelled."), view=None)
+
+    @ui.button(emoji="◀️", style=discord.ButtonStyle.primary, row=0)
+    async def prev_b(self, interaction: discord.Interaction, button: ui.Button):
+        self.index = (self.index - 1) % len(self.cards)
+        await self._show(interaction)
+
+    @ui.button(emoji="▶️", style=discord.ButtonStyle.primary, row=0)
+    async def next_b(self, interaction: discord.Interaction, button: ui.Button):
+        self.index = (self.index + 1) % len(self.cards)
+        await self._show(interaction)
+
+    async def on_timeout(self) -> None:
+        _pending_confirm.discard(self.user_id)
+        await super().on_timeout()
+
+
+async def _send_buy_browser(ctx: commands.Context, cards: list):
+    if ctx.author.id in _pending_confirm:
+        await ctx.send("❌ You already have a confirmation waiting — finish that first.")
+        return
+    _pending_confirm.add(ctx.author.id)
+    try:
+        view = BuyBrowseView(ctx.author.id, cards)
+        card = view.card
+        embed, path = view._embed(), card["image_path"]
+        url = card_cache.cached_url(path)
+        file = None if url else await card_cache.card_file(path)
+        if not url and file is None:
+            embed = discord.Embed(description=_buy_text(card), color=discord.Color.gold())
+        if file:
+            view.message = await ctx.send(embed=embed, file=file, view=view)
+            card_cache.remember(path, view.message)
+        else:
+            view.message = await ctx.send(embed=embed, view=view)
+    except Exception:
+        _pending_confirm.discard(ctx.author.id)
+        raise
+
+
 # ── csms: multi sell ─────────────────────────────────────────────────────────
 
 class MultiSellView(OwnedView):
@@ -825,39 +970,13 @@ class EconomyCog(commands.Cog, name="Economy"):
         if _in_match(self.bot, ctx.author.id):
             await ctx.send("You can't buy players during a match.")
             return
-        card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
-        if card is None:
-            await ctx.send(str(err))
+        text = security.clean_input(player)
+        cards = await asyncio.to_thread(find_buy_cards, text)
+        if not cards:
+            await ctx.send(f"No player found matching `{sl.discord_safe(text)}`.")
             return
-        if not card_db.is_obtainable(card):
-            # Show the card itself with a grey (dead) tick, plus our own locked note.
-            async def never() -> str:
-                return LOCKED_CARD_TEXT
-            await _send_buysell(
-                ctx, card,
-                f"**Price:** `{sl.buy_price(card):,}`\n{LOCKED_CARD_TEXT}",
-                never, buy_locked=True,
-            )
-            return
-        if economy.owns(ctx.author.id, card["playername_key"]):
-            await ctx.send("You already own this player.")
-            return
-        if economy.squad_count(ctx.author.id) >= economy.SQUAD_MAX:
-            await ctx.send(f"❌ Your squad is full (**{economy.SQUAD_MAX}/{economy.SQUAD_MAX}**). Sell a player first with `cssell`.")
-            return
-        price = sl.buy_price(card)
-        uid, key = ctx.author.id, card["playername_key"]
-
-        async def do_buy() -> str:
-            e = economy.buy_card(uid, key, price)
-            return str(e) if e else f"Bought {esc(card['playername'])} for {_plain_coins(price)}."
-
-        await _send_buysell(
-            ctx, card,
-            f"Buy {esc(card['playername'])} ({card['ovr']} OVR) for {_plain_coins(price)}?\n"
-            f"Your coins: {_plain_coins(economy.get_balance(uid))}",
-            do_buy,
-        )
+        # Buy / owned / squad-full checks happen when ✅ is pressed, for the card on screen.
+        await _send_buy_browser(ctx, cards)
 
     @commands.command(name="cssell")
     @economy_gate(BUYSELL_COOLDOWN)
