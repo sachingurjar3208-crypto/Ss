@@ -228,7 +228,7 @@ async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable
         raise
 
 
-LOCKED_CARD_TEXT = "🔒 Ye card locked hai, shop se nahi kharid sakte."
+LOCKED_CARD_TEXT = "🔒 This card isn't sold in the shop"
 
 
 class BuySellView(OwnedView):
@@ -276,7 +276,7 @@ class BuySellView(OwnedView):
 def _buy_text(card) -> str:
     text = f"**Price:** `{sl.buy_price(card):,}` {emojis.COIN}"
     if not card_db.is_obtainable(card):
-        text += "\n⚠️ This card type is not available for purchase"
+        text += "\n" + LOCKED_CARD_TEXT
     return text
 
 
