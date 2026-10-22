@@ -98,6 +98,9 @@ _NEW_CARD_COLUMNS = [
     # ── Events (set with /cardmaker and /editcard, events made with /eventmaker) ──
     ("event_key",  "TEXT"),                              # NULL = normal card, else events.event_key
     ("obtainable", "INTEGER NOT NULL DEFAULT 1"),       # 1 = packs / claims / draft / shop, 0 = manual only (Star Pass, admin give)
+    # Same real player, many cards: all versions share one player_group (e.g. "virat kohli").
+    # NULL = the card is its own group (old cards keep working unchanged).
+    ("player_group", "TEXT"),
 ]
 
 
@@ -240,6 +243,7 @@ def create_card(
     bowling_type: str | None = None,
     event_key: str | None = None,
     obtainable: bool = True,
+    player_group: str | None = None,
 ) -> None:
     now = time.time()
     with _conn() as conn:
@@ -250,8 +254,8 @@ def create_card(
                 background, ovr, bat, bowl, country, country_emoji,
                 offset_x, offset_y, scale_pct, image_path, created_by, created_at, updated_at,
                 role, batting_hand, playstyle1, playstyle2, bowling_type,
-                event_key, obtainable
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 100, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                event_key, obtainable, player_group
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 100, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 playername.strip().lower(), playername.strip(), displayname.strip(),
@@ -259,6 +263,7 @@ def create_card(
                 country, country_emoji, created_by, now, now,
                 role, batting_hand, playstyle1, playstyle2, bowling_type,
                 (event_key.strip().lower() if event_key else None), 1 if obtainable else 0,
+                (player_group.strip().lower() if player_group and player_group.strip() else None),
             ),
         )
         conn.commit()
@@ -499,6 +504,43 @@ def key_event_disabled(player_key: str) -> bool:
     """True if this card belongs to a disabled event (so nobody may be given it)."""
     row = get_card(player_key)
     return bool(row is not None and is_event_disabled(row))
+
+
+def group_key(card) -> str:
+    """The real-player identity of a card. Several cards can share it (Kohli RCB, Kohli India...).
+    Cards with no player_group are their own group."""
+    g = _rget(card, "player_group", None)
+    return str(g).strip().lower() if g and str(g).strip() else str(card["playername_key"]).strip().lower()
+
+
+def group_key_of(player_key: str) -> str:
+    """Same as group_key() but from a card key. Unknown card -> the key itself."""
+    row = get_card(player_key)
+    return group_key(row) if row is not None else str(player_key).strip().lower()
+
+
+def group_keys(keys: list[str]) -> dict[str, str]:
+    """{card_key: group_key} for many cards in one query."""
+    found = get_cards(list(keys))
+    return {k: (group_key(found[k.strip().lower()]) if k.strip().lower() in found
+                else k.strip().lower()) for k in keys}
+
+
+def list_group_cards(group: str) -> list[sqlite3.Row]:
+    """Every card of one real player, best OVR first."""
+    g = group.strip().lower()
+    return [c for c in list_all_cards() if group_key(c) == g]
+
+
+def set_card_group(playername: str, group: str | None) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE cards SET player_group = ?, updated_at = ? WHERE playername_key = ?",
+            ((group.strip().lower() if group and group.strip() else None), time.time(),
+             playername.strip().lower()),
+        )
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def list_obtainable_cards() -> list[sqlite3.Row]:

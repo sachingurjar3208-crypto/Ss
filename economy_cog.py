@@ -192,7 +192,8 @@ def _buysell_embed(card, text: str) -> discord.Embed:
     return embed
 
 
-async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable[[], Awaitable[str]]):
+async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable[[], Awaitable[str]],
+                        buy_locked: bool = False):
     """Send the card image + text with the check / cross buttons.
     Refuses (politely) if this user already has a confirm button waiting —
     see _pending_confirm above."""
@@ -202,7 +203,7 @@ async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable
     _pending_confirm.add(ctx.author.id)
     try:
         import time as _t
-        view = BuySellView(ctx.author.id, card, action)
+        view = BuySellView(ctx.author.id, card, action, buy_locked=buy_locked)
         t0 = _t.perf_counter()
         embed = _buysell_embed(card, text)
         path = card["image_path"]
@@ -227,13 +228,20 @@ async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable
         raise
 
 
+LOCKED_CARD_TEXT = "🔒 Ye card locked hai, shop se nahi kharid sakte."
+
+
 class BuySellView(OwnedView):
-    def __init__(self, user_id: int, card, action: Callable[[], Awaitable[str]]):
+    def __init__(self, user_id: int, card, action: Callable[[], Awaitable[str]], buy_locked: bool = False):
         super().__init__(user_id, timeout=BUYSELL_TIMEOUT)
         self.user_id = user_id
         self.card = card
         self.action = action
         self.used = False
+        if buy_locked:
+            # Unobtainable card: the buy (tick) button stays visible but grey and dead.
+            self.yes.disabled = True
+            self.yes.style = discord.ButtonStyle.secondary
 
     @ui.button(emoji="✅", style=discord.ButtonStyle.success)
     async def yes(self, interaction: discord.Interaction, button: ui.Button):
@@ -822,7 +830,14 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send(str(err))
             return
         if not card_db.is_obtainable(card):
-            await ctx.send("❌ This player isn't available in the shop.")
+            # Show the card itself with a grey (dead) tick, plus our own locked note.
+            async def never() -> str:
+                return LOCKED_CARD_TEXT
+            await _send_buysell(
+                ctx, card,
+                f"**Price:** `{sl.buy_price(card):,}`\n{LOCKED_CARD_TEXT}",
+                never, buy_locked=True,
+            )
             return
         if economy.owns(ctx.author.id, card["playername_key"]):
             await ctx.send("You already own this player.")

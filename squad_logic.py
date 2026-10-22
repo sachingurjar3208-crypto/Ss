@@ -212,6 +212,14 @@ def best_xi(cards: list) -> list:
     """Best 11 of `cards`, satisfying ROLE_LIMITS when the owned pool allows
     it (WK 1-2, BAT 5-6, AR 1-3, BOWL 3-5), otherwise highest overall.
     Returned in batting order."""
+    # one card per real player: keep only the highest-OVR card of each player_group
+    best_of: dict[str, object] = {}
+    for c in cards:
+        g = card_db.group_key(c)
+        if g not in best_of or c["ovr"] > best_of[g]["ovr"]:
+            best_of[g] = c
+    cards = [c for c in cards if best_of[card_db.group_key(c)] is c]
+
     if len(cards) <= economy.XI_SIZE:
         return order_xi(list(cards))
 
@@ -334,6 +342,10 @@ def xi_problem(user_id) -> str | None:
     cards = xi_cards(user_id)
     if len(cards) != economy.XI_SIZE:
         return f"has only {len(cards)}/{economy.XI_SIZE} players in the XI"
+
+    groups = [card_db.group_key(c) for c in cards]
+    if len(set(groups)) != len(groups):
+        return "has two cards of the same player in the XI (only one card per player is allowed)"
 
     counts = xi_role_counts(cards)
     for role, (lo, hi) in ROLE_LIMITS.items():

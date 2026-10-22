@@ -493,7 +493,7 @@ def resolve_pending(user_id, new_key: str, action: str, replace_key: str | None 
             conn.execute(
                 "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, new_key, time.time())
             )
-            if slot_row is not None:
+            if slot_row is not None and not _xi_has_group(conn, uid, new_key):
                 conn.execute(
                     "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot_row["slot"], new_key)
                 )
@@ -723,12 +723,42 @@ def _xi_rows(conn: sqlite3.Connection, uid: int) -> dict[int, str]:
     return {r["slot"]: r["player_key"] for r in rows}
 
 
+DUPLICATE_PLAYER_MSG = "XI me ek player ka sirf ek hi card ho sakta hai. Pehle uska doosra card bench karo."
+
+
+def _group_of(key: str) -> str:
+    """Real-player identity of a card key (see card_db.group_key). Never raises."""
+    try:
+        import card_db
+        return card_db.group_key_of(key)
+    except Exception as e:
+        print(f"[xi-group] lookup failed: {type(e).__name__}: {e}")
+        return str(key).strip().lower()
+
+
+def _xi_has_group(conn: sqlite3.Connection, uid: int, key: str, ignore: tuple = ()) -> bool:
+    """True if the XI already holds ANOTHER card of the same real player as `key`.
+    `ignore` = card keys that are leaving the XI right now (so they don't count)."""
+    g = _group_of(key)
+    for k in _xi_rows(conn, uid).values():
+        if k == key or k in ignore:
+            continue
+        if _group_of(k) == g:
+            return True
+    return False
+
+
 def _fill_empty_slots(conn: sqlite3.Connection, uid: int, keys: list[str]) -> None:
-    """Put new players into the first empty XI slots, the rest stay on the bench."""
-    taken = _xi_rows(conn, uid)
-    free = [s for s in range(1, XI_SIZE + 1) if s not in taken]
-    for slot, key in zip(free, keys):
-        conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, key))
+    """Put new players into the first empty XI slots, the rest stay on the bench.
+    A card whose real player is already in the XI stays on the bench."""
+    for key in keys:
+        taken = _xi_rows(conn, uid)
+        free = [s for s in range(1, XI_SIZE + 1) if s not in taken]
+        if not free:
+            break
+        if _xi_has_group(conn, uid, key):
+            continue
+        conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, free[0], key))
 
 
 # ── XI / captain ────────────────────────────────────────────────────────────
@@ -760,6 +790,9 @@ def set_full_xi(user_id, keys: list[str]) -> bool:
             if k not in owned:
                 return False
             stored.append(owned[k])
+        groups = [_group_of(k) for k in stored]
+        if len(set(groups)) != len(groups):
+            return False   # two cards of the same real player in one XI
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
         for slot, k in enumerate(stored, start=1):
             conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, k))
@@ -786,6 +819,11 @@ def swap_players(user_id, key_a: str, key_b: str) -> str | None:
         sa, sb = slot_of.get(key_a), slot_of.get(key_b)
         if sa is None and sb is None:
             return "Both players are on the bench — at least one must be in your XI."
+        # bench card coming in must not clash with another card of the same real player
+        if (sa is None) != (sb is None):
+            incoming, outgoing = (key_a, key_b) if sa is None else (key_b, key_a)
+            if _xi_has_group(conn, uid, incoming, ignore=(outgoing,)):
+                return DUPLICATE_PLAYER_MSG
         # Remove first, then re-insert, so the UNIQUE(player_key) rule never trips halfway.
         if sa is not None:
             conn.execute("DELETE FROM xi WHERE user_id = ? AND slot = ?", (uid, sa))
@@ -863,7 +901,7 @@ def sell_card(user_id, player_key: str, value: int, replacement_key: str | None)
             in_xi = conn.execute(
                 "SELECT 1 FROM xi WHERE user_id = ? AND player_key = ?", (uid, replacement_key)
             ).fetchone()
-            if ok and not in_xi:
+            if ok and not in_xi and not _xi_has_group(conn, uid, replacement_key):
                 conn.execute(
                     "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)",
                     (uid, slot_row["slot"], replacement_key),
@@ -915,7 +953,7 @@ def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) ->
                 in_xi = conn.execute(
                     "SELECT 1 FROM xi WHERE user_id = ? AND player_key = ?", (uid, cand)
                 ).fetchone()
-                if owned_ok and not in_xi:
+                if owned_ok and not in_xi and not _xi_has_group(conn, uid, cand):
                     conn.execute(
                         "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, cand)
                     )
@@ -1258,7 +1296,14 @@ def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
                 "INSERT OR IGNORE INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, k, now)
             )
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
-        for slot, k in enumerate(xi_order[:XI_SIZE], start=1):
+        seen_groups: set[str] = set()
+        slot = 0
+        for k in xi_order[:XI_SIZE]:
+            g = _group_of(k)
+            if g in seen_groups:
+                continue
+            seen_groups.add(g)
+            slot += 1
             conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, k))
         conn.execute("UPDATE users SET starter_claimed = 1 WHERE user_id = ?", (uid,))
         return None
@@ -1331,7 +1376,7 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
             conn.execute(
                 "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (u, in_k, time.time())
             )
-            if slot_row is not None:
+            if slot_row is not None and not _xi_has_group(conn, u, in_k):
                 conn.execute(
                     "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (u, slot_row["slot"], in_k)
                 )

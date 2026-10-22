@@ -265,6 +265,28 @@ class CardMakerCog(commands.Cog):
         else:
             await interaction.response.send_message(msg, ephemeral=True)
 
+    # ── /renamecard ──────────────────────────────────────────────────
+    @app_commands.command(name="renamecard", description="Change a card's player name (card image and owners stay the same)")
+    @app_commands.describe(
+        playername="Card to rename (pick from the list)",
+        newname="The new player name",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def renamecard(self, interaction: discord.Interaction, playername: str, newname: str):
+        await interaction.response.defer()
+        import card_rename
+        card = get_card(playername)
+        old_shown = card["playername"] if card else playername
+        err, changed = await asyncio.to_thread(card_rename.rename_card, playername, newname)
+        if err:
+            await interaction.followup.send(f"❌ {err}")
+            return
+        await interaction.followup.send(
+            f"✅ Renamed **{old_shown}** → **{' '.join(newname.split())}**.\n"
+            f"Card image and its corner name are unchanged, and everyone who owns it still has it."
+        )
+
     # ── /cardmaker ───────────────────────────────────────────────────
     @app_commands.command(name="cardmaker", description="Create a new player card")
     @app_commands.describe(
@@ -283,6 +305,7 @@ class CardMakerCog(commands.Cog):
         bowlingtype="Bowling type for bowlers/all-rounders (Fast / Medium Pacer / Off Spin / Leg Spin / Orthodox; default Fast)",
         event="Event of this card (from /eventmaker). Its emoji shows in the XI. Empty = normal card",
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand. Default True",
+        player="Real player this card belongs to, e.g. Virat Kohli. Many cards can share it; XI takes only one. Empty = same as playername",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
@@ -310,6 +333,7 @@ class CardMakerCog(commands.Cog):
         bowlingtype: str | None = None,
         event: str | None = None,
         obtainable: bool = True,
+        player: str | None = None,
     ):
         await interaction.response.defer()
 
@@ -360,6 +384,7 @@ class CardMakerCog(commands.Cog):
             bowling_type=bowlingtype,
             event_key=event_row["event_key"] if event_row else None,
             obtainable=obtainable,
+            player_group=player,
         )
 
         try:
