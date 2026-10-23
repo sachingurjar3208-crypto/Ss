@@ -24,7 +24,8 @@ def _toss_result_file(result: str) -> tuple[discord.File, str]:
 
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
-from commentary import build_ball_commentary
+from commentary import build_ball_commentary, SIX_DISTANCES
+from wagon_wheel import wagon_wheel_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 
 
@@ -1047,6 +1048,7 @@ async def _send_commentary_with_gifs(
     embed: discord.Embed,
     gif_urls: list[str],
     interaction: discord.Interaction | None = None,
+    wheel: bytes | None = None,
 ):
     """
     Show ball commentary + scoreboard embed.
@@ -1060,6 +1062,12 @@ async def _send_commentary_with_gifs(
             await channel.send(content=commentary, embed=embed)
     else:
         await channel.send(content=commentary, embed=embed)
+
+    if wheel:   # wagon wheel for a four / six
+        try:
+            await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
+        except Exception:
+            pass
 
     for url in gif_urls:
         try:
@@ -1302,6 +1310,9 @@ async def _process_delivery_locked(
     else:
         commentary_suffix = ""
 
+    # One six distance, used by both the commentary and the wagon-wheel picture.
+    six_distance = random.choice(SIX_DISTANCES) if outcome == "6" else None
+
     commentary = build_ball_commentary(
         bowler_name=bname,
         bowler_ovr=bowler.get("ovr", 80),
@@ -1315,6 +1326,7 @@ async def _process_delivery_locked(
         bowling_type=bowler.get("bowling_type", "Fast"),
         stage1_choice=stage1_choice,
         direction=direction,
+        six_distance=six_distance,
     ) + commentary_suffix
 
     # BUG FIX #8: bowler_stats[bname] is initialised inside BowlerSelectView
@@ -1455,6 +1467,16 @@ async def _process_delivery_locked(
                     gif_urls.append(gif)
                 break
 
+    # Wagon wheel: only for a four or a six (None for everything else).
+    wheel = None
+    if outcome in ("4", "6"):
+        try:
+            wheel = await asyncio.to_thread(
+                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal
+            )
+        except Exception:
+            wheel = None
+
     # ── Acknowledge the shot button (remove it from the message) ─────────
     # BUG FIX #4: always ack the interaction immediately to avoid
     # "This interaction failed" errors. We edit in-place to remove the view.
@@ -1519,11 +1541,11 @@ async def _process_delivery_locked(
             if outcome == "W":
                 game.timeline.append(_timeline_emoji("W"))
             if game.innings == 1:
-                await _do_innings_break(channel, game, commentary, embed, gif_urls, interaction)
+                await _do_innings_break(channel, game, commentary, embed, gif_urls, interaction, wheel=wheel)
             else:
                 save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
                 _save_match_record(game)
-                await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
+                await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
                 await _ranked_announce(channel, game)
@@ -1545,20 +1567,20 @@ async def _process_delivery_locked(
                 game.rotate_strike()
             game.timeline.append("|")
             game.end_over()
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
             await _send_next_bowler_prompt(channel, game)
             return
 
         # ── Extras (wide / no-ball) — re-bowl ────────────────────────────
         if is_extra:
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
             # NB outcomes set pending_free_hit; wides do not.
             # _send_bowling_prompt reads and clears the flag to show FREE HIT label.
             await _send_bowling_prompt(channel, game)
             return
 
         # ── Normal continue ───────────────────────────────────────────────
-        await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction)
+        await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
         await _send_bowling_prompt(channel, game)
 
     except Exception as e:
@@ -1615,10 +1637,10 @@ async def _handle_wicket_fall(channel, game: GameState):
 # Innings transition helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _do_innings_break(channel, game: GameState, commentary, embed, gif_urls=None, interaction=None):
+async def _do_innings_break(channel, game: GameState, commentary, embed, gif_urls=None, interaction=None, wheel=None):
     """End of innings via overs exhausted: save stats, send commentary, start break."""
     save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id)
-    await _send_commentary_with_gifs(channel, commentary, embed, gif_urls or [], interaction)
+    await _send_commentary_with_gifs(channel, commentary, embed, gif_urls or [], interaction, wheel=wheel)
     await _start_second_innings(channel, game)
 
 

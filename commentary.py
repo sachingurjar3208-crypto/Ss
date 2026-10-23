@@ -93,6 +93,7 @@ def build_ball_commentary(
     bowling_type: str = "Fast",
     stage1_choice: str = "",
     direction: str | None = None,
+    six_distance: int | None = None,
 ) -> str:
     """Short result commentary (max MAX_COMMENTARY_WORDS words). The bowler,
     delivery type and speed are already announced in the "is coming with ...
@@ -110,7 +111,8 @@ def build_ball_commentary(
     _dir = direction if direction and direction != "Defend" else None
 
     if outcome == "6":
-        dist = random.choice(SIX_DISTANCES)
+        # six_distance is passed in so the wagon-wheel picture shows the same number
+        dist = six_distance if six_distance else random.choice(SIX_DISTANCES)
         tail = f" — over {_dir}!" if _dir else ""
         lines.append(f"**{_num_to_emoji(dist)}m — THAT'S A SIX{tail}**")
     elif outcome == "4":

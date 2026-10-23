@@ -13,7 +13,8 @@ from discord import ui
 
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
-from commentary import build_ball_commentary
+from commentary import build_ball_commentary, SIX_DISTANCES
+from wagon_wheel import wagon_wheel_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 from data import (
     TIMELINE_EMOJIS,
@@ -43,6 +44,17 @@ active_practice: dict[int, GameState] = {}   # channel_id → GameState
 
 def _timeline_emoji(outcome: str) -> str:
     return TIMELINE_EMOJIS.get(outcome, "•")
+
+
+async def _send_wheel(channel, wheel: bytes | None):
+    """Send the wagon-wheel picture (four / six only). Never raises."""
+    if not wheel:
+        return
+    try:
+        import io
+        await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
+    except Exception:
+        pass
 
 
 # ── Difficulty constants ──────────────────────────────────────────────────────
@@ -294,6 +306,9 @@ async def _practice_process_delivery_inner(
     else:
         commentary_suffix = ""
 
+    # One six distance, used by both the commentary and the wagon-wheel picture.
+    six_distance = random.choice(SIX_DISTANCES) if outcome == "6" else None
+
     commentary = build_ball_commentary(
         bowler_name      = bname,
         bowler_ovr       = bowler.get("ovr", 80),
@@ -307,6 +322,7 @@ async def _practice_process_delivery_inner(
         bowling_type     = bowler.get("bowling_type", "Fast"),
         stage1_choice    = stage1_choice,
         direction        = direction,
+        six_distance     = six_distance,
     ) + commentary_suffix
 
     striker_runs_before   = game.batsman_stats.get(sname, {}).get("runs", 0)
@@ -390,6 +406,16 @@ async def _practice_process_delivery_inner(
                     gif_urls.append(gif)
                 break
 
+    # Wagon wheel: only for a four or a six.
+    wheel = None
+    if outcome in ("4", "6"):
+        try:
+            wheel = await asyncio.to_thread(
+                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal
+            )
+        except Exception:
+            wheel = None
+
     # Ack the interaction
     try:
         await interaction.response.edit_message(view=None)
@@ -414,6 +440,7 @@ async def _practice_process_delivery_inner(
         if outcome == "W":
             game.timeline.append(_timeline_emoji("W"))
         await channel.send(content=commentary, embed=embed)
+        await _send_wheel(channel, wheel)
         for url in gif_urls:
             await channel.send(url)
         if game.innings == 1:
@@ -433,6 +460,7 @@ async def _practice_process_delivery_inner(
         game.timeline.append("|")
         game.end_over()
         await channel.send(content=commentary, embed=embed)
+        await _send_wheel(channel, wheel)
         for url in gif_urls:
             await channel.send(url)
         await _practice_next_over(channel, game)
@@ -448,6 +476,7 @@ async def _practice_process_delivery_inner(
 
     # ── Normal continue ───────────────────────────────────────────────────
     await channel.send(content=commentary, embed=embed)
+    await _send_wheel(channel, wheel)
     for url in gif_urls:
         await channel.send(url)
     await _practice_send_bowling(channel, game)
