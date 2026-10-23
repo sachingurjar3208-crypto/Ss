@@ -25,11 +25,12 @@ from data import DIRECTIONS
 # ── Feature switches ─────────────────────────────────────────────────────────
 FIELD_FEATURE_ENABLED = True
 
-# Open question #6 (decided by the product owner: HIDDEN). When False the
-# field editor is an ephemeral message only the bowling captain can see, the
-# confirmed field is not posted in the channel, and `csfield` is DM-only for
-# the bowling captain. Flip to True to make the field public / visible to the
-# batting side (the "realistic" option).
+# Open question #6 (decided: HIDDEN while the batter plays shots). When False
+# the field editor is an ephemeral message only the bowling captain can see and
+# the confirmed field is not posted in the channel. The batter can still look
+# at the field on demand with `csfield` (batter-only, 20 s cooldown), and it is
+# shown on the wagon wheel of a four / six. Flip to True to also post the field
+# picture publicly after every confirm.
 FIELD_VISIBLE_TO_BATTER = False
 
 # Seconds the captain gets before the default field is auto-applied.
@@ -92,13 +93,14 @@ def default_field(max_allowed: int) -> list[str]:
 # ── Gameplay modifier ────────────────────────────────────────────────────────
 # Multipliers applied on top of the existing weights in
 # logic.calculate_outcome() (after MATCHUP_MATRIX etc.; nothing is rewritten).
+#   no_boundary    -> True: weights of "4" AND "6" are set to 0 (stopped ball)
 #   boundary_mult  -> weight of "4"
 #   single_mult    -> weights of "1" and "2"   (a stopped boundary becomes 1-2)
 #   three_mult     -> weight of "3"
 #   dot_mult       -> weight of "0"
 #   wkt_mult       -> weight of "W"            (catch / run-out chance)
-FIELDER_MOD: dict[str, float] = {
-    "boundary_mult": 0.35, "single_mult": 1.15, "three_mult": 0.80,
+FIELDER_MOD: dict = {
+    "no_boundary": True, "boundary_mult": 0.0, "single_mult": 1.15, "three_mult": 0.80,
     "dot_mult": 1.10, "wkt_mult": 1.25,
 }
 GAP_MOD: dict[str, float] = {
@@ -124,41 +126,49 @@ def get_field_modifier(direction_key: str | None, field_positions,
     return dict(FIELDER_MOD if direction_key in field_positions else GAP_MOD)
 
 
-# ── Loft shot INTO a fielder: out chance by bat / bowl rating ───────────────
-# A lofted shot hit towards a direction that has a fielder is dismissed with a
-# fixed probability that depends on the batter's BAT rating (and a bit on the
-# bowler's BOWL rating). Requested bat table (out % vs an average bowler):
-#   bat 99 -> 5%, 98 -> 6%, ... one point at a time ... 90 -> 14%
-#   bat 89 -> 18%, 88 -> 22%, ... four points at a time ... 78 -> 62%
-# The same pattern is continued below 78 (+4% per rating point) up to the cap.
-LOFT_OUT_MIN = 0.02          # never lower than 2% (very good bat, weak bowler)
-LOFT_OUT_MAX = 0.97          # never certain
-LOFT_OUT_BAT_CAP = 95        # base % for the weakest batters (bat <= 69)
-# Bowl: the table above is for a bowler rated LOFT_OUT_BOWL_REF. Every bowl
-# point above/below that scales the chance by LOFT_OUT_BOWL_STEP (clamped).
-LOFT_OUT_BOWL_REF = 80
-LOFT_OUT_BOWL_STEP = 0.02
-LOFT_OUT_BOWL_MULT_RANGE = (0.60, 1.40)
+# ── Shots INTO a fielder ─────────────────────────────────────────────────────
+# GROUND shot towards a fielder: the ball is stopped -> only 0/1/2/3 runs or a
+#   wicket. No four and no six (FIELDER_MOD["no_boundary"], applied in logic.py).
+# LOFTED shot towards a fielder: fixed probabilities of a SIX and a WICKET
+#   (catch) that depend on the batter's BAT rating; everything else is 0-3 runs.
+#   No four is possible (it can't go over the fielder along the ground).
+#   Requested table (bat -> six% / wicket%):
+#     99 -> 46 / 20,  98 -> 45 / 21,  97 -> 44 / 22,  96 -> 43 / 23, ...
+#     one point at a time down to 90 -> 37 / 29  (six -1, wicket +1 per point)
+#     below 90 it flips to -2 / +2 per point: 89 -> 35 / 31, 88 -> 33 / 33 ...
+#   The six % is then multiplied by the batter's PLAYSTYLE six boost
+#   (Power Hitter, Aggressive, Breakthrough ...) — see logic.calculate_outcome.
+LOFT_SIX_AT_99, LOFT_WKT_AT_99 = 46, 20
+LOFT_SIX_MIN = 1             # six chance never below 1% (weak batters)
+LOFT_WKT_MAX = 95            # wicket chance never above 95%
+LOFT_TOTAL_MAX = 0.97        # six + wicket never above 97%
+# Bowl: the table is for a bowler rated LOFT_BOWL_REF. Every bowl point
+# above/below scales the wicket chance up/down by LOFT_BOWL_STEP (clamped) and
+# the six chance the opposite way.
+LOFT_BOWL_REF = 80
+LOFT_BOWL_STEP = 0.02
+LOFT_BOWL_MULT_RANGE = (0.60, 1.40)
 
 
-def loft_out_base_percent(bat: int | float) -> int:
-    """Base out % for a lofted shot into a fielder, from the BAT rating."""
-    r = int(round(bat))
-    if r >= 99:
-        return 5
+def loft_field_base_percent(bat: int | float) -> tuple[int, int]:
+    """(six %, wicket %) for a lofted shot into a fielder, from the BAT rating."""
+    r = min(99, int(round(bat)))
     if r >= 90:
-        return 5 + (99 - r)              # 98->6 ... 90->14
-    if r >= 78:
-        return 14 + 4 * (90 - r)         # 89->18 ... 78->62
-    return min(LOFT_OUT_BAT_CAP, 62 + 4 * (78 - r))   # 77->66 ... capped
+        d = 99 - r                                  # 1 point = -1 six / +1 wicket
+        six, wkt = LOFT_SIX_AT_99 - d, LOFT_WKT_AT_99 + d
+    else:
+        d = 90 - r                                  # 1 point = -2 six / +2 wicket
+        six, wkt = (LOFT_SIX_AT_99 - 9) - 2 * d, (LOFT_WKT_AT_99 + 9) + 2 * d
+    return max(LOFT_SIX_MIN, six), min(LOFT_WKT_MAX, wkt)
 
 
-def loft_out_chance(bat: int | float, bowl: int | float) -> float:
-    """Probability (0-1) that a lofted shot into a fielder gets the batter out."""
-    lo, hi = LOFT_OUT_BOWL_MULT_RANGE
-    mult = min(hi, max(lo, 1.0 + (bowl - LOFT_OUT_BOWL_REF) * LOFT_OUT_BOWL_STEP))
-    p = loft_out_base_percent(bat) / 100.0 * mult
-    return min(LOFT_OUT_MAX, max(LOFT_OUT_MIN, p))
+def loft_field_chances(bat: int | float, bowl: int | float) -> dict[str, float]:
+    """{"six": p, "wkt": p} (0-1) for a lofted shot into a fielder, BEFORE the
+    batter's playstyle six boost (logic.py applies that)."""
+    six, wkt = loft_field_base_percent(bat)
+    lo, hi = LOFT_BOWL_MULT_RANGE
+    m = min(hi, max(lo, 1.0 + (bowl - LOFT_BOWL_REF) * LOFT_BOWL_STEP))
+    return {"six": six / 100.0 / m, "wkt": min(LOFT_WKT_MAX / 100.0, wkt / 100.0 * m)}
 
 
 # ── Display ──────────────────────────────────────────────────────────────────

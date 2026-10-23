@@ -694,52 +694,49 @@ class SquadCog(commands.Cog, name="Squad"):
 
     # -- field (read-only) -----------------------------------------------
     @commands.command(name="csfield")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @commands.cooldown(1, 20, commands.BucketType.user)
     async def csfield(self, ctx: commands.Context):
-        """Show the CURRENT field setup (read-only; changes nothing)."""
+        """Show the current field (which fielder stands on which side). Batter only; changes nothing."""
+        import io as _io, asyncio as _asyncio
         import field_logic
         from views import active_games
+        from wagon_wheel import field_png
         game = active_games.get(ctx.channel.id)
         players = {getattr(game, "challenger", None), getattr(game, "opponent", None)} if game else set()
         if game is None or ctx.author.id not in {getattr(p, "id", None) for p in players}:
             await ctx.send("❌ You are not playing a match in this channel.")
             return
+        if ctx.author.id != game.batting_user_id:
+            await ctx.send("🏏 Only the **batter** can use `csfield`.")
+            return
         positions = getattr(game, "field_positions", None)
         if positions is None:
             await ctx.send("🧤 No field has been set yet.")
             return
-        over_no = (getattr(game, "field_over_idx", None) or 0) + 1
-        text = (
-            f"🧤 **Field for over {over_no}** — {len(positions)} outside the circle\n"
-            f"{field_logic.describe_field(positions)}"
-        )
-        import io as _io, asyncio as _asyncio
-        from wagon_wheel import field_png
-        _idx = over_no - 1
+
+        over_idx = getattr(game, "field_over_idx", None)
+        if over_idx is None:
+            over_idx = game.current_legal_balls // 6
+        over_no = over_idx + 1
+        phase = "Powerplay" if field_logic.is_powerplay(over_idx, game.overs) else "Non-restriction"
         png = await _asyncio.to_thread(
-            field_png, positions, over_no,
-            "Powerplay" if field_logic.is_powerplay(_idx, game.overs) else "Non-restriction",
-            field_logic.max_fielders_allowed(_idx, game.overs),
+            field_png, positions, over_no, phase,
+            field_logic.max_fielders_allowed(over_idx, game.overs),
         )
 
-        def _file():   # a fresh File per send (a File can only be sent once)
-            return discord.File(_io.BytesIO(png), filename="field.png") if png else None
-
-        if field_logic.FIELD_VISIBLE_TO_BATTER:
-            f = _file()
-            await ctx.send(text, **({"file": f} if f else {}))
-            return
-        # Hidden mode: the batting side must not see it, and a channel reply
-        # is public — so only the bowling captain gets it, by DM.
-        if ctx.author.id != game.bowling_user_id:
-            await ctx.send("🙈 The field is hidden from the batting side.")
-            return
-        try:
-            f = _file()
-            await ctx.author.send(text, **({"file": f} if f else {}))
-            await ctx.send("📩 Sent the current field to your DMs (it's hidden from the batter).")
-        except discord.HTTPException:
-            await ctx.send("❌ I couldn't DM you — enable DMs from server members to use `csfield`.")
+        # Which side each fielder is on, in the same words as the wagon wheel.
+        side_lines = [
+            f"{field_logic.position_label(k)}" + (f" — {positions[k]}" if positions.get(k) else "")
+            for k in field_logic.FIELD_POSITIONS if k in positions
+        ]
+        gaps = [field_logic.position_label(k) for k in field_logic.FIELD_POSITIONS if k not in positions]
+        text = (
+            f"🧤 **Field for over {over_no}** ({phase}) — {len(positions)} outside the circle\n"
+            f"**Fielders:** {', '.join(side_lines) if side_lines else 'none'}\n"
+            f"**Gaps:** {', '.join(gaps) if gaps else 'none'}"
+        )
+        f = discord.File(_io.BytesIO(png), filename="field.png") if png else None
+        await ctx.send(text, **({"file": f} if f else {}))
 
     # -- swap ------------------------------------------------------------
     @commands.command(name="csswap")

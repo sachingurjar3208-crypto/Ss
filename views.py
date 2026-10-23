@@ -1302,14 +1302,16 @@ async def _process_delivery_locked(
 
         # Field placement: ground shots only (loft keeps its own risk table
         # above). None when no field was set -> behaviour unchanged.
-        # Lofted shot hit towards a fielder: fixed out-chance from bat/bowl
-        # rating (field_logic.loft_out_chance). Gaps / no field -> unchanged.
-        loft_field_out = None
+        # Lofted shot hit towards a fielder: fixed six / wicket chances from
+        # the bat (and bowl) rating (field_logic.loft_field_chances); the
+        # playstyle six boost is applied inside calculate_outcome. Gaps /
+        # no field -> unchanged.
+        loft_field = None
         _fp = getattr(game, "field_positions", None)
         if height == "Loft" and direction and _fp is not None:
             _fk = DIRECTIONS_BY_NAME.get(direction)
             if _fk in field_logic.FIELD_POSITIONS and _fk in _fp:
-                loft_field_out = field_logic.loft_out_chance(
+                loft_field = field_logic.loft_field_chances(
                     striker.get("bat", 80), bowler.get("bowl", 80))
 
         ground_zone_mod = None
@@ -1339,7 +1341,7 @@ async def _process_delivery_locked(
             bowler_max_balls=game.max_bowler_balls(),
             loft_zone_mod=loft_zone_mod,
             ground_zone_mod=ground_zone_mod,
-            loft_field_out_chance=loft_field_out,
+            loft_field_chances=loft_field,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
