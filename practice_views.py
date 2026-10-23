@@ -182,12 +182,24 @@ async def _practice_process_delivery(
     ch = interaction.channel
     if ch and (ch.id not in active_practice or active_practice.get(ch.id) is not game):
         return
+    lock = game.__dict__.get("_ball_lock")
+    if lock is None:
+        lock = game.__dict__.setdefault("_ball_lock", asyncio.Lock())
     try:
-        await _practice_process_delivery_inner(
-            interaction, game, shot_button,
-            stage1_choice=stage1_choice,
-            is_recommended_shot=is_recommended_shot,
-        )
+        async with lock:
+            if game.pending_delivery is None:   # this ball was already played (double tap)
+                try:
+                    await interaction.response.send_message(
+                        "This ball has already been played.", ephemeral=True
+                    )
+                except Exception:
+                    pass
+                return
+            await _practice_process_delivery_inner(
+                interaction, game, shot_button,
+                stage1_choice=stage1_choice,
+                is_recommended_shot=is_recommended_shot,
+            )
     except Exception as e:
         import traceback
         print(f"[practice] delivery error: {e}\n{traceback.format_exc()}")
@@ -213,6 +225,9 @@ async def _practice_process_delivery_inner(
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
     delivery_button   = game.pending_delivery
     delivery_internal = game.pending_delivery_internal
+    # Consume the delivery so a second press for this ball is rejected by the lock check.
+    game.pending_delivery          = None
+    game.pending_delivery_internal = None
     bowler            = game.current_bowler
     striker           = game.striker
 

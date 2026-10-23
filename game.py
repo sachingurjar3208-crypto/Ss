@@ -304,6 +304,10 @@ class GameState:
         self.consecutive_dots: int = 0
         self.pending_free_hit: bool = False
 
+        # Serialises ball processing: two button presses for the same ball
+        # (double-tap / lag) can never both change the score.
+        self._ball_lock = asyncio.Lock()
+
     @property
     def batting_user(self):
         return (

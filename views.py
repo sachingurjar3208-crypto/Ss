@@ -826,7 +826,7 @@ class _TimeoutMixin:
             if live is not None and live is not self and not live.is_finished():
                 try:
                     await interaction.response.send_message(
-                        "⚠️ Ye purana prompt hai — naye message ke buttons use karo.",
+                        "⚠️ This prompt is outdated — please use the buttons on the newest message.",
                         ephemeral=True,
                     )
                 except discord.InteractionResponded:
@@ -1128,7 +1128,26 @@ async def _send_next_batsman_prompt(
 # Core delivery processor
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _process_delivery(
+async def _process_delivery(interaction: discord.Interaction, game: GameState, shot_button: str, **kwargs):
+    """Per-game lock around one ball. A second press for the SAME ball (double
+    tap / lag) waits for the first to finish, then sees pending_delivery is
+    already consumed and is told so, without touching the score."""
+    lock = game.__dict__.get("_ball_lock")
+    if lock is None:
+        lock = game.__dict__.setdefault("_ball_lock", asyncio.Lock())
+    async with lock:
+        if game.pending_delivery is None:
+            try:
+                await interaction.response.send_message(
+                    "This ball has already been played.", ephemeral=True
+                )
+            except Exception:
+                pass
+            return
+        await _process_delivery_locked(interaction, game, shot_button, **kwargs)
+
+
+async def _process_delivery_locked(
     interaction: discord.Interaction,
     game: GameState,
     shot_button: str,
@@ -2176,6 +2195,12 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             if not self.stage1_choice:
                 await interaction.response.send_message("Pehle swing/speed choose karo.", ephemeral=True)
                 return
+            if self.is_finished():   # delivery already chosen (double tap)
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
+                return
             self.stop()
             delivery_internal = DELIVERY_BUTTON_MAP.get(delivery_button, delivery_button)
             self.game.pending_delivery          = delivery_button
@@ -2252,6 +2277,12 @@ class BowlingView(_TimeoutMixin, ui.View):
             if interaction.user.id != self.game.bowling_user_id:
                 await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
                 return
+            if self.is_finished():   # delivery already chosen (double tap)
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
+                return
             self.stop()
             btype             = self.game.current_bowler.get("bowling_type", "Off Spin")
             delivery_internal = resolve_delivery(delivery_button, btype)
@@ -2325,6 +2356,12 @@ class BattingView(_TimeoutMixin, ui.View):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.batting_user_id:
                 await interaction.response.send_message("Only the batting team plays shots!", ephemeral=True)
+                return
+            if self.is_finished():   # shot already chosen (double tap)
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
                 return
             self.stop()
             await _process_delivery(
