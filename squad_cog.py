@@ -692,6 +692,55 @@ class SquadCog(commands.Cog, name="Squad"):
         )
         autoplay_kick(game)
 
+    # -- field (read-only) -----------------------------------------------
+    @commands.command(name="csfield")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def csfield(self, ctx: commands.Context):
+        """Show the CURRENT field setup (read-only; changes nothing)."""
+        import field_logic
+        from views import active_games
+        game = active_games.get(ctx.channel.id)
+        players = {getattr(game, "challenger", None), getattr(game, "opponent", None)} if game else set()
+        if game is None or ctx.author.id not in {getattr(p, "id", None) for p in players}:
+            await ctx.send("❌ You are not playing a match in this channel.")
+            return
+        positions = getattr(game, "field_positions", None)
+        if positions is None:
+            await ctx.send("🧤 No field has been set yet.")
+            return
+        over_no = (getattr(game, "field_over_idx", None) or 0) + 1
+        text = (
+            f"🧤 **Field for over {over_no}** — {len(positions)} outside the circle\n"
+            f"{field_logic.describe_field(positions)}"
+        )
+        import io as _io, asyncio as _asyncio
+        from wagon_wheel import field_png
+        _idx = over_no - 1
+        png = await _asyncio.to_thread(
+            field_png, positions, over_no,
+            "Powerplay" if field_logic.is_powerplay(_idx, game.overs) else "Non-restriction",
+            field_logic.max_fielders_allowed(_idx, game.overs),
+        )
+
+        def _file():   # a fresh File per send (a File can only be sent once)
+            return discord.File(_io.BytesIO(png), filename="field.png") if png else None
+
+        if field_logic.FIELD_VISIBLE_TO_BATTER:
+            f = _file()
+            await ctx.send(text, **({"file": f} if f else {}))
+            return
+        # Hidden mode: the batting side must not see it, and a channel reply
+        # is public — so only the bowling captain gets it, by DM.
+        if ctx.author.id != game.bowling_user_id:
+            await ctx.send("🙈 The field is hidden from the batting side.")
+            return
+        try:
+            f = _file()
+            await ctx.author.send(text, **({"file": f} if f else {}))
+            await ctx.send("📩 Sent the current field to your DMs (it's hidden from the batter).")
+        except discord.HTTPException:
+            await ctx.send("❌ I couldn't DM you — enable DMs from server members to use `csfield`.")
+
     # -- swap ------------------------------------------------------------
     @commands.command(name="csswap")
     @commands.cooldown(1, 4, commands.BucketType.user)

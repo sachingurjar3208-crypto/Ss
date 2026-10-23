@@ -25,7 +25,7 @@ def _toss_result_file(result: str) -> tuple[discord.File, str]:
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary, SIX_DISTANCES
-from wagon_wheel import wagon_wheel_png
+from wagon_wheel import wagon_wheel_png, field_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 
 
@@ -315,6 +315,7 @@ from data import (
     LOFT_DIRECTION_RISK, USE_LOFT_DIRECTION_RISK,
 )
 from career_stats import save_innings as _save_innings
+import field_logic
 
 
 def save_game_innings_stats(game, batting_user_id=None, bowling_user_id=None, is_final=False):
@@ -637,6 +638,11 @@ async def _auto_select_one(view, make):
     await _auto_pick_from_select(view, make, n=1)
 
 
+async def _auto_field(view, make):
+    """Autoplay / ranked bot: lock in the default symmetric field."""
+    await view._finalize(view._channel, view._default_positions(), auto=True)
+
+
 async def _auto_fast_bowl(view, make):
     await random.choice(view._stage1_btns).callback(make())
     await random.choice(view._stage2_btns).callback(make())
@@ -697,6 +703,7 @@ _AUTOPLAY_HANDLERS = {
     "StrikerDesignateView": _auto_striker,
     "BowlerSelectView": _auto_select_one,
     "NextBowlerView": _auto_select_one,
+    "FieldSetupView": _auto_field,
     "NextBatsmanView": _auto_select_one,
     "FastBowlStage1View": _auto_fast_bowl,
     "BowlingView": _auto_spin_bowl,
@@ -878,6 +885,7 @@ class _TimeoutMixin:
         if class_name in (
             "FastBowlStage1View", "FastBowlStage2View",
             "BowlingView", "BowlerSelectView", "NextBowlerView",
+            "FieldSetupView",
         ):
             return getattr(game, "bowling_user_id", None)
         # Batting views — batting_user_id is responsible
@@ -1134,6 +1142,25 @@ async def _send_bowling_prompt(
 
 
 async def _send_next_bowler_prompt(channel: discord.TextChannel, game: GameState):
+    """End-of-over hook: first the field-placement prompt (Field Placement
+    feature), which then hands over to the next-bowler prompt. Skipped for
+    the first over of an innings, when the feature is off, or when a field is
+    already locked in for the coming over (e.g. `csresume`)."""
+    over_idx = game.current_legal_balls // 6
+    if (
+        field_logic.FIELD_FEATURE_ENABLED
+        and over_idx > 0
+        and getattr(game, "field_over_idx", None) != over_idx
+    ):
+        try:
+            await _send_field_prompt(channel, game, over_idx)
+            return
+        except Exception as e:   # never let the new feature stall a match
+            print(f"[field] prompt failed ({type(e).__name__}: {e}) — skipping field setup")
+    await _send_bowler_prompt_only(channel, game)
+
+
+async def _send_bowler_prompt_only(channel: discord.TextChannel, game: GameState):
     """Prompt the bowling captain to choose the next over's bowler."""
     xi_embed = build_playing_xi_embed(game.get_bowling_team())
     nb_view  = NextBowlerView(game)
@@ -1273,6 +1300,25 @@ async def _process_delivery_locked(
             zone_key = DIRECTIONS_BY_NAME.get(direction)
             loft_zone_mod = LOFT_DIRECTION_RISK.get(zone_key)
 
+        # Field placement: ground shots only (loft keeps its own risk table
+        # above). None when no field was set -> behaviour unchanged.
+        # Lofted shot hit towards a fielder: fixed out-chance from bat/bowl
+        # rating (field_logic.loft_out_chance). Gaps / no field -> unchanged.
+        loft_field_out = None
+        _fp = getattr(game, "field_positions", None)
+        if height == "Loft" and direction and _fp is not None:
+            _fk = DIRECTIONS_BY_NAME.get(direction)
+            if _fk in field_logic.FIELD_POSITIONS and _fk in _fp:
+                loft_field_out = field_logic.loft_out_chance(
+                    striker.get("bat", 80), bowler.get("bowl", 80))
+
+        ground_zone_mod = None
+        if height == "Ground" and direction:
+            ground_zone_mod = field_logic.get_field_modifier(
+                DIRECTIONS_BY_NAME.get(direction),
+                getattr(game, "field_positions", None),
+            )
+
         outcome, is_extra = calculate_outcome(
             delivery_internal, shot_internal,
             bowler.get("bowl", 80), striker.get("bat", 80),
@@ -1292,6 +1338,8 @@ async def _process_delivery_locked(
             bowler_balls_done=game.bowler_ball_count.get(bname, 0),
             bowler_max_balls=game.max_bowler_balls(),
             loft_zone_mod=loft_zone_mod,
+            ground_zone_mod=ground_zone_mod,
+            loft_field_out_chance=loft_field_out,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1472,7 +1520,8 @@ async def _process_delivery_locked(
     if outcome in ("4", "6"):
         try:
             wheel = await asyncio.to_thread(
-                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal
+                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal,
+                field_positions=getattr(game, "field_positions", None),
             )
         except Exception:
             wheel = None
@@ -3043,6 +3092,225 @@ class NextBatsmanView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
                 await _send_bowling_prompt(channel, self.game)
 
         await _safe_next(channel, self.game, _work)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Field placement (end of every over, before the next bowler is chosen)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _send_field_prompt(channel, game: GameState, over_idx: int):
+    view = FieldSetupView(game, over_idx)
+    view._channel = channel
+    msg = await channel.send(
+        content=view.prompt_text(),
+        view=view,
+    )
+    view._message = msg
+
+
+class _FieldEditorView(ui.View):
+    """The toggle grid. Sent as an EPHEMERAL reply to the prompt button, so
+    only the bowling captain ever sees which positions are on (the batter
+    must not see the field). State lives on the parent FieldSetupView; the
+    timeout / autoplay / auto-default logic lives there too."""
+
+    # (key, row): same 3x3 shape as the batting grid, Confirm sits in the
+    # middle where "C"/Defend would be.
+    _LAYOUT = [("UL", 0), ("U", 0), ("UR", 0), ("L", 1), ("CONFIRM", 1), ("R", 1),
+               ("DL", 2), ("D", 2), ("DR", 2)]
+
+    def __init__(self, parent: "FieldSetupView"):
+        super().__init__(timeout=field_logic.FIELD_VIEW_TIMEOUT)
+        self.parent = parent
+        self._btns: dict[str, ui.Button] = {}
+        for key, row in self._LAYOUT:
+            if key == "CONFIRM":
+                btn = ui.Button(label="Confirm", style=discord.ButtonStyle.primary, emoji="✅", row=row)
+                btn.callback = self._confirm
+                self._confirm_btn = btn
+            else:
+                btn = ui.Button(label=field_logic.position_label(key), row=row)
+                btn.callback = self._make_toggle(key)
+                self._btns[key] = btn
+            self.add_item(btn)
+        self._refresh_buttons()
+
+    def _refresh_buttons(self):
+        full = len(self.parent.positions) >= self.parent.max_allowed
+        for key, btn in self._btns.items():
+            on = key in self.parent.positions
+            btn.style = discord.ButtonStyle.success if on else discord.ButtonStyle.secondary
+            btn.disabled = full and not on     # cap reached: only OFF-toggles allowed
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.parent.game.bowling_user_id:
+            await interaction.response.send_message("Only the bowling captain sets the field!", ephemeral=True)
+            return False
+        if self.parent._done:
+            await interaction.response.send_message("The field is already locked in.", ephemeral=True)
+            return False
+        return True
+
+    def _make_toggle(self, key: str):
+        async def callback(interaction: discord.Interaction):
+            p = self.parent
+            if key in p.positions:
+                p.positions.discard(key)
+            elif len(p.positions) < p.max_allowed:
+                p.positions.add(key)
+            else:
+                await interaction.response.send_message(
+                    f"Max {p.max_allowed} fielders outside the circle right now.", ephemeral=True)
+                return
+            self._refresh_buttons()
+            f = await p.field_file(p.positions)
+            await interaction.response.edit_message(
+                content=p.editor_text(), view=self, attachments=[f] if f else [])
+        return callback
+
+    async def _confirm(self, interaction: discord.Interaction):
+        p = self.parent
+        if p._done:
+            await interaction.response.send_message("The field is already locked in.", ephemeral=True)
+            return
+        try:
+            await interaction.response.edit_message(content="✅ Field locked in.", view=None)
+        except Exception:
+            pass
+        self.stop()
+        await p._finalize(p._channel or _ch(interaction, p.game), set(p.positions))
+
+
+class FieldSetupView(_TimeoutMixin, ui.View):
+    """Public prompt shown automatically at the end of every over (like
+    BowlerSelectView). The bowling captain taps [Set Field] to get a private
+    toggle grid, or [Default field]. Timeout -> the default symmetric field
+    is applied (NOT the usual AFK abandon) so the match never stalls."""
+
+    def __init__(self, game: GameState, over_idx: int):
+        super().__init__(timeout=field_logic.FIELD_VIEW_TIMEOUT)
+        self.game = game
+        self.over_idx = over_idx                       # 0-based over this field is FOR
+        self.max_allowed = field_logic.max_fielders_allowed(over_idx, game.overs)
+        self.in_powerplay = field_logic.is_powerplay(over_idx, game.overs)
+        # Start from last over's field (trimmed to the new cap) so small
+        # tweaks are one tap; falls back to the default field.
+        prev = [k for k in field_logic.FIELD_POSITIONS if k in (game.field_positions or {})]
+        self.positions: set[str] = set(prev[: self.max_allowed]) or set(self._default_positions())
+        self._done = False
+
+        set_btn = ui.Button(label="Set Field", emoji="🧤", style=discord.ButtonStyle.primary)
+        set_btn.callback = self._open_editor
+        self.add_item(set_btn)
+        def_btn = ui.Button(label="Default field", style=discord.ButtonStyle.secondary)
+        def_btn.callback = self._use_default
+        self.add_item(def_btn)
+
+    # -- text ------------------------------------------------------------
+    def _phase(self) -> str:
+        return "Powerplay" if self.in_powerplay else "Non-restriction"
+
+    def prompt_text(self) -> str:
+        return (
+            f"🧤 Over complete — set your field for over **{self.over_idx + 1}** "
+            f"{self.game.bowling_user.mention}\n"
+            f"{self._phase()}: max **{self.max_allowed}** fielders outside the circle. "
+            f"*(Only you can see the field.)*"
+        )
+
+    def editor_text(self) -> str:
+        n = len(self.positions)
+        sel = field_logic.describe_field(self.positions) if n else "none"
+        return (
+            f"🧤 **Over {self.over_idx + 1} — {self._phase()}**\n"
+            f"Fielders outside circle: **{n} / {self.max_allowed}** allowed\n"
+            f"Selected: {sel}"
+        )
+
+    def _default_positions(self) -> list[str]:
+        return field_logic.default_field(self.max_allowed)
+
+    async def field_file(self, positions) -> discord.File | None:
+        """Wagon-wheel style picture of `positions` (None if drawing failed)."""
+        try:
+            png = await asyncio.to_thread(
+                field_png, {k: None for k in positions}, self.over_idx + 1,
+                self._phase(), self.max_allowed,
+            )
+        except Exception:
+            png = None
+        return discord.File(io.BytesIO(png), filename="field.png") if png else None
+
+    # -- callbacks -------------------------------------------------------
+    async def _guard(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.game.bowling_user_id:
+            await interaction.response.send_message("Only the bowling captain sets the field!", ephemeral=True)
+            return False
+        if self._done:
+            await interaction.response.send_message("The field is already locked in.", ephemeral=True)
+            return False
+        return True
+
+    async def _open_editor(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        editor = _FieldEditorView(self)
+        f = await self.field_file(self.positions)
+        kwargs = {"file": f} if f else {}
+        await interaction.response.send_message(self.editor_text(), view=editor, ephemeral=True, **kwargs)
+
+    async def _use_default(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        try:
+            await interaction.response.defer()
+        except Exception:
+            pass
+        await self._finalize(_ch(interaction, self.game), set(self._default_positions()))
+
+    # -- finish ----------------------------------------------------------
+    async def _finalize(self, channel, positions, *, auto: bool = False):
+        """Lock the field in, tidy the prompt, then carry on to the bowler prompt."""
+        if self._done:
+            return
+        self._done = True
+        self.stop()
+        self.game.set_field(positions)
+        # `set_field` stamps the over index from the ball count; keep it exact.
+        self.game.field_over_idx = self.over_idx
+        if field_logic.FIELD_VISIBLE_TO_BATTER:
+            summary = f"🧤 Field set for over **{self.over_idx + 1}**: {field_logic.describe_field(positions)}"
+        else:
+            summary = f"🧤 Field set for over **{self.over_idx + 1}** ({len(positions)} outside the circle)."
+        if auto:
+            summary += " *(default field applied)*"
+        try:
+            if self._message is not None:
+                await self._message.edit(content=summary, view=None)
+        except Exception:
+            pass   # cosmetic only
+        if field_logic.FIELD_VISIBLE_TO_BATTER:
+            # Visible mode only: post the field picture for everyone. In
+            # hidden mode the picture stays in the captain's private editor
+            # (and is revealed on the wagon wheel of a four / six).
+            async def _show():
+                f = await self.field_file(positions)
+                if f:
+                    await channel.send(file=f)
+            await _safe_next(channel, self.game, _show)
+        await _safe_next(channel, self.game, lambda: _send_bowler_prompt_only(channel, self.game))
+
+    async def on_timeout(self):
+        """Override of _TimeoutMixin.on_timeout: NEVER abandon the match here."""
+        if self._done:
+            return
+        ch, game = self._channel, self.game
+        if not ch or active_games.get(ch.id) is not game:
+            return
+        live = game.__dict__.get("_live_view")
+        if live is not None and live is not self:
+            return
+        await self._finalize(ch, set(self._default_positions()), auto=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

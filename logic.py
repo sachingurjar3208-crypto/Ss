@@ -290,6 +290,8 @@ def calculate_outcome(
     bowler_balls_done: int = 0,
     bowler_max_balls: int = 0,
     loft_zone_mod: dict | None = None,
+    ground_zone_mod: dict | None = None,
+    loft_field_out_chance: float | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -308,6 +310,12 @@ def calculate_outcome(
                           two-step batting UI's direction grid; the caller
                           only passes this when the shot height was "Loft",
                           so no height check is needed here. None = no change.
+      ground_zone_mod   – optional multipliers from field_logic.get_field_modifier()
+                          (Field Placement). The caller only passes it for
+                          height == "Ground" shots. None = no change.
+      loft_field_out_chance – Field Placement: probability (0-1) that this LOFTED
+                          shot, hit towards a fielder, is a wicket. Overrides
+                          the wicket weight (applied last). None = no change.
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
@@ -635,6 +643,18 @@ def calculate_outcome(
         w["6"] = max(0.02, w["6"] * loft_zone_mod.get("six_mult", 1.0))
         w["W"] = w["W"] * loft_zone_mod.get("wkt_mult", 1.0)
 
+    # ── Field placement (ground shots only; see field_logic.py) ─────────────
+    # Fielder in the shot's direction: boundaries mostly cut down to 1-2 runs
+    # and more catches/run-outs. Gap in the field: slightly more boundaries.
+    # Multiplies on top of everything above; no existing weight logic changed.
+    if ground_zone_mod:
+        w["4"] = max(0.02, w["4"] * ground_zone_mod.get("boundary_mult", 1.0))
+        for k in ("1", "2"):
+            w[k] = w[k] * ground_zone_mod.get("single_mult", 1.0)
+        w["3"] = w["3"] * ground_zone_mod.get("three_mult", 1.0)
+        w["0"] = w["0"] * ground_zone_mod.get("dot_mult", 1.0)
+        w["W"] = w["W"] * ground_zone_mod.get("wkt_mult", 1.0)
+
     # ── DEFEND is a defensive shot: it can NEVER give a 4, a 6 or a 3 ────────
     # (a defended ball only dies for 0 / a quick single / 2, or the batter is
     #  beaten). Boundaries stay impossible no matter what playstyles stack up.
@@ -667,6 +687,14 @@ def calculate_outcome(
         elif ground_type == "medium_pace":
             if delivery_internal in _SEAM_DELIVERIES:
                 w["W"] = w["W"] * up
+
+    # ── Field placement: lofted shot INTO a fielder (applied last) ──────────
+    # The wicket weight is set so that, among legal balls, P(out) equals the
+    # given chance exactly (extras keep their weights).
+    if loft_field_out_chance is not None:
+        _p = min(0.97, max(0.01, loft_field_out_chance))
+        _legal = sum(v for k, v in w.items() if k not in ("W", "Wd", "NB", "NB+1"))
+        w["W"] = _legal * _p / (1.0 - _p)
 
     outcome = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
     is_extra = outcome in ("Wd", "NB", "NB+1")

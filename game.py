@@ -309,6 +309,13 @@ class GameState:
         self.consecutive_dots: int = 0
         self.pending_free_hit: bool = False
 
+        # Field Placement (see field_logic.py). None = no field set -> the
+        # match behaves exactly as before. Otherwise {direction_key: fielder
+        # name or None}; Phase 1 always stores None as the value (Phase 2 will
+        # put a player name there).
+        self.field_positions: dict[str, str | None] | None = None
+        self.field_over_idx: int | None = None   # 0-based over this field was set FOR
+
         # Serialises ball processing: two button presses for the same ball
         # (double-tap / lag) can never both change the score.
         self._ball_lock = asyncio.Lock()
@@ -882,6 +889,11 @@ class GameState:
             return True
         return False
 
+    def set_field(self, positions) -> None:
+        """Lock in the field for the NEXT over (called after end_over())."""
+        self.field_positions = {k: None for k in positions}
+        self.field_over_idx = self.current_legal_balls // 6
+
     def start_second_innings(self) -> None:
         # Keep innings-1 stats for the end-of-match summary card (they are reset below).
         import copy as _copy
@@ -906,6 +918,8 @@ class GameState:
         self.bowler_stats = {}
         self.batsman_stats = {}
         self.last_delivery_internal = None
+        self.field_positions = None   # new innings -> new bowling side, field reset
+        self.field_over_idx = None
         self._over_ended_flag = False
         self.last_ball_was_wicket = False
         self.last_wicket_dismissed_name = ""

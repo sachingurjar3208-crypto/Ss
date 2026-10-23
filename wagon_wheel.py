@@ -33,6 +33,7 @@ _NAMES = {"D": "Straight", "DL": "Cover", "L": "Point", "UL": "Third Man",
 
 _SIX  = (255, 196, 0)
 _FOUR = (0, 190, 255)
+_FIELDER = (232, 72, 72)
 
 # Believable direction when the batter did not pick one (CPU batter etc.).
 _FALLBACK = {
@@ -57,6 +58,54 @@ def _font(size):
             return ImageFont.load_default()
 
 
+def _draw_fielders(d, cx, cy, S, field_positions) -> None:
+    """A red dot per fielder, between the 30-yard circle and the rope. If a
+    position maps to a name (Phase 2) the name is written under the dot."""
+    for key, ang in _ANGLE.items():
+        if key not in field_positions:
+            continue
+        a = math.radians(ang)
+        fx, fy = cx + 182 * S * math.cos(a), cy - 182 * S * math.sin(a)
+        d.ellipse([fx - 15 * S, fy - 15 * S, fx + 15 * S, fy + 15 * S],
+                  fill=_FIELDER, outline=(255, 255, 255), width=3 * S)
+        d.text((fx, fy), "F", font=_font(15), fill=(255, 255, 255), anchor="mm")
+        who = field_positions.get(key) if hasattr(field_positions, "get") else None
+        if who:
+            d.text((fx, fy + 26 * S), str(who), font=_font(12), fill=(255, 255, 255), anchor="mm")
+
+
+def field_png(field_positions, over_no: int | None = None, phase: str = "",
+              max_allowed: int | None = None) -> bytes | None:
+    """The current field as a wagon-wheel style picture (same ground, same
+    colours). Returns PNG bytes, or None on any drawing problem."""
+    if field_positions is None:
+        return None
+    try:
+        from PIL import Image
+        S = _S
+        img, d, cx, cy, R = _base(S)
+        _draw_fielders(d, cx, cy, S, field_positions)
+        d.ellipse([cx - 6 * S, cy - 6 * S, cx + 6 * S, cy + 6 * S], fill=(255, 255, 255))
+        title = f"FIELD · OVER {over_no}" if over_no else "FIELD"
+        d.text((24 * S, 22 * S), title, font=_font(30), fill=(255, 255, 255), anchor="la")
+        n = len(field_positions)
+        sub = f"{n} / {max_allowed} outside the circle" if max_allowed else f"{n} outside the circle"
+        if phase:
+            sub = f"{phase} · {sub}"
+        d.text((24 * S, 62 * S), sub, font=_font(17), fill=(210, 214, 224), anchor="la")
+        lx, y = (_W - 120) * S, 24 * S
+        d.ellipse([lx, y + 4 * S, lx + 12 * S, y + 16 * S], fill=_FIELDER, outline=(0, 0, 0), width=S)
+        d.text((lx + 20 * S, y + 10 * S), "Fielder", font=_font(15), fill=(210, 214, 224), anchor="lm")
+        img = img.resize((_W, _H), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return buf.getvalue()
+    except Exception as e:          # never break a match over a picture
+        print(f"[field image] skipped ({type(e).__name__}: {e})")
+        return None
+
+
+
 def _resolve_key(direction: str | None, shot_internal: str | None) -> str | None:
     key = DIRECTIONS_BY_NAME.get(direction or "")
     if key in _ANGLE:
@@ -71,23 +120,21 @@ def wagon_wheel_png(
     meters: int | None = None,
     batter: str = "",
     shot_internal: str | None = None,
+    field_positions=None,
 ) -> bytes | None:
     if outcome not in ("4", "6"):
         return None
     try:
-        return _draw(direction, outcome, meters, batter, shot_internal)
+        return _draw(direction, outcome, meters, batter, shot_internal, field_positions)
     except Exception as e:          # never break a match over a picture
         print(f"[wagon wheel] skipped ({type(e).__name__}: {e})")
         return None
 
 
-def _draw(direction, outcome, meters, batter, shot_internal) -> bytes | None:
+def _base(S):
+    """The ground (circle, 30-yard ring, pitch, spokes, labels). Shared by the
+    wagon wheel and the field picture. Returns (img, d, cx, cy, R)."""
     from PIL import Image, ImageDraw
-
-    key = _resolve_key(direction, shot_internal)
-    if key is None:
-        return None
-    S = _S
     img = Image.new("RGB", (_W * S, _H * S), (18, 20, 28))
     d = ImageDraw.Draw(img)
     cx, cy = _W * S // 2, _H * S // 2 + 25 * S
@@ -110,6 +157,20 @@ def _draw(direction, outcome, meters, batter, shot_internal) -> bytes | None:
         ly = cy - (R + (26 if axis else 40) * S) * math.sin(a)
         lx = min(max(lx, 52 * S), (_W - 52) * S)
         d.text((lx, ly), _NAMES[k], font=_font(13), fill=(170, 176, 190), anchor="mm")
+    return img, d, cx, cy, R
+
+
+def _draw(direction, outcome, meters, batter, shot_internal, field_positions=None) -> bytes | None:
+    from PIL import Image, ImageDraw
+
+    key = _resolve_key(direction, shot_internal)
+    if key is None:
+        return None
+    S = _S
+    img, d, cx, cy, R = _base(S)
+
+    if field_positions is not None:
+        _draw_fielders(d, cx, cy, S, field_positions)
 
     col = _SIX if outcome == "6" else _FOUR
     a = math.radians(_ANGLE[key])
@@ -158,7 +219,10 @@ def _draw(direction, outcome, meters, batter, shot_internal) -> bytes | None:
     d.text((24 * S, 22 * S), "SIX!" if outcome == "6" else "FOUR", font=_font(34), fill=col, anchor="la")
     sub = f"{batter} · {_NAMES[key]}" if batter else _NAMES[key]
     d.text((24 * S, 66 * S), sub, font=_font(18), fill=(210, 214, 224), anchor="la")
-    for i, (lab, c) in enumerate((("Six", _SIX), ("Four", _FOUR))):   # legend
+    _legend = [("Six", _SIX), ("Four", _FOUR)]
+    if field_positions is not None:
+        _legend.append(("Fielder", _FIELDER))
+    for i, (lab, c) in enumerate(_legend):   # legend
         y = 24 * S + i * 22 * S
         lx = (_W - 110) * S
         d.ellipse([lx, y + 4 * S, lx + 12 * S, y + 16 * S], fill=c, outline=(0, 0, 0), width=S)
