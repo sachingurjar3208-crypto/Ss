@@ -255,6 +255,11 @@ class GameState:
         self.pending_delivery: str | None = None
         self.pending_delivery_speed: float | None = None
         self.pending_stage1_choice: str = ""
+        # Direction/height of the shot just played (two-step batting UI).
+        # Set right before the outcome is calculated; None when a direction
+        # wasn't given (CPU batter, Leave, resumed games with old data).
+        self.last_shot_direction: str | None = None
+        self.last_shot_height: str | None = None
         self.current_ball_free_hit: bool = False
         # DRS reviews left per user id (set when the toss decision is made)
         self.drs_reviews: dict[int, int] = {}
@@ -647,6 +652,10 @@ class GameState:
         self.wagon_wheel_data.append(bw)
 
     def _choose_direction(self, delivery: str, shot: str, runs: int) -> str:
+        # The two-step batting UI already tells us exactly where the batter
+        # aimed — use that instead of guessing from the shot alone.
+        if self.last_shot_direction:
+            return self.last_shot_direction
         direction_bias = {
             "Fine Leg": "5 o'clock",
             "Square Leg": "6 o'clock",

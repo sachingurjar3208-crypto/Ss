@@ -25,6 +25,8 @@ from data import (
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
     NOT_OUT_EMOJI, LBW_EMOJI,
+    DIRECTIONS, DIRECTIONS_BY_NAME, translate_shot,
+    LOFT_DIRECTION_RISK, USE_LOFT_DIRECTION_RISK,
 )
 import emojis
 from media import get_player_media, get_milestone_gif, get_umpire_gif
@@ -177,6 +179,8 @@ async def _practice_process_delivery(
     *,
     stage1_choice: str = "",
     is_recommended_shot: bool = False,
+    direction: str | None = None,
+    height: str | None = None,
 ):
     # Guard: match may have been cancelled
     ch = interaction.channel
@@ -199,6 +203,8 @@ async def _practice_process_delivery(
                 interaction, game, shot_button,
                 stage1_choice=stage1_choice,
                 is_recommended_shot=is_recommended_shot,
+                direction=direction,
+                height=height,
             )
     except Exception as e:
         import traceback
@@ -221,6 +227,8 @@ async def _practice_process_delivery_inner(
     *,
     stage1_choice: str = "",
     is_recommended_shot: bool = False,
+    direction: str | None = None,
+    height: str | None = None,
 ):
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
     delivery_button   = game.pending_delivery
@@ -243,9 +251,19 @@ async def _practice_process_delivery_inner(
     bname = _pname(bowler)
     sname = _pname(striker)
 
+    # Two-step batting UI: remember exactly where/how the shot was played
+    # (None for the CPU batter or an old resumed game).
+    game.last_shot_direction = direction
+    game.last_shot_height    = height
+
     speed_range  = get_delivery_speed(delivery_button, (game.current_bowler or {}).get("bowling_type"))
     speed        = random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
+
+    loft_zone_mod = None
+    if USE_LOFT_DIRECTION_RISK and height == "Loft" and direction:
+        zone_key = DIRECTIONS_BY_NAME.get(direction)
+        loft_zone_mod = LOFT_DIRECTION_RISK.get(zone_key)
 
     outcome, is_extra = calculate_outcome(
         delivery_internal, shot_internal,
@@ -262,6 +280,7 @@ async def _practice_process_delivery_inner(
         prev_delivery      = getattr(game, "last_delivery_internal", None),
         bowler_balls_done  = game.bowler_ball_count.get(bname, 0),
         bowler_max_balls   = game.max_bowler_balls(),
+        loft_zone_mod      = loft_zone_mod,
     )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -287,6 +306,7 @@ async def _practice_process_delivery_inner(
         outcome          = outcome,
         bowling_type     = bowler.get("bowling_type", "Fast"),
         stage1_choice    = stage1_choice,
+        direction        = direction,
     ) + commentary_suffix
 
     striker_runs_before   = game.batsman_stats.get(sname, {}).get("runs", 0)
@@ -321,6 +341,8 @@ async def _practice_process_delivery_inner(
             game.batsman_stats[sname]["fours"] = game.batsman_stats[sname].get("fours", 0) + 1
         elif outcome == "6" and sname in game.batsman_stats:
             game.batsman_stats[sname]["sixes"] = game.batsman_stats[sname].get("sixes", 0) + 1
+        if outcome in ("4", "6"):
+            game._do_record_boundary_direction(int(outcome), delivery_button, shot_button)
         if outcome in ("1", "3"):
             game.rotate_strike()
 
@@ -1254,12 +1276,30 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
 # Human batting view — bot bowled already, human picks shot
 # ─────────────────────────────────────────────────────────────────────────────
 
+_STAGE1_STYLES = {
+    "Loft":   discord.ButtonStyle.danger,
+    "Ground": discord.ButtonStyle.success,
+    "Leave":  discord.ButtonStyle.secondary,
+}
+# (key, row) order for the 3x3 direction grid — same orientation as the live
+# BattingView (camera behind the bowler, right-handed batter).
+_DIRECTION_GRID = [
+    ("UL", 1), ("U", 1), ("UR", 1),
+    ("L",  2), ("C", 2), ("R",  2),
+    ("DL", 3), ("D", 3), ("DR", 3),
+]
+
+
 class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
+    """Two-step batting for the human batter in practice mode — same UI as
+    the live BattingView, just reporting to _practice_process_delivery."""
+
     def __init__(self, game: GameState, *, stage1_choice: str = "", is_free_hit: bool = False):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.game          = game
         self.stage1_choice = stage1_choice
         self.is_free_hit   = is_free_hit
+        self.height        = ""
 
         delivery_btn = game.pending_delivery or ""
         if stage1_choice:
@@ -1267,38 +1307,86 @@ class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
         else:
             self.recommended = SPIN_SHOT_GUIDE.get(delivery_btn, [])
 
-        self._add_buttons()
+        self._stage1_btns: list[ui.Button] = []
+        self._direction_btns: list[ui.Button] = []
+        self._direction_keys: list[str] = []
+        self._add_stage1_buttons()
 
-    def _add_buttons(self):
-        STYLES = {
-            "Drive":  discord.ButtonStyle.success,
-            "Loft":   discord.ButtonStyle.danger,
-            "Flick":  discord.ButtonStyle.success,
-            "Pull":   discord.ButtonStyle.danger,
-            "Cut":    discord.ButtonStyle.primary,
-            "Sweep":  discord.ButtonStyle.primary,
-            "Scoop":  discord.ButtonStyle.secondary,
-            "Defend": discord.ButtonStyle.secondary,
-            "Leave":  discord.ButtonStyle.secondary,
-        }
-        ROWS = {
-            "Drive": 0, "Loft": 0, "Flick": 0, "Pull": 0, "Cut": 0,
-            "Sweep": 1, "Scoop": 1, "Defend": 1, "Leave": 1,
-        }
-        for label in BATTING_BUTTONS:
-            btn          = ui.Button(label=label, style=STYLES.get(label, discord.ButtonStyle.secondary), row=ROWS.get(label, 0))
-            btn.callback = self._make_callback(label, label in self.recommended)
+    def _add_stage1_buttons(self):
+        for label in ("Loft", "Ground", "Leave"):
+            btn = ui.Button(label=label, style=_STAGE1_STYLES[label], row=0)
+            btn.callback = self._make_stage1_callback(label)
+            self._stage1_btns.append(btn)
             self.add_item(btn)
 
-    def _make_callback(self, shot: str, is_recommended: bool):
+    def _add_direction_buttons(self):
+        for key, row in _DIRECTION_GRID:
+            arrow, name = DIRECTIONS[key]
+            style = discord.ButtonStyle.primary if key == "C" else discord.ButtonStyle.secondary
+            btn   = ui.Button(label=f"{arrow} {name}", style=style, row=row)
+            btn.callback = self._make_direction_callback(key)
+            self._direction_btns.append(btn)
+            self._direction_keys.append(key)
+            self.add_item(btn)
+
+    def _make_stage1_callback(self, label: str):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.batting_user_id:
                 await interaction.response.send_message("Only you bat!", ephemeral=True)
                 return
+            if self.height or self.is_finished():
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
+                return
+
+            if label == "Leave":
+                self.stop()
+                await _practice_process_delivery(
+                    interaction, self.game, "Leave",
+                    stage1_choice=self.stage1_choice,
+                    is_recommended_shot=False,
+                )
+                return
+
+            self.height = label
+            for b in self._stage1_btns:
+                b.disabled = True
+                b.style    = discord.ButtonStyle.secondary
+            self._add_direction_buttons()
+            try:
+                await interaction.response.edit_message(view=self)
+            except Exception as e:
+                print(f"[practice batting] stage1 edit failed ({type(e).__name__}: {e})")
+        return callback
+
+    def _make_direction_callback(self, direction_key: str):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.game.batting_user_id:
+                await interaction.response.send_message("Only you bat!", ephemeral=True)
+                return
+            if not self.height:
+                await interaction.response.send_message("Pehle Loft ya Ground choose karo.", ephemeral=True)
+                return
+            if self.is_finished():
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
+                return
             self.stop()
+
+            delivery_internal = self.game.pending_delivery_internal or ""
+            shot_button = translate_shot(self.height, direction_key, delivery_internal)
+            is_recommended = shot_button in self.recommended
+            _, direction_name = DIRECTIONS[direction_key]
+
             await _practice_process_delivery(
-                interaction, self.game, shot,
+                interaction, self.game, shot_button,
                 stage1_choice=self.stage1_choice,
                 is_recommended_shot=is_recommended,
+                direction=direction_name,
+                height=self.height,
             )
         return callback

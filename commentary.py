@@ -92,24 +92,41 @@ def build_ball_commentary(
     outcome: str,
     bowling_type: str = "Fast",
     stage1_choice: str = "",
+    direction: str | None = None,
 ) -> str:
     """Short result commentary (max MAX_COMMENTARY_WORDS words). The bowler,
     delivery type and speed are already announced in the "is coming with ...
     kmph" message before the shot is played, so this only describes the shot
-    and, for a boundary/wicket, one short flavour line."""
+    and, for a boundary/wicket, one short flavour line.
+
+    direction: the DIRECTIONS display name the two-step batting UI recorded
+    for this shot (e.g. "Cover"), or None when there isn't one (Leave, CPU
+    batter, old resumed games). "Defend" isn't a real fielding placement so
+    it's never used as a direction flavour word."""
     delivery_desc = get_delivery_description(delivery_button, delivery_internal)
     shot_verb = SHOT_DESCRIPTIONS.get(shot_internal, shot_button.lower() + "s")
 
     lines = [f"**{batsman_name}** {shot_verb} the {delivery_desc}"]
+    _dir = direction if direction and direction != "Defend" else None
 
     if outcome == "6":
         dist = random.choice(SIX_DISTANCES)
-        lines.append(f"**{_num_to_emoji(dist)}m — THAT'S A SIX!**")
+        tail = f" — over {_dir}!" if _dir else ""
+        lines.append(f"**{_num_to_emoji(dist)}m — THAT'S A SIX{tail}**")
     elif outcome == "4":
-        lines.append(f"**{random.choice(FOUR_TEXTS)}**")
+        four_line = random.choice(FOUR_TEXTS)
+        tail = f" ({_dir})" if _dir else ""
+        lines.append(f"**{four_line}{tail}**")
     elif outcome == "W":
         wkt_pool = WICKET_TEXTS.get(delivery_internal, GENERIC_WICKET)
-        lines = [f"**{random.choice(wkt_pool)}** {batsman_name} is OUT"]
+        wkt_line = random.choice(wkt_pool)
+        upper = wkt_line.upper()
+        # Only tack the fielding spot onto an already-caught dismissal — never
+        # introduce the word "caught" ourselves, that would relabel a bowled/
+        # LBW wicket for _dismissal_type() downstream.
+        if _dir and ("CAUGHT" in upper or "CATCH" in upper or "HOLES OUT" in upper):
+            wkt_line = f"{wkt_line} ({_dir})"
+        lines = [f"**{wkt_line}** {batsman_name} is OUT"]
     elif outcome == "Wd":
         lines = ["**Wide!** Extra run awarded."]
     elif outcome == "NB":
@@ -118,5 +135,8 @@ def build_ball_commentary(
         lines = ["**No Ball!** Plus a run — two extras!"]
     elif outcome == "0":
         lines.append(f"*{random.choice(DOT_TEXTS)}*")
+    elif outcome in ("1", "2", "3") and _dir:
+        word = {"1": "a single", "2": "a two", "3": "three"}[outcome]
+        lines.append(f"*Finds the gap at {_dir} for {word}.*")
 
     return _limit_words("\n".join(lines), MAX_COMMENTARY_WORDS)

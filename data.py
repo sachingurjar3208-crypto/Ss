@@ -401,6 +401,72 @@ def get_spin_buttons(bowling_type) -> list:
 
 BATTING_BUTTONS = ["Drive", "Loft", "Flick", "Pull", "Cut", "Sweep", "Scoop", "Defend", "Leave"]
 
+# ── Two-step direction batting ─────────────────────────────────────────────
+# key -> (arrow, display name). Rename shots only through this dict.
+DIRECTIONS: dict[str, tuple[str, str]] = {
+    "UL": ("↖", "Third Man"), "U": ("↑", "Behind"),    "UR": ("↗", "Fine Leg"),
+    "L":  ("←", "Point"),     "C": ("●", "Defend"),     "R":  ("→", "Square Leg"),
+    "DL": ("↙", "Cover"),     "D": ("↓", "Straight"),   "DR": ("↘", "Mid-wicket"),
+}
+# Reverse lookup: display name -> key (used to resolve a stored direction
+# name back to its grid key, e.g. for the loft risk table below).
+DIRECTIONS_BY_NAME: dict[str, str] = {name: key for key, (_arrow, name) in DIRECTIONS.items()}
+
+# Delivery types classified as spin — the single source of truth (logic.py
+# imports this instead of keeping its own copy).
+SPIN_DELIVERIES = {
+    "Off Break", "Doosra", "Carrom Ball", "Arm Ball", "Top Spin",
+    "Drift Ball", "Leg Break", "Googly", "Flipper", "Top Spinner", "Slider",
+}
+
+
+def translate_shot(height: str, direction_key: str, delivery_internal: str) -> str:
+    """(height, direction, delivery) -> one of the existing BATTING_BUTTONS.
+
+    height          "Loft" | "Ground"
+    direction_key   one of the DIRECTIONS keys above
+    delivery_internal  the bowler's internal delivery name (e.g. "Yorker",
+                        "Off Break") — only used to tell pace from spin for
+                        the Square Leg / Mid-wicket split.
+    """
+    if direction_key == "C":
+        return "Defend"
+    if height == "Loft":
+        return "Loft"
+    is_spin = delivery_internal in SPIN_DELIVERIES
+    if direction_key == "D":
+        return "Drive"
+    if direction_key == "DL":
+        return "Drive"
+    if direction_key == "L":
+        return "Cut"
+    if direction_key == "UL":
+        return "Cut"
+    if direction_key == "U":
+        return "Scoop"
+    if direction_key == "UR":
+        return "Flick"
+    if direction_key == "R":
+        return "Sweep" if is_spin else "Pull"
+    if direction_key == "DR":
+        return "Sweep" if is_spin else "Flick"
+    return "Defend"  # unreachable with a valid key — safe fallback
+
+
+# ── Phase 2 (optional): direction matters for lofted shots too ────────────
+# Square Leg and the three "V" sectors (Straight, Cover, Mid-wicket) are
+# neutral; the four behind-square angles (Point, Third Man, Fine Leg,
+# Behind) are the hardest to clear and the riskiest to attempt — sixes are
+# rarer and the wicket chance is a bit higher there, mirroring how a mistimed
+# lap/upper-cut is far more likely to pick out a fielder than a straight loft.
+LOFT_DIRECTION_RISK: dict[str, dict[str, float]] = {
+    "L":  {"six_mult": 0.7, "wkt_mult": 1.15},   # Point
+    "UL": {"six_mult": 0.7, "wkt_mult": 1.15},   # Third Man
+    "UR": {"six_mult": 0.7, "wkt_mult": 1.15},   # Fine Leg
+    "U":  {"six_mult": 0.7, "wkt_mult": 1.15},   # Behind
+}
+USE_LOFT_DIRECTION_RISK = True
+
 # ── Shot guide ────────────────────────────────────────────────────────────────
 # Maps delivery combination → list of recommended shot BUTTON labels.
 # Using a recommended shot lowers wicket chance and boosts boundaries.

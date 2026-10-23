@@ -1,6 +1,6 @@
 import math
 import random
-from data import DELIVERY_BUTTON_MAP, SHOT_BUTTON_MAP
+from data import DELIVERY_BUTTON_MAP, SHOT_BUTTON_MAP, SPIN_DELIVERIES as _SPIN_DELIVERIES
 
 # Playstyle "narratives" chosen on a player's card (/cardmaker, /editcard,
 # /setplaystylelogo) are looked up by player name and switched on here.
@@ -238,11 +238,6 @@ ATTR_EFFECTS = {
 # Names a card can carry that the engine knows under another name.
 _ATTR_ALIASES: dict[str, str] = {}   # (Swing King used to alias Swing Master; they are separate now)
 
-# Delivery types classified as spin
-_SPIN_DELIVERIES = {
-    "Off Break", "Doosra", "Carrom Ball", "Arm Ball", "Top Spin",
-    "Drift Ball", "Leg Break", "Googly", "Flipper", "Top Spinner", "Slider",
-}
 _SWING_DELIVERIES  = {"Swing", "In Swinger", "Out Swinger", "Reverse Swing"}
 _YORKER_DELIVERIES = {"Yorker", "Yorker Full Toss"}
 _PACE_DELIVERIES   = {"Swing", "Good Length", "Fast", "Bouncer", "Full", "Yorker"}
@@ -294,6 +289,7 @@ def calculate_outcome(
     prev_delivery: str | None = None,
     bowler_balls_done: int = 0,
     bowler_max_balls: int = 0,
+    loft_zone_mod: dict | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -308,6 +304,10 @@ def calculate_outcome(
       prev_delivery     – internal delivery type of the previous ball (None at start)
       bowler_balls_done – legal balls this bowler has already bowled
       bowler_max_balls  – this bowler's max balls in the match (overs/5 rule)
+      loft_zone_mod     – optional {"six_mult":.., "wkt_mult":..} from the
+                          two-step batting UI's direction grid; the caller
+                          only passes this when the shot height was "Loft",
+                          so no height check is needed here. None = no change.
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
@@ -627,6 +627,13 @@ def calculate_outcome(
     elif guide_entry_exists:
         # Guide covered this delivery but batter ignored it → wrong-shot penalty
         w["W"] = w["W"] * 1.25
+
+    # ── Loft direction risk (optional, two-step batting UI) ─────────────────
+    # A lofted shot toward an awkward angle (behind square) is harder to
+    # clear than one down the ground — fewer sixes, a bit more wicket risk.
+    if loft_zone_mod:
+        w["6"] = max(0.02, w["6"] * loft_zone_mod.get("six_mult", 1.0))
+        w["W"] = w["W"] * loft_zone_mod.get("wkt_mult", 1.0)
 
     # ── DEFEND is a defensive shot: it can NEVER give a 4, a 6 or a 3 ────────
     # (a defended ball only dies for 0 / a quick single / 2, or the batter is

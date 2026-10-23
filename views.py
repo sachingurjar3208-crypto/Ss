@@ -310,6 +310,8 @@ from data import (
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
     NOT_OUT_EMOJI, LBW_EMOJI,
+    DIRECTIONS, DIRECTIONS_BY_NAME, translate_shot,
+    LOFT_DIRECTION_RISK, USE_LOFT_DIRECTION_RISK,
 )
 from career_stats import save_innings as _save_innings
 
@@ -646,14 +648,45 @@ async def _auto_spin_bowl(view, make):
 
 
 async def _auto_bat(view, make):
-    btns = [c for c in view.children if isinstance(c, ui.Button)]
-    good = [b for b in btns if b.label in (view.recommended or [])]
+    """Two-step BattingView: press a stage-1 button (Ground most of the
+    time, Loft sometimes, Leave only rarely), then — once that callback has
+    revealed the direction grid — press a direction. If view.recommended is
+    non-empty, prefer a direction whose translate_shot() result lands in it,
+    with the same skill-based chance ranked bots already use elsewhere."""
+    stage1_btns = getattr(view, "_stage1_btns", None)
+    if not stage1_btns:
+        return
+    btn_by_label = {b.label: b for b in stage1_btns}
+
+    r = random.random()
+    if r < 0.03:
+        height_choice = "Leave"
+    elif r < 0.03 + 0.25:
+        height_choice = "Loft"
+    else:
+        height_choice = "Ground"
+
+    stage1_btn = btn_by_label.get(height_choice) or random.choice(stage1_btns)
+    await stage1_btn.callback(make())
+
+    if height_choice == "Leave" or view.is_finished():
+        return   # Leave ends the ball immediately — no direction step
+
+    direction_btns = getattr(view, "_direction_btns", [])
+    direction_keys = getattr(view, "_direction_keys", [])
+    if not direction_btns:
+        return
+
+    delivery_internal = getattr(view.game, "pending_delivery_internal", "") or ""
+    good = [
+        b for b, key in zip(direction_btns, direction_keys)
+        if translate_shot(view.height, key, delivery_internal) in (view.recommended or [])
+    ]
     skill = _acting_skill(view)
     if skill is not None and random.random() > skill:
         good = []   # a weaker bot often ignores the recommended shot
-    pool = good or [b for b in btns if b.label not in ("Leave", "Scoop")] or btns
-    if pool:
-        await random.choice(pool).callback(make())
+    pool = good or direction_btns
+    await random.choice(pool).callback(make())
 
 
 _AUTOPLAY_HANDLERS = {
@@ -1156,6 +1189,8 @@ async def _process_delivery_locked(
     is_recommended_shot: bool = False,
     guide_entry_exists: bool = False,
     is_free_hit: bool = False,
+    direction: str | None = None,
+    height: str | None = None,
 ):
     # BUG FIX: `cscancel` only removed the game from active_games — it never
     # stopped the match itself, because this function (and every other
@@ -1203,6 +1238,11 @@ async def _process_delivery_locked(
     bname = _pname(bowler)
     sname = _pname(striker)
 
+    # Two-step batting UI: remember exactly where/how the shot was played
+    # (None for Leave, the CPU batter, or an old resumed game).
+    game.last_shot_direction = direction
+    game.last_shot_height    = height
+
     # Same speed that was announced ("is coming with X kmph"); fall back to a fresh roll.
     speed_range  = get_delivery_speed(delivery_button, bowler.get("bowling_type"))
     speed        = _announced_speed if _announced_speed is not None else random.uniform(*speed_range)
@@ -1217,6 +1257,14 @@ async def _process_delivery_locked(
         # leave is always a dot ball: no runs, no wicket.
         outcome, is_extra = "0", False
     else:
+        # Loft direction risk (optional, section 7): an off-angle lofted
+        # shot is harder to clear than a straight one — fewer sixes, a
+        # little more wicket risk. Only ever set when height == "Loft".
+        loft_zone_mod = None
+        if USE_LOFT_DIRECTION_RISK and height == "Loft" and direction:
+            zone_key = DIRECTIONS_BY_NAME.get(direction)
+            loft_zone_mod = LOFT_DIRECTION_RISK.get(zone_key)
+
         outcome, is_extra = calculate_outcome(
             delivery_internal, shot_internal,
             bowler.get("bowl", 80), striker.get("bat", 80),
@@ -1235,6 +1283,7 @@ async def _process_delivery_locked(
             prev_delivery=getattr(game, "last_delivery_internal", None),
             bowler_balls_done=game.bowler_ball_count.get(bname, 0),
             bowler_max_balls=game.max_bowler_balls(),
+            loft_zone_mod=loft_zone_mod,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1265,6 +1314,7 @@ async def _process_delivery_locked(
         outcome=outcome,
         bowling_type=bowler.get("bowling_type", "Fast"),
         stage1_choice=stage1_choice,
+        direction=direction,
     ) + commentary_suffix
 
     # BUG FIX #8: bowler_stats[bname] is initialised inside BowlerSelectView
@@ -1340,6 +1390,8 @@ async def _process_delivery_locked(
             game.batsman_stats[sname]["fours"] = game.batsman_stats[sname].get("fours", 0) + 1
         elif outcome == "6" and sname in game.batsman_stats:
             game.batsman_stats[sname]["sixes"] = game.batsman_stats[sname].get("sixes", 0) + 1
+        if outcome in ("4", "6"):
+            game._do_record_boundary_direction(int(outcome), delivery_button, shot_button)
         # Odd runs → rotate strike
         if outcome in ("1", "3"):
             game.rotate_strike()
@@ -2310,12 +2362,31 @@ class BowlingView(_TimeoutMixin, ui.View):
 # Batting view
 # ─────────────────────────────────────────────────────────────────────────────
 
+_STAGE1_STYLES = {
+    "Loft":   discord.ButtonStyle.danger,
+    "Ground": discord.ButtonStyle.success,
+    "Leave":  discord.ButtonStyle.secondary,
+}
+# (row, key) order for the 3x3 direction grid — matches the camera-behind-
+# bowler, right-handed-batter orientation in the design doc exactly.
+_DIRECTION_GRID = [
+    ("UL", 1), ("U", 1), ("UR", 1),
+    ("L",  2), ("C", 2), ("R",  2),
+    ("DL", 3), ("D", 3), ("DR", 3),
+]
+
+
 class BattingView(_TimeoutMixin, ui.View):
+    """Two-step batting: [Loft] [Ground] [Leave] first; after Loft/Ground is
+    tapped those three grey out and a 3x3 direction grid appears on the same
+    message. Leave ends the ball immediately (no direction grid)."""
+
     def __init__(self, game: GameState, *, stage1_choice: str = "", is_free_hit: bool = False):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.game          = game
-        self.stage1_choice = stage1_choice
+        self.stage1_choice = stage1_choice   # the FAST bowler's swing choice (unrelated to height)
         self.is_free_hit   = is_free_hit
+        self.height        = ""              # "Loft" | "Ground" once stage 1 is picked
 
         delivery_btn = game.pending_delivery or ""
         if stage1_choice:
@@ -2326,36 +2397,77 @@ class BattingView(_TimeoutMixin, ui.View):
         self.recommended        = guide_list
         self.guide_entry_exists = bool(guide_list)  # False when delivery not in guide
 
-        self._add_buttons()
+        self._stage1_btns: list[ui.Button] = []
+        self._direction_btns: list[ui.Button] = []
+        self._direction_keys: list[str] = []   # parallel to _direction_btns
+        self._add_stage1_buttons()
 
-    def _add_buttons(self):
-        STYLES = {
-            "Drive":  discord.ButtonStyle.success,
-            "Loft":   discord.ButtonStyle.danger,
-            "Flick":  discord.ButtonStyle.success,
-            "Pull":   discord.ButtonStyle.danger,
-            "Cut":    discord.ButtonStyle.primary,
-            "Sweep":  discord.ButtonStyle.primary,
-            "Scoop":  discord.ButtonStyle.secondary,
-            "Defend": discord.ButtonStyle.secondary,
-            "Leave":  discord.ButtonStyle.secondary,
-        }
-        ROWS = {
-            "Drive": 0, "Loft": 0, "Flick": 0, "Pull": 0, "Cut": 0,
-            "Sweep": 1, "Scoop": 1, "Defend": 1, "Leave": 1,
-        }
-        for label in BATTING_BUTTONS:
-            style   = STYLES.get(label, discord.ButtonStyle.secondary)
-            row     = ROWS.get(label, 0)
-            is_good = label in self.recommended
-            btn     = ui.Button(label=label, style=style, row=row)
-            btn.callback = self._make_callback(label, is_good, self.guide_entry_exists)
+    def _add_stage1_buttons(self):
+        for label in ("Loft", "Ground", "Leave"):
+            btn = ui.Button(label=label, style=_STAGE1_STYLES[label], row=0)
+            btn.callback = self._make_stage1_callback(label)
+            self._stage1_btns.append(btn)
             self.add_item(btn)
 
-    def _make_callback(self, shot: str, is_recommended: bool, guide_entry_exists: bool):
+    def _add_direction_buttons(self):
+        for key, row in _DIRECTION_GRID:
+            arrow, name = DIRECTIONS[key]
+            style = discord.ButtonStyle.primary if key == "C" else discord.ButtonStyle.secondary
+            btn   = ui.Button(label=f"{arrow} {name}", style=style, row=row)
+            btn.callback = self._make_direction_callback(key)
+            self._direction_btns.append(btn)
+            self._direction_keys.append(key)
+            self.add_item(btn)
+
+    def _make_stage1_callback(self, label: str):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.batting_user_id:
                 await interaction.response.send_message("Only the batting team plays shots!", ephemeral=True)
+                return
+            if self.height or self.is_finished():   # already picked — ignore double taps
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
+                return
+
+            if label == "Leave":
+                if self.is_finished():
+                    try:
+                        await interaction.response.defer()
+                    except Exception:
+                        pass
+                    return
+                self.stop()
+                await _process_delivery(
+                    interaction, self.game, "Leave",
+                    stage1_choice=self.stage1_choice,
+                    is_recommended_shot=False,
+                    guide_entry_exists=self.guide_entry_exists,
+                    is_free_hit=self.is_free_hit,
+                )
+                return
+
+            self.height = label
+            # Row 0 -> grey + disabled
+            for b in self._stage1_btns:
+                b.disabled = True
+                b.style    = discord.ButtonStyle.secondary
+            # Reveal the direction grid on the same message
+            self._add_direction_buttons()
+            try:
+                await interaction.response.edit_message(view=self)
+            except Exception as e:
+                print(f"[batting] stage1 edit failed ({type(e).__name__}: {e})")
+        return callback
+
+    def _make_direction_callback(self, direction_key: str):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.game.batting_user_id:
+                await interaction.response.send_message("Only the batting team plays shots!", ephemeral=True)
+                return
+            if not self.height:
+                await interaction.response.send_message("Pehle Loft ya Ground choose karo.", ephemeral=True)
                 return
             if self.is_finished():   # shot already chosen (double tap)
                 try:
@@ -2364,12 +2476,20 @@ class BattingView(_TimeoutMixin, ui.View):
                     pass
                 return
             self.stop()
+
+            delivery_internal = self.game.pending_delivery_internal or ""
+            shot_button = translate_shot(self.height, direction_key, delivery_internal)
+            is_recommended = shot_button in self.recommended
+            _, direction_name = DIRECTIONS[direction_key]
+
             await _process_delivery(
-                interaction, self.game, shot,
+                interaction, self.game, shot_button,
                 stage1_choice=self.stage1_choice,
                 is_recommended_shot=is_recommended,
-                guide_entry_exists=guide_entry_exists,
+                guide_entry_exists=self.guide_entry_exists,
                 is_free_hit=self.is_free_hit,
+                direction=direction_name,
+                height=self.height,
             )
         return callback
 
