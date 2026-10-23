@@ -269,6 +269,68 @@ def create_card(
         conn.commit()
 
 
+# Columns that are NOT copied when a card is cloned with clone_card().
+# extra_stats is left empty on purpose: the Style 2 stats are then worked out from the new ovr/bat/bowl.
+_CLONE_SKIP = {
+    "playername_key", "playername", "image_path",
+    "created_by", "created_at", "updated_at", "extra_stats",
+}
+
+
+def clone_card(
+    source: str,
+    new_playername: str,
+    *,
+    ovr: int,
+    bat: int,
+    bowl: int,
+    background: str,
+    style: str,
+    event_key: str,
+    obtainable: bool,
+    created_by: int,
+    displayname: str | None = None,
+) -> str | None:
+    """Make a new card from an existing one (used by /eventplayermaker).
+
+    Copied from the source card: foreground link + position + size, country, role,
+    batting hand, bowling type, playstyle logos and every layout setting.
+    Set fresh: name, ovr / bat / bowl, background, design, event, obtainable.
+    The new card joins the source's real-player group, so an XI can hold only one of them.
+    Returns None when it worked, or "source" / "exists" / "style" when it did not."""
+    if style not in CARD_STYLES:
+        return "style"
+    src = get_card(source)
+    if src is None:
+        return "source"
+    if card_exists(new_playername):
+        return "exists"
+    now = time.time()
+    with _conn() as conn:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(cards)")]
+        values = {c: src[c] for c in cols if c not in _CLONE_SKIP}
+        values.update({
+            "playername_key": new_playername.strip().lower(),
+            "playername": new_playername.strip(),
+            "displayname": (displayname.strip() if displayname and displayname.strip() else src["displayname"]),
+            "background": background.strip(),
+            "ovr": ovr, "bat": bat, "bowl": bowl,
+            "card_style": style,
+            "event_key": event_key.strip().lower(),
+            "obtainable": 1 if obtainable else 0,
+            "player_group": src["player_group"] or src["playername_key"],
+            "image_path": None, "extra_stats": None,
+            "created_by": created_by, "created_at": now, "updated_at": now,
+        })
+        names = [n for n in values if n in cols]
+        conn.execute(
+            "INSERT INTO cards (" + ", ".join(names) + ") VALUES (" + ", ".join("?" for _ in names) + ")",
+            [values[n] for n in names],
+        )
+        conn.commit()
+    return None
+
+
 def update_card(
     playername: str,
     *,

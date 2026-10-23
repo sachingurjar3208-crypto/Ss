@@ -688,11 +688,11 @@ class EconomyCog(commands.Cog, name="Economy"):
         if not res["ok"]:
             if res.get("locked"):
                 await ctx.send(
-                    f"🔒 The monthly reward unlocks **1 month after your debut**. "
-                    f"Come back in **{fmt_wait(res['wait'])}**."
+                    f"The monthly reward unlocks 1 month after your debut. "
+                    f"Come back in `{fmt_wait(res['wait'])}`."
                 )
                 return
-            await ctx.send(f"⏳ You already claimed your {kind} reward. Come back in **{fmt_wait(res['wait'])}**.")
+            await ctx.send(f"You already claimed your {kind} reward. Come back in `{fmt_wait(res['wait'])}`.")
             return
         lines = [f"{REWARD_EMOJI.get(kind, '🎁')} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**"]
         if kind == "weekly" and res.get("vouchers"):
@@ -724,6 +724,27 @@ class EconomyCog(commands.Cog, name="Economy"):
         lines.append(f"Balance: **{economy.fmt_coins(res['balance'])}**")
         text = "\n".join(lines)
         shown = card_db.get_card(res["card"]) if res["card"] else None
+        # Short monospace layout (no emojis) for csdaily / csweekly / csmonthly.
+        if True:
+            if kind == "daily":
+                d = [f"Daily: +{res['base']:,} coins | Streak: {res['streak']}"]
+                if res["bonus"]:
+                    d.append(f"Streak bonus: +{res['bonus']:,} coins | +{res['vouchers']} vouchers")
+            elif kind == "weekly":
+                d = [f"Weekly: +{res['coins']:,} coins | Vouchers: +{res['vouchers']}"]
+            else:
+                d = [f"Monthly: +{res['coins']:,} coins"]
+            if shown is not None:
+                got = f"Got: {shown['playername']} ({shown['ovr']} {card_db.effective_role(shown)})"
+                if res["dupe"]:
+                    got += f" - duplicate, +{res['refund']:,} coins"
+                elif res.get("pending"):
+                    got += " - squad full, choose below"
+                d.append(got)
+            else:
+                d.append(f"No player cards with rating {lo}-{hi} are available yet.")
+            d.append(f"Balance: {res['balance']:,}")
+            text = "```\n" + "\n".join(d).replace("```", "'''") + "\n```"
         if shown is not None and shown["image_path"]:
             # Reward text + the card image in ONE message (daily, weekly and monthly).
             embed = discord.Embed(
@@ -777,28 +798,25 @@ class EconomyCog(commands.Cog, name="Economy"):
             if res.get("empty"):
                 await ctx.send("🎴 No player cards are available to claim yet. Try again later.")
                 return
-            msg = f"⏳ Your next card is ready in **{fmt_wait(res['wait'])}**."
-            if not premium:
-                msg += "\n💎 Premium members can claim every **35 min**."
+            msg = f"Your next card is ready in `{fmt_wait(res['wait'])}`."
             await ctx.send(msg)
             return
 
         card = card_db.get_card(res["card"])
         ovr = int(card["ovr"])
+        got = f"Got: {card['playername']} ({ovr} {card_db.effective_role(card)})"
         if res["dupe"]:
-            body = f"{_card_line(card, '  ♻️ duplicate')}\n💰 Sold automatically for **+{economy.fmt_coins(res['refund'])}**"
+            got += f" - duplicate, +{res['refund']:,} coins"
         elif res["pending"]:
-            body = f"{_card_line(card, '  ⚠️ squad full')}\nChoose below: sell it or replace a player."
-        else:
-            body = _card_line(card, "  🆕")
+            got += " - squad full, choose below"
         if ovr >= 84:
-            title, color = "🌟 Rare Claim!", discord.Color.purple()
+            title, color = "Rare Claim [Legendary]", discord.Color.purple()
         elif ovr >= 76:
-            title, color = "🎴 Hourly Claim", discord.Color.blue()
+            title, color = "Hourly Claim [Rare]", discord.Color.blue()
         else:
-            title, color = "🎴 Hourly Claim", discord.Color.light_grey()
-        embed = discord.Embed(title=title, description=body, color=color)
-        embed.set_footer(text=f"Next claim in {fmt_wait(cooldown)}" + (" • 💎 Premium" if premium else ""))
+            title, color = "Hourly Claim [Common]", discord.Color.light_grey()
+        body = "```\n" + "\n".join([title, got, f"Next claim in {fmt_wait(cooldown)}"]) + "\n```"
+        embed = discord.Embed(description=body, color=color)
         await card_cache.send_embed(ctx, embed, card["image_path"])   # card image comes with the message
         if res["pending"]:
             await send_next_pending(ctx, ctx.author.id)

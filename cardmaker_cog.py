@@ -2,6 +2,7 @@
 
     /cardmaker      create a new player card
     /editcard       edit an existing player card (only pass fields you want to change)
+    /eventplayermaker  make an event card from an existing card (reuses its foreground; new stats / background / design / event)
     /bgadder        add a new background template
     /foregroundfix  nudge position and/or resize a card's foreground cutout
     /removecard     delete a player card
@@ -41,7 +42,7 @@ from PIL import Image
 from card_countries import CRICKET_COUNTRIES, resolve_country
 from card_db import (
     init_card_db,
-    card_exists, get_card, create_card, update_card, update_card_offset,
+    card_exists, get_card, create_card, clone_card, update_card, update_card_offset,
     set_card_image_path, list_playernames, list_all_cards, delete_card,
     cards_using_background, cards_on_background_any, reassign_cards_background, delete_background,
     set_card_style,
@@ -425,6 +426,103 @@ class CardMakerCog(commands.Cog):
                 f"This is usually the foreground image link — check it loads directly as "
                 f"an image (not a webpage), then try `/editcard` with a new link, or "
                 f"nudge it with `/foregroundfix`."
+            )
+
+    # ── /eventplayermaker ────────────────────────────────────────────
+    @app_commands.command(
+        name="eventplayermaker",
+        description="Make an event card from an existing card (reuses its foreground, no new image needed)",
+    )
+    @app_commands.describe(
+        foreground="Existing card to copy: its foreground, position, country, role, hand, bowling type and playstyles are reused",
+        playername="Name of the NEW card — the unique ID, e.g. Virat Kohli RCB",
+        ovr="Overall rating (1–150)",
+        bat="Batting power (1–150)",
+        bowl="Bowling power (1–150)",
+        background="Card background template for the new card (added via /bgadder)",
+        design="Old design (Classic) or New design (Style 2)",
+        eventname="Event of this card (from /eventmaker). Its emoji shows in the XI",
+        obtainable="True = packs & all sources. False = not found anywhere, only added by hand. Default True",
+        displayname="Short name shown big in the card corner. Empty = same as the copied card",
+    )
+    @app_commands.choices(design=[
+        app_commands.Choice(name="Old design (Classic)", value="classic"),
+        app_commands.Choice(name="New design (Style 2)", value="style2"),
+    ])
+    @app_commands.autocomplete(foreground=playername_autocomplete, background=background_autocomplete,
+                               eventname=event_autocomplete)
+    @is_owner()
+    async def eventplayermaker(
+        self,
+        interaction: discord.Interaction,
+        foreground: str,
+        playername: str,
+        ovr: app_commands.Range[int, 1, MAX_STAT],
+        bat: app_commands.Range[int, 1, MAX_STAT],
+        bowl: app_commands.Range[int, 1, MAX_STAT],
+        background: str,
+        design: str,
+        eventname: str,
+        obtainable: bool = True,
+        displayname: str | None = None,
+    ):
+        await interaction.response.defer()
+
+        if not playername.strip():
+            await interaction.followup.send("❌ playername can't be empty.")
+            return
+
+        src = get_card(foreground)
+        if src is None:
+            await interaction.followup.send(f"❌ No card named `{foreground}`. Pick one from the list.")
+            return
+
+        event_row = get_event(eventname)
+        if event_row is None:
+            names = ", ".join(e["eventname"] for e in list_events()) or "(none yet — use `/eventmaker` first)"
+            await interaction.followup.send(f"❌ Unknown event `{eventname}`.\nAvailable: {names}")
+            return
+
+        if card_exists(playername):
+            await interaction.followup.send(
+                f"❌ A card for **{playername}** already exists. Use `/editcard` to change it, "
+                f"or pick another playername."
+            )
+            return
+
+        bg = get_background(background)
+        if bg is None:
+            names = list_backgrounds()
+            hint = ", ".join(names) if names else "(none added yet — use `/bgadder` first)"
+            await interaction.followup.send(f"❌ Unknown background `{background}`.\nAvailable: {hint}")
+            return
+
+        err = await asyncio.to_thread(
+            clone_card, src["playername"], playername,
+            ovr=ovr, bat=bat, bowl=bowl, background=bg["pathname"], style=design,
+            event_key=event_row["event_key"], obtainable=obtainable,
+            created_by=interaction.user.id, displayname=displayname,
+        )
+        if err:
+            reason = {
+                "source": f"No card named `{foreground}`.",
+                "exists": f"A card for **{playername}** already exists.",
+                "style": "Unknown design.",
+            }.get(err, "Could not create the card.")
+            await interaction.followup.send(f"❌ {reason}")
+            return
+
+        try:
+            await _regenerate_and_send(interaction, playername, "✅ Event card created")
+            await interaction.followup.send(
+                _event_note(event_row, obtainable)
+                + f"\n📋 Copied from **{src['playername']}**: foreground, position, country, role, hand, "
+                  f"bowling type, playstyles and layout."
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                f"⚠️ Card saved to the database, but image generation failed: `{e}`\n"
+                f"Try `/refreshcards`, or nudge the foreground with `/foregroundfix`."
             )
 
     # ── /editcard ────────────────────────────────────────────────────
