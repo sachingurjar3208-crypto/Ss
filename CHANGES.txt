@@ -64,3 +64,18 @@ RULES
 NOT CHANGED
   - Batting UI, DRS, bowler selection, playstyles other than the loft rules.
   - Per-player fielder stats (still Phase 2, not built).
+
+PITCH MAP - landing spot vs shot, RHB / LHB
+==========================================
+  pitch_map.py      NEW. Each ball lands in a random spot from its delivery's zone
+                    (row: Short/Good/Full/Yorker x column). The batter's shot has
+                    a perfect spot. Result: PERFECT / PARTIAL / WRONG.
+                    pitch_png() draws the top-down pitch for this ball, mirrored
+                    for left-hand batters, with the shot line and a fielder
+                    marker if a fielder is in that direction.
+  logic.py          calculate_outcome(..., timing_mod=None). Perfect: more 4/6,
+                    fewer dots/wickets. Wrong: more dots/wickets, fewer 4/6.
+  views.py          Timing is computed for each ball (not for Leave) and the pitch
+                    picture is sent with the ball message.
+  xi_display.py,
+  ranked.py         Player dicts now carry batting_hand (R/L). Missing = R.

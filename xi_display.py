@@ -69,6 +69,7 @@ def entry_from_card(card) -> dict:
         "bat": card["bat"],
         "bowl": card["bowl"],
         "bowling_type": card_db.effective_bowling_type(card),
+        "batting_hand": card["batting_hand"] if "batting_hand" in card.keys() else None,
         "card": card_db.card_emoji(card),
         "remoji": sl.role_emoji(card),
         "flag": card["country_emoji"],

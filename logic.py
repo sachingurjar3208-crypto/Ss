@@ -293,6 +293,7 @@ def calculate_outcome(
     ground_zone_mod: dict | None = None,
     loft_field_chances: dict | None = None,
     loft_power: float | None = None,
+    timing_mod: dict | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -324,6 +325,9 @@ def calculate_outcome(
                           Low bat: almost no sixes, fewer fours, more wickets
                           when going after it. High bat: sixes come easily.
                           Only used when loft_field_chances is None.
+      timing_mod        – how well the batter's shot matched the landing spot
+                          (pitch_map.timing_for). Keys are outcome weights:
+                          {"0","1","2","3","4","6","W"}: multipliers. None = no change.
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
@@ -667,6 +671,12 @@ def calculate_outcome(
         w["4"] = max(0.02, w["4"] * min(1.4, max(0.4, 0.4 + 0.6 * lp)))
         if lp < 1.0:                                 # hitting out of reach: more risk
             w["W"] = w["W"] * min(1.5, 1.0 + (1.0 - lp) * 0.5)
+
+    # ── Timing: did the shot match where the ball landed? ───────────────────
+    if timing_mod:
+        for k, m in timing_mod.items():
+            if k in w:
+                w[k] = w[k] * float(m)
 
     # ── Field placement (ground shots only; see field_logic.py) ─────────────
     # Fielder in the shot's direction: boundaries mostly cut down to 1-2 runs

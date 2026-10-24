@@ -631,6 +631,7 @@ def _player_dict(c) -> dict:
         "bat": c["bat"],
         "bowl": c["bowl"],
         "bowling_type": card_db.effective_bowling_type(c),
+        "batting_hand": c["batting_hand"] if "batting_hand" in c.keys() else None,
         "role": ENGINE_ROLE[card_db.effective_role(c)],
         "card": sl.card_emoji(c),
         "flag": c["country_emoji"],

@@ -26,6 +26,7 @@ from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary, SIX_DISTANCES
 from wagon_wheel import wagon_wheel_png, field_png, catch_wheel_png
+import pitch_map
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 
 
@@ -311,7 +312,7 @@ from data import (
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
     NOT_OUT_EMOJI, LBW_EMOJI,
-    DIRECTIONS, DIRECTIONS_BY_NAME, translate_shot,
+    DIRECTIONS, DIRECTIONS_BY_NAME, translate_shot, SHOT_BUTTON_MAP,
     LOFT_DIRECTION_RISK, USE_LOFT_DIRECTION_RISK,
 )
 from career_stats import save_innings as _save_innings
@@ -1057,6 +1058,7 @@ async def _send_commentary_with_gifs(
     gif_urls: list[str],
     interaction: discord.Interaction | None = None,
     wheel: bytes | None = None,
+    pitch: bytes | None = None,
 ):
     """
     Show ball commentary + scoreboard embed.
@@ -1074,6 +1076,12 @@ async def _send_commentary_with_gifs(
     if wheel:   # wagon wheel for a four / six
         try:
             await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
+        except Exception:
+            pass
+
+    if pitch:   # where the ball landed vs the shot
+        try:
+            await channel.send(file=discord.File(io.BytesIO(pitch), filename="pitch_map.png"))
         except Exception:
             pass
 
@@ -1289,6 +1297,17 @@ async def _process_delivery_locked(
     if height == "Loft" and direction and _fp_now is not None:
         catch_zone_key = field_logic.catch_zone_for(DIRECTIONS_BY_NAME.get(direction), _fp_now)
 
+    # Pitch map: where the ball landed (random within the delivery's zone)
+    # against where the shot was aimed. Leave is not a shot, so no timing.
+    timing = None
+    if shot_button != "Leave":
+        timing = pitch_map.timing_for(
+            delivery_button,
+            SHOT_BUTTON_MAP.get(shot_button, shot_button),
+            DIRECTIONS_BY_NAME.get(direction) if direction else None,
+            pitch_map.batter_hand(striker),
+        )
+
     if shot_button == "Leave":
         # BUG FIX: "Leave" was mapped to the "Defend" internal shot purely
         # for matchup/narrative lookups, but that meant it also went through
@@ -1355,6 +1374,7 @@ async def _process_delivery_locked(
             ground_zone_mod=ground_zone_mod,
             loft_field_chances=loft_field,
             loft_power=loft_pow,
+            timing_mod=timing["mod"] if timing else None,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1466,10 +1486,6 @@ async def _process_delivery_locked(
         game.add_legal_ball()
         game.add_runs(int(outcome))
         game.timeline.append(_timeline_emoji(outcome))
-        if outcome == "4" and sname in game.batsman_stats:
-            game.batsman_stats[sname]["fours"] = game.batsman_stats[sname].get("fours", 0) + 1
-        elif outcome == "6" and sname in game.batsman_stats:
-            game.batsman_stats[sname]["sixes"] = game.batsman_stats[sname].get("sixes", 0) + 1
         if outcome in ("4", "6"):
             game._do_record_boundary_direction(int(outcome), delivery_button, shot_button)
         # Odd runs → rotate strike
@@ -1534,6 +1550,24 @@ async def _process_delivery_locked(
                 if gif:
                     gif_urls.append(gif)
                 break
+
+    # Pitch picture: landing spot vs the shot line, with the result. Sent with
+    # the ball; None when there was no timing for this ball.
+    pitch = None
+    if timing is not None:
+        try:
+            _txt = {"6": "SIX", "4": "FOUR", "W": "OUT"}.get(outcome, f"{outcome} run" + ("" if outcome == "1" else "s"))
+            pitch = await asyncio.to_thread(
+                pitch_map.pitch_png, sname, pitch_map.batter_hand(striker),
+                SHOT_BUTTON_MAP.get(shot_button, shot_button),
+                DIRECTIONS_BY_NAME.get(direction) if direction else None,
+                timing, delivery_button,
+                field_logic.catch_zone_for(DIRECTIONS_BY_NAME.get(direction) if direction else None,
+                                           getattr(game, "field_positions", None)),
+                _txt,
+            )
+        except Exception:
+            pitch = None
 
     # Wagon wheel: only for a four or a six (None for everything else).
     wheel = None
@@ -1619,11 +1653,11 @@ async def _process_delivery_locked(
             if outcome == "W":
                 game.timeline.append(_timeline_emoji("W"))
             if game.innings == 1:
-                await _do_innings_break(channel, game, commentary, embed, gif_urls, interaction, wheel=wheel)
+                await _do_innings_break(channel, game, commentary, embed, gif_urls, interaction, wheel=wheel, pitch=pitch)
             else:
                 save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
                 _save_match_record(game)
-                await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
+                await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, pitch=pitch)
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
                 await _ranked_announce(channel, game)
@@ -1645,20 +1679,20 @@ async def _process_delivery_locked(
                 game.rotate_strike()
             game.timeline.append("|")
             game.end_over()
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, pitch=pitch)
             await _send_next_bowler_prompt(channel, game)
             return
 
         # ── Extras (wide / no-ball) — re-bowl ────────────────────────────
         if is_extra:
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, pitch=pitch)
             # NB outcomes set pending_free_hit; wides do not.
             # _send_bowling_prompt reads and clears the flag to show FREE HIT label.
             await _send_bowling_prompt(channel, game)
             return
 
         # ── Normal continue ───────────────────────────────────────────────
-        await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)
+        await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, pitch=pitch)
         await _send_bowling_prompt(channel, game)
 
     except Exception as e:
@@ -1715,10 +1749,10 @@ async def _handle_wicket_fall(channel, game: GameState):
 # Innings transition helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _do_innings_break(channel, game: GameState, commentary, embed, gif_urls=None, interaction=None, wheel=None):
+async def _do_innings_break(channel, game: GameState, commentary, embed, gif_urls=None, interaction=None, wheel=None, pitch=None):
     """End of innings via overs exhausted: save stats, send commentary, start break."""
     save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id)
-    await _send_commentary_with_gifs(channel, commentary, embed, gif_urls or [], interaction, wheel=wheel)
+    await _send_commentary_with_gifs(channel, commentary, embed, gif_urls or [], interaction, wheel=wheel, pitch=pitch)
     await _start_second_innings(channel, game)
 
 
