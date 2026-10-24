@@ -1,20 +1,15 @@
 """wagon_wheel.py
 ----------------
-One wagon-wheel picture for a FOUR or a SIX (nothing else gets a wheel).
+Pictures for the ground:
 
-    png = wagon_wheel_png(direction, outcome, meters=98, batter="Kohli")
+  wagon_wheel_png(...)  one wagon wheel for a FOUR or a SIX (nothing else).
+  catch_wheel_png(...)  a RED curved line from the batter to the fielder who
+                        took a lofted catch, ending in OUT.
+  field_png(...)        the 11 fielders placed on the ground (numbered 1-11).
 
-  direction : the DIRECTIONS display name the batting UI recorded
-              ("Cover", "Straight", ...). If it is None (CPU batter, old
-              resumed game) a believable one is picked from `shot_internal`.
-  outcome   : "4" or "6". Anything else returns None (no wheel).
-  meters    : distance of the six. Shown ONLY for sixes.
-
-Colours: six = gold (a curve that rises up the picture, like a lofted ball),
-         four = blue (a straight line to the rope).
-
-Returns PNG bytes, or None if nothing should be shown / drawing failed — the
-caller must never let a picture problem break a match.
+Every picture can show the 11 fielders when the field is known. Returns PNG
+bytes, or None if nothing should be shown / drawing failed. The caller must
+never let a picture problem break a match.
 """
 from __future__ import annotations
 
@@ -23,6 +18,7 @@ import math
 import random
 
 from data import DIRECTIONS_BY_NAME
+import field_logic as FL
 
 # Screen angle (degrees, 0 = right, counter-clockwise). Same orientation as
 # the batting buttons: straight at the bottom, off side left, leg side right,
@@ -31,9 +27,15 @@ _ANGLE = {"D": -90, "DL": -135, "L": 180, "UL": 135, "U": 90, "UR": 45, "R": 0, 
 _NAMES = {"D": "Straight", "DL": "Cover", "L": "Point", "UL": "Third Man",
           "U": "Behind", "UR": "Fine Leg", "R": "Square Leg", "DR": "Mid-wicket"}
 
-_SIX  = (255, 196, 0)
+# Inner-zone centres (degrees) and radius; outfield fielders sit at 182 px.
+_INNER_ANGLE = {"IL": 150, "IS": -90, "IR": 30}
+_INNER_R = 84
+_OUTER_R = 182
+
+_SIX = (255, 196, 0)
 _FOUR = (0, 190, 255)
 _FIELDER = (232, 72, 72)
+_OUT = (255, 40, 40)
 
 # Believable direction when the batter did not pick one (CPU batter etc.).
 _FALLBACK = {
@@ -58,52 +60,78 @@ def _font(size):
             return ImageFont.load_default()
 
 
-def _draw_fielders(d, cx, cy, S, field_positions) -> None:
-    """A red dot per fielder, between the 30-yard circle and the rope. If a
-    position maps to a name (Phase 2) the name is written under the dot."""
-    for key, ang in _ANGLE.items():
-        if key not in field_positions:
+# ── Fielder placement ────────────────────────────────────────────────────────
+def fielder_points(counts) -> list[dict]:
+    """Every fielder as {zone, x, y, num} in unscaled picture units.
+
+    Fielders in one zone are fanned out along an arc so none overlap. The
+    numbers run 1..11 in the editor's display order."""
+    pts: list[dict] = []
+    if not counts:
+        return pts
+    num = 0
+    for zone in FL.ZONE_KEYS:
+        n = int(counts.get(zone, 0))
+        if n <= 0:
             continue
+        if zone in FL.FIELD_POSITIONS:
+            base, radius, step = _ANGLE[zone], _OUTER_R, 13.0
+        else:
+            base, radius, step = _INNER_ANGLE[zone], _INNER_R, 22.0
+        for i in range(n):
+            num += 1
+            ang = math.radians(base + (i - (n - 1) / 2.0) * step)
+            pts.append({
+                "zone": zone, "num": num,
+                "x": math.cos(ang) * radius, "y": -math.sin(ang) * radius,
+            })
+    return pts
+
+
+def _draw_fielders(d, cx, cy, S, counts) -> None:
+    """One red dot per fielder, numbered 1-11."""
+    for p in fielder_points(counts):
+        fx, fy = cx + p["x"] * S, cy + p["y"] * S
+        d.ellipse([fx - 13 * S, fy - 13 * S, fx + 13 * S, fy + 13 * S],
+                  fill=_FIELDER, outline=(255, 255, 255), width=2 * S)
+        d.text((fx, fy), str(p["num"]), font=_font(12), fill=(255, 255, 255), anchor="mm")
+
+
+def _catch_point(zone: str, counts) -> tuple[float, float] | None:
+    """Picture position of the first fielder in `zone` (the one who takes it)."""
+    for p in fielder_points(counts):
+        if p["zone"] == zone:
+            return p["x"], p["y"]
+    return None
+
+
+# ── Base ground ──────────────────────────────────────────────────────────────
+def _base(S):
+    """The ground (circle, 30-yard ring, pitch, spokes, labels). Shared by the
+    wagon wheel, the catch wheel and the field picture. Returns (img, d, cx, cy, R)."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (_W * S, _H * S), (18, 20, 28))
+    d = ImageDraw.Draw(img)
+    cx, cy = _W * S // 2, _H * S // 2 + 25 * S
+    R = 245 * S
+
+    d.ellipse([cx - R, cy - R, cx + R, cy + R], fill=(38, 112, 58), outline=(240, 240, 240), width=4 * S)
+    for r in (200, 150, 100):
+        d.ellipse([cx - r * S, cy - r * S, cx + r * S, cy + r * S], outline=(46, 128, 68), width=2 * S)
+    r30 = 120 * S
+    for a in range(0, 360, 12):                     # dashed 30-yard circle
+        d.arc([cx - r30, cy - r30, cx + r30, cy + r30], a, a + 6, fill=(235, 235, 235), width=2 * S)
+    d.rectangle([cx - 9 * S, cy - 48 * S, cx + 9 * S, cy + 48 * S], fill=(196, 170, 120))   # pitch
+
+    for k, ang in _ANGLE.items():                   # faint spokes + labels
         a = math.radians(ang)
-        fx, fy = cx + 182 * S * math.cos(a), cy - 182 * S * math.sin(a)
-        d.ellipse([fx - 15 * S, fy - 15 * S, fx + 15 * S, fy + 15 * S],
-                  fill=_FIELDER, outline=(255, 255, 255), width=3 * S)
-        d.text((fx, fy), "F", font=_font(15), fill=(255, 255, 255), anchor="mm")
-        who = field_positions.get(key) if hasattr(field_positions, "get") else None
-        if who:
-            d.text((fx, fy + 26 * S), str(who), font=_font(12), fill=(255, 255, 255), anchor="mm")
-
-
-def field_png(field_positions, over_no: int | None = None, phase: str = "",
-              max_allowed: int | None = None) -> bytes | None:
-    """The current field as a wagon-wheel style picture (same ground, same
-    colours). Returns PNG bytes, or None on any drawing problem."""
-    if field_positions is None:
-        return None
-    try:
-        from PIL import Image
-        S = _S
-        img, d, cx, cy, R = _base(S)
-        _draw_fielders(d, cx, cy, S, field_positions)
-        d.ellipse([cx - 6 * S, cy - 6 * S, cx + 6 * S, cy + 6 * S], fill=(255, 255, 255))
-        title = f"FIELD · OVER {over_no}" if over_no else "FIELD"
-        d.text((24 * S, 22 * S), title, font=_font(30), fill=(255, 255, 255), anchor="la")
-        n = len(field_positions)
-        sub = f"{n} / {max_allowed} outside the circle" if max_allowed else f"{n} outside the circle"
-        if phase:
-            sub = f"{phase} · {sub}"
-        d.text((24 * S, 62 * S), sub, font=_font(17), fill=(210, 214, 224), anchor="la")
-        lx, y = (_W - 120) * S, 24 * S
-        d.ellipse([lx, y + 4 * S, lx + 12 * S, y + 16 * S], fill=_FIELDER, outline=(0, 0, 0), width=S)
-        d.text((lx + 20 * S, y + 10 * S), "Fielder", font=_font(15), fill=(210, 214, 224), anchor="lm")
-        img = img.resize((_W, _H), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, "PNG")
-        return buf.getvalue()
-    except Exception as e:          # never break a match over a picture
-        print(f"[field image] skipped ({type(e).__name__}: {e})")
-        return None
-
+        d.line([cx, cy, cx + R * math.cos(a), cy - R * math.sin(a)], fill=(60, 140, 80), width=S)
+        axis = (ang % 90 == 0)
+        lx = cx + (R + (44 if axis else 70) * S) * math.cos(a)
+        ly = cy - (R + (26 if axis else 40) * S) * math.sin(a)
+        lx = min(max(lx, 52 * S), (_W - 52) * S)
+        d.text((lx, ly), _NAMES[k], font=_font(13), fill=(170, 176, 190), anchor="mm")
+    return img, d, cx, cy, R
 
 
 def _resolve_key(direction: str | None, shot_internal: str | None) -> str | None:
@@ -112,6 +140,48 @@ def _resolve_key(direction: str | None, shot_internal: str | None) -> str | None
         return key
     pool = _FALLBACK.get(shot_internal or "")
     return random.choice(pool) if pool else None
+
+
+def _png(img) -> bytes:
+    from PIL import Image
+    img = img.resize((_W, _H), Image.LANCZOS)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _count_line(counts) -> str:
+    n = FL.total_count(counts)
+    return f"{n} fielders" if n else ""
+
+
+def field_png(field_positions, over_no: int | None = None, phase: str = "",
+              max_allowed: int | None = None) -> bytes | None:
+    """The current field as a picture: all fielders numbered on the ground.
+    Returns PNG bytes, or None on any drawing problem."""
+    if field_positions is None:
+        return None
+    try:
+        S = _S
+        img, d, cx, cy, R = _base(S)
+        _draw_fielders(d, cx, cy, S, field_positions)
+        d.ellipse([cx - 6 * S, cy - 6 * S, cx + 6 * S, cy + 6 * S], fill=(255, 255, 255))
+        title = f"FIELD · OVER {over_no}" if over_no else "FIELD"
+        d.text((24 * S, 22 * S), title, font=_font(30), fill=(255, 255, 255), anchor="la")
+        outside = FL.outside_count(field_positions)
+        sub = f"{outside} / {max_allowed} outside the circle" if max_allowed else f"{outside} outside the circle"
+        if phase:
+            sub = f"{phase} · {sub}"
+        d.text((24 * S, 62 * S), sub, font=_font(17), fill=(210, 214, 224), anchor="la")
+        d.text((24 * S, 86 * S), _count_line(field_positions) or "no fielders",
+               font=_font(15), fill=(180, 186, 200), anchor="la")
+        lx, y = (_W - 150) * S, 24 * S
+        d.ellipse([lx, y + 4 * S, lx + 12 * S, y + 16 * S], fill=_FIELDER, outline=(0, 0, 0), width=S)
+        d.text((lx + 20 * S, y + 10 * S), "Fielder", font=_font(15), fill=(210, 214, 224), anchor="lm")
+        return _png(img)
+    except Exception as e:          # never break a match over a picture
+        print(f"[field image] skipped ({type(e).__name__}: {e})")
+        return None
 
 
 def wagon_wheel_png(
@@ -131,33 +201,66 @@ def wagon_wheel_png(
         return None
 
 
-def _base(S):
-    """The ground (circle, 30-yard ring, pitch, spokes, labels). Shared by the
-    wagon wheel and the field picture. Returns (img, d, cx, cy, R)."""
-    from PIL import Image, ImageDraw
-    img = Image.new("RGB", (_W * S, _H * S), (18, 20, 28))
-    d = ImageDraw.Draw(img)
-    cx, cy = _W * S // 2, _H * S // 2 + 25 * S
-    R = 245 * S
+def catch_wheel_png(
+    direction: str | None,
+    catch_zone: str,
+    batter: str = "",
+    field_positions=None,
+    shot_internal: str | None = None,
+) -> bytes | None:
+    """A lofted shot that was caught: a RED curved line from the batter to the
+    fielder who took it, with OUT at the end. None on any drawing problem."""
+    try:
+        from PIL import Image, ImageDraw
+        S = _S
+        img, d, cx, cy, R = _base(S)
+        _draw_fielders(d, cx, cy, S, field_positions)
 
-    # field
-    d.ellipse([cx - R, cy - R, cx + R, cy + R], fill=(38, 112, 58), outline=(240, 240, 240), width=4 * S)
-    for r in (200, 150, 100):
-        d.ellipse([cx - r * S, cy - r * S, cx + r * S, cy + r * S], outline=(46, 128, 68), width=2 * S)
-    r30 = 120 * S
-    for a in range(0, 360, 12):                     # dashed 30-yard circle
-        d.arc([cx - r30, cy - r30, cx + r30, cy + r30], a, a + 6, fill=(235, 235, 235), width=2 * S)
-    d.rectangle([cx - 9 * S, cy - 48 * S, cx + 9 * S, cy + 48 * S], fill=(196, 170, 120))   # pitch
+        pt = _catch_point(catch_zone, field_positions)
+        if pt is None:
+            # No fielder recorded there: aim at the zone's own spot instead.
+            if catch_zone in FL.FIELD_POSITIONS:
+                a = math.radians(_ANGLE[catch_zone])
+                pt = (math.cos(a) * _OUTER_R, -math.sin(a) * _OUTER_R)
+            else:
+                a = math.radians(_INNER_ANGLE[catch_zone])
+                pt = (math.cos(a) * _INNER_R, -math.sin(a) * _INNER_R)
+        ex, ey = cx + pt[0] * S, cy + pt[1] * S
 
-    for k, ang in _ANGLE.items():                   # faint spokes + labels
-        a = math.radians(ang)
-        d.line([cx, cy, cx + R * math.cos(a), cy - R * math.sin(a)], fill=(60, 140, 80), width=S)
-        axis = (ang % 90 == 0)
-        lx = cx + (R + (44 if axis else 70) * S) * math.cos(a)
-        ly = cy - (R + (26 if axis else 40) * S) * math.sin(a)
-        lx = min(max(lx, 52 * S), (_W - 52) * S)
-        d.text((lx, ly), _NAMES[k], font=_font(13), fill=(170, 176, 190), anchor="mm")
-    return img, d, cx, cy, R
+        # Quadratic curve: lifted up the picture like a high catch.
+        dist = math.hypot(ex - cx, ey - cy)
+        qx, qy = (cx + ex) / 2, (cy + ey) / 2 - (0.45 * dist + 40 * S)
+        pts = []
+        for i in range(61):
+            t = i / 60
+            pts.append(((1 - t) ** 2 * cx + 2 * (1 - t) * t * qx + t * t * ex,
+                        (1 - t) ** 2 * cy + 2 * (1 - t) * t * qy + t * t * ey))
+
+        for w_, alpha in ((18, 35), (11, 80)):
+            layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+            ImageDraw.Draw(layer).line(pts, fill=_OUT + (alpha,), width=w_ * S, joint="curve")
+            img.paste(layer, (0, 0), layer)
+        d = ImageDraw.Draw(img)
+        d.line(pts, fill=_OUT, width=5 * S, joint="curve")
+
+        # Batter end marker and the OUT badge at the fielder.
+        d.ellipse([cx - 6 * S, cy - 6 * S, cx + 6 * S, cy + 6 * S], fill=(255, 255, 255))
+        d.ellipse([ex - 16 * S, ey - 16 * S, ex + 16 * S, ey + 16 * S],
+                  fill=_OUT, outline=(255, 255, 255), width=2 * S)
+        d.text((ex, ey), "OUT", font=_font(12), fill=(255, 255, 255), anchor="mm")
+
+        d.text((24 * S, 22 * S), "OUT · CAUGHT", font=_font(34), fill=_OUT, anchor="la")
+        sub = f"{batter} · caught at {FL.zone_name(catch_zone)}" if batter else f"Caught at {FL.zone_name(catch_zone)}"
+        d.text((24 * S, 66 * S), sub, font=_font(18), fill=(210, 214, 224), anchor="la")
+        lx, y = (_W - 150) * S, 24 * S
+        for i, (lab, c) in enumerate((("Caught", _OUT), ("Fielder", _FIELDER))):
+            yy = y + i * 22 * S
+            d.ellipse([lx, yy + 4 * S, lx + 12 * S, yy + 16 * S], fill=c, outline=(0, 0, 0), width=S)
+            d.text((lx + 20 * S, yy + 10 * S), lab, font=_font(15), fill=(210, 214, 224), anchor="lm")
+        return _png(img)
+    except Exception as e:
+        print(f"[catch wheel] skipped ({type(e).__name__}: {e})")
+        return None
 
 
 def _draw(direction, outcome, meters, batter, shot_internal, field_positions=None) -> bytes | None:
@@ -192,7 +295,7 @@ def _draw(direction, outcome, meters, batter, shot_internal, field_positions=Non
             d.line([cx + (ex - cx) * t0, cy + (ey - cy) * t0, cx + (ex - cx) * t1, cy + (ey - cy) * t1],
                    fill=(20, 70, 35), width=3 * S)
         lift = 0.55 * math.hypot(ex - cx, ey - cy) + 60 * S
-        qx, qy = (cx + ex) / 2, (cy + ey) / 2 - lift     # control point pulled UP the picture
+        qx, qy = (cx + ex) / 2, (cy + ey) / 2 - lift
         pts = []
         for i in range(61):
             t = i / 60
@@ -228,7 +331,4 @@ def _draw(direction, outcome, meters, batter, shot_internal, field_positions=Non
         d.ellipse([lx, y + 4 * S, lx + 12 * S, y + 16 * S], fill=c, outline=(0, 0, 0), width=S)
         d.text((lx + 20 * S, y + 10 * S), lab, font=_font(15), fill=(210, 214, 224), anchor="lm")
 
-    img = img.resize((_W, _H), Image.LANCZOS)
-    buf = io.BytesIO()
-    img.save(buf, "PNG")
-    return buf.getvalue()
+    return _png(img)

@@ -310,10 +310,9 @@ class GameState:
         self.pending_free_hit: bool = False
 
         # Field Placement (see field_logic.py). None = no field set -> the
-        # match behaves exactly as before. Otherwise {direction_key: fielder
-        # name or None}; Phase 1 always stores None as the value (Phase 2 will
-        # put a player name there).
-        self.field_positions: dict[str, str | None] | None = None
+        # match behaves exactly as before. Otherwise {zone_key: number of
+        # fielders there}; the counts always add up to 11 (PLAYERS_TOTAL).
+        self.field_positions: dict[str, int] | None = None
         self.field_over_idx: int | None = None   # 0-based over this field was set FOR
 
         # Serialises ball processing: two button presses for the same ball
@@ -889,9 +888,12 @@ class GameState:
             return True
         return False
 
-    def set_field(self, positions) -> None:
-        """Lock in the field for the NEXT over (called after end_over())."""
-        self.field_positions = {k: None for k in positions}
+    def set_field(self, counts) -> None:
+        """Lock in the field for the NEXT over (called after end_over(), or at
+        the start of an innings once the first bowler is picked).
+        `counts` is {zone_key: number of fielders}."""
+        import field_logic as _fl
+        self.field_positions = _fl.clean_counts(counts)
         self.field_over_idx = self.current_legal_balls // 6
 
     def start_second_innings(self) -> None:

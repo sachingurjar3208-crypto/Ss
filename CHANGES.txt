@@ -27,3 +27,40 @@ HOW TO USE
 
 Copy these 6 files over your project folder (same names) and restart the bot.
 No new libraries needed. /cardmaker, /editcard and the match engine are untouched.
+
+FIELD PLACEMENT v2 - 11 fielders, formations, catch wheel
+==========================================================
+
+WHAT CHANGED
+  field_logic.py    Every legal field has exactly 11 fielders in 11 zones:
+                    8 outfield (outside 30 yd: UL U UR L R DL D DR) and
+                    3 inner (inside 30 yd: IL IS IR). 10 formation presets
+                    (FORMATIONS). Powerplay: max 2 outside. Open overs: max 5.
+                    Inner fielders stop dots/singles/threes and take short
+                    catches. loft_power(bat) decides how far a batter can
+                    clear the rope with a lofted ball that is not caught.
+  logic.py          calculate_outcome(..., loft_power=None). Low bat = few
+                    sixes, more wickets when going after it. High bat = sixes.
+  wagon_wheel.py    All 11 fielders drawn and numbered 1-11.
+                    New catch_wheel_png(): RED curved line from the batter to
+                    the fielder who took a lofted catch, ending in OUT.
+  commentary.py     No emoji. Short 2-3 line lines, symbols (★ » ▲) only.
+                    New catch lines (each contains CAUGHT so the dismissal is
+                    recorded as a catch). "at <zone>" is named.
+  game.py           field_positions is now {zone_key: count}; set_field() takes it.
+  views.py          Field prompt is shown at the START of an innings too: after
+                    the first bowler is picked, the captain sets the field for
+                    over 1 (powerplay cap applies), then the first delivery.
+                    Field prompt: formation dropdown + Customise + Confirm.
+                    Editor: 11 zone buttons laid out like the ground, Add/Remove
+                    mode, Reset, Confirm (only when all 11 are placed).
+  squad_cog.py      csfield shows the new field layout.
+
+RULES
+  - Every field must place exactly 11 players.
+  - Outside the 30-yard circle: at most 2 (powerplay) or 5 (other overs).
+  - Inside the circle: no cap, max 6 in any one inner zone.
+
+NOT CHANGED
+  - Batting UI, DRS, bowler selection, playstyles other than the loft rules.
+  - Per-player fielder stats (still Phase 2, not built).

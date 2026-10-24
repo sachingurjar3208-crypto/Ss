@@ -724,16 +724,18 @@ class SquadCog(commands.Cog, name="Squad"):
             field_logic.max_fielders_allowed(over_idx, game.overs),
         )
 
-        # Which side each fielder is on, in the same words as the wagon wheel.
-        side_lines = [
-            f"{field_logic.position_label(k)}" + (f" — {positions[k]}" if positions.get(k) else "")
-            for k in field_logic.FIELD_POSITIONS if k in positions
-        ]
-        gaps = [field_logic.position_label(k) for k in field_logic.FIELD_POSITIONS if k not in positions]
+        # Where the 11 fielders stand, in the same words as the wagon wheel.
+        side_lines = []
+        for k in field_logic.ZONE_KEYS:
+            n = int(positions.get(k, 0))
+            if n:
+                side_lines.append(f"{field_logic.zone_name(k)} x{n}" if n > 1 else field_logic.zone_name(k))
+        outside = field_logic.outside_count(positions)
         text = (
-            f"🧤 **Field for over {over_no}** ({phase}) — {len(positions)} outside the circle\n"
-            f"**Fielders:** {', '.join(side_lines) if side_lines else 'none'}\n"
-            f"**Gaps:** {', '.join(gaps) if gaps else 'none'}"
+            f"🧤 **Field for over {over_no}** ({phase}) — "
+            f"{field_logic.total_count(positions)}/{field_logic.PLAYERS_TOTAL} players placed, "
+            f"{outside} outside the circle\n"
+            f"**Fielders:** {', '.join(side_lines) if side_lines else 'none'}"
         )
         f = discord.File(_io.BytesIO(png), filename="field.png") if png else None
         await ctx.send(text, **({"file": f} if f else {}))

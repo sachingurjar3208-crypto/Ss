@@ -292,6 +292,7 @@ def calculate_outcome(
     loft_zone_mod: dict | None = None,
     ground_zone_mod: dict | None = None,
     loft_field_chances: dict | None = None,
+    loft_power: float | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -318,6 +319,11 @@ def calculate_outcome(
                           The six chance is multiplied by the batter's
                           playstyle six boost; no four is possible; the rest
                           is 0-3 runs. Applied last. None = no change.
+      loft_power        – batter's ability to clear the rope with a LOFTED
+                          shot that is NOT into a fielder (field_logic.loft_power).
+                          Low bat: almost no sixes, fewer fours, more wickets
+                          when going after it. High bat: sixes come easily.
+                          Only used when loft_field_chances is None.
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
@@ -652,6 +658,15 @@ def calculate_outcome(
     if loft_zone_mod:
         w["6"] = max(0.02, w["6"] * loft_zone_mod.get("six_mult", 1.0))
         w["W"] = w["W"] * loft_zone_mod.get("wkt_mult", 1.0)
+
+    # ── Loft power: can this batter clear the rope with a lofted ball? ───────
+    # Not used when the ball goes into a fielder (that has its own table).
+    if loft_power is not None and loft_field_chances is None:
+        lp = max(0.0, float(loft_power))
+        w["6"] = max(0.01, w["6"] * lp)
+        w["4"] = max(0.02, w["4"] * min(1.4, max(0.4, 0.4 + 0.6 * lp)))
+        if lp < 1.0:                                 # hitting out of reach: more risk
+            w["W"] = w["W"] * min(1.5, 1.0 + (1.0 - lp) * 0.5)
 
     # ── Field placement (ground shots only; see field_logic.py) ─────────────
     # Fielder in the shot's direction: boundaries mostly cut down to 1-2 runs
