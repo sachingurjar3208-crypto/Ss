@@ -16,6 +16,7 @@ from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary, SIX_DISTANCES
 from wagon_wheel import wagon_wheel_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
+import pitch_map
 from data import (
     TIMELINE_EMOJIS,
     FAST_STAGE1, FAST_STAGE2,
@@ -1325,6 +1326,7 @@ class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
         self.stage1_choice = stage1_choice
         self.is_free_hit   = is_free_hit
         self.height        = ""
+        self.hand          = pitch_map.batter_hand(game.striker)   # R / L: LHB gets a mirrored grid
 
         delivery_btn = game.pending_delivery or ""
         if stage1_choice:
@@ -1346,7 +1348,9 @@ class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
 
     def _add_direction_buttons(self):
         for key, row in _DIRECTION_GRID:
-            arrow, name = DIRECTIONS[key]
+            arrow = DIRECTIONS[key][0]
+            bkey  = pitch_map.mirror_dir(key) if self.hand == "L" else key
+            name  = DIRECTIONS[bkey][1]
             style = discord.ButtonStyle.primary if key == "C" else discord.ButtonStyle.secondary
             btn   = ui.Button(label=f"{arrow} {name}", style=style, row=row)
             btn.callback = self._make_direction_callback(key)
@@ -1403,9 +1407,10 @@ class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
             self.stop()
 
             delivery_internal = self.game.pending_delivery_internal or ""
-            shot_button = translate_shot(self.height, direction_key, delivery_internal)
+            bkey = pitch_map.mirror_dir(direction_key) if self.hand == "L" else direction_key
+            shot_button = translate_shot(self.height, bkey, delivery_internal)
             is_recommended = shot_button in self.recommended
-            _, direction_name = DIRECTIONS[direction_key]
+            _, direction_name = DIRECTIONS[bkey]
 
             await _practice_process_delivery(
                 interaction, self.game, shot_button,

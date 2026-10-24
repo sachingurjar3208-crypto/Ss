@@ -1319,6 +1319,12 @@ async def _process_delivery_locked(
     # (None for Leave, the CPU batter, or an old resumed game).
     game.last_shot_direction = direction
     game.last_shot_height    = height
+    # `direction` is the batter's own direction (Cover = his off side). Fielders stand
+    # at fixed spots on the ground, so for a left-hand batter the field is mirrored
+    # into his frame once here; every check below (catch, saves, wagon wheel, pitch
+    # picture) then sees direction and fielders in the same frame.
+    _fp_view = pitch_map.mirror_field(getattr(game, "field_positions", None),
+                                      pitch_map.batter_hand(striker))
 
     # Same speed that was announced ("is coming with X kmph"); fall back to a fresh roll.
     speed_range  = get_delivery_speed(delivery_button, bowler.get("bowling_type"))
@@ -1327,7 +1333,7 @@ async def _process_delivery_locked(
     # Field Placement: the zone that would take a LOFTED shot in this direction
     # (outfield fielder, else an inner fielder covering it). None = no catch zone.
     catch_zone_key = None
-    _fp_now = getattr(game, "field_positions", None)
+    _fp_now = _fp_view
     if height == "Loft" and direction and _fp_now is not None:
         catch_zone_key = field_logic.catch_zone_for(DIRECTIONS_BY_NAME.get(direction), _fp_now)
 
@@ -1367,7 +1373,7 @@ async def _process_delivery_locked(
         # playstyle six boost is applied inside calculate_outcome. Gaps /
         # no field -> unchanged.
         loft_field = None
-        _fp = getattr(game, "field_positions", None)
+        _fp = _fp_view
         if height == "Loft" and direction and _fp is not None:
             loft_field = field_logic.loft_field_for(
                 DIRECTIONS_BY_NAME.get(direction), _fp,
@@ -1384,7 +1390,7 @@ async def _process_delivery_locked(
         if height == "Ground" and direction:
             ground_zone_mod = field_logic.get_field_modifier(
                 DIRECTIONS_BY_NAME.get(direction),
-                getattr(game, "field_positions", None),
+                _fp_view,
             )
 
         outcome, is_extra = calculate_outcome(
@@ -1598,7 +1604,7 @@ async def _process_delivery_locked(
                 DIRECTIONS_BY_NAME.get(direction) if direction else None,
                 timing, delivery_button,
                 field_logic.catch_zone_for(DIRECTIONS_BY_NAME.get(direction) if direction else None,
-                                           getattr(game, "field_positions", None)),
+                                           _fp_view),
                 _txt,
             )
         except Exception:
@@ -1610,7 +1616,7 @@ async def _process_delivery_locked(
         try:
             wheel = await asyncio.to_thread(
                 wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal,
-                field_positions=getattr(game, "field_positions", None),
+                field_positions=_fp_view,
             )
         except Exception:
             wheel = None
@@ -1619,7 +1625,7 @@ async def _process_delivery_locked(
         try:
             wheel = await asyncio.to_thread(
                 catch_wheel_png, direction, caught_zone_key, sname,
-                getattr(game, "field_positions", None), shot_internal,
+                _fp_view, shot_internal,
             )
         except Exception:
             wheel = None
@@ -2574,6 +2580,9 @@ class BattingView(_TimeoutMixin, ui.View):
         self.stage1_choice = stage1_choice   # the FAST bowler's swing choice (unrelated to height)
         self.is_free_hit   = is_free_hit
         self.height        = ""              # "Loft" | "Ground" once stage 1 is picked
+        # R / L. A left-hand batter gets the direction grid mirrored (his cover is
+        # on the other side), see _add_direction_buttons.
+        self.hand          = pitch_map.batter_hand(game.striker)
 
         delivery_btn = game.pending_delivery or ""
         if stage1_choice:
@@ -2598,7 +2607,12 @@ class BattingView(_TimeoutMixin, ui.View):
 
     def _add_direction_buttons(self):
         for key, row in _DIRECTION_GRID:
-            arrow, name = DIRECTIONS[key]
+            # The arrow is the screen position; the NAME is the shot as this batter
+            # sees it. Left-hand batter: positions swap left/right (Cover is on the
+            # right of the grid, Mid-wicket on the left).
+            arrow = DIRECTIONS[key][0]
+            bkey  = pitch_map.mirror_dir(key) if self.hand == "L" else key
+            name  = DIRECTIONS[bkey][1]
             style = discord.ButtonStyle.primary if key == "C" else discord.ButtonStyle.secondary
             btn   = ui.Button(label=f"{arrow} {name}", style=style, row=row)
             btn.callback = self._make_direction_callback(key)
@@ -2665,9 +2679,13 @@ class BattingView(_TimeoutMixin, ui.View):
             self.stop()
 
             delivery_internal = self.game.pending_delivery_internal or ""
-            shot_button = translate_shot(self.height, direction_key, delivery_internal)
+            # Batter's own direction: for a left-hand batter the pressed position is
+            # mirrored, so the shot type (Drive / Cut / Flick ...) and the name follow
+            # HIS cover / point / mid-wicket, not the right-hand layout.
+            bkey = pitch_map.mirror_dir(direction_key) if self.hand == "L" else direction_key
+            shot_button = translate_shot(self.height, bkey, delivery_internal)
             is_recommended = shot_button in self.recommended
-            _, direction_name = DIRECTIONS[direction_key]
+            _, direction_name = DIRECTIONS[bkey]
 
             await _process_delivery(
                 interaction, self.game, shot_button,

@@ -111,6 +111,26 @@ def batter_hand(player) -> str:
     return "L" if str(hand or "").upper().startswith("L") else "R"
 
 
+# Left/right mirror of every direction / fielding zone key. Direction keys on the
+# batting grid and the fielding zones are written for a RIGHT-hand batter (DL = Cover,
+# DR = Mid-wicket, L = Point, R = Square Leg ...). For a LEFT-hand batter the same
+# screen position is the opposite shot, so everything is mirrored with this map.
+_MIRROR = {"L": "R", "R": "L", "UL": "UR", "UR": "UL", "DL": "DR", "DR": "DL", "IL": "IR", "IR": "IL"}
+
+
+def mirror_dir(key):
+    """The left/right mirror of a direction or zone key (centre keys stay as they are)."""
+    return _MIRROR.get(key, key)
+
+
+def mirror_field(counts, hand: str):
+    """A {zone_key: count} field seen from a LEFT-hand batter: left and right swap.
+    Right-hand batter (or no field): returned unchanged."""
+    if hand != "L" or not counts:
+        return counts
+    return {mirror_dir(k): v for k, v in counts.items()}
+
+
 def to_batter_col(bowler_col: int, hand: str) -> int:
     """A bowler-frame column in batter frame (a mirror for a LEFT-hand batter)."""
     return bowler_col if hand == "R" else -bowler_col

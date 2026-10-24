@@ -117,3 +117,19 @@ LANDING PICTURE RIGHT AFTER THE BOWLER'S CHOICE v5
                    _process_delivery_locked passes that spot to pitch_map.timing_for(landing=...)
                    so the result matches the picture the batter saw, then clears it.
   game.py          + pending_landing (the spot for the current ball).
+
+LEFT-HAND BATTER: MIRRORED SHOTS v6
+===================================
+  Problem          The direction grid and the field zones are written for a right-hand
+                   batter (Cover on the left, Mid-wicket on the right). A left-hand batter
+                   pressing "Cover" hit it to his mid-wicket side.
+  pitch_map.py     + mirror_dir(key), mirror_field(counts, hand).
+  views.py         BattingView: for a LHB the grid is mirrored (Cover is on the right,
+                   Mid-wicket on the left ...). The pressed button is converted to the
+                   batter's own direction BEFORE translate_shot, so the shot type and the
+                   name follow HIS cover / point / mid-wicket. In _process_delivery_locked the
+                   field is mirrored once for a LHB (_fp_view), so catches, saves, loft
+                   chances, the wagon wheel and the pitch picture all agree.
+  practice_views.py  Same grid mirroring for practice mode.
+  Unchanged        RHB behaves exactly as before. Fielders still stand at fixed ground spots;
+                   field editor / formations are not changed.
