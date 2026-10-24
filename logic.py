@@ -1,6 +1,6 @@
 import math
 import random
-from data import DELIVERY_BUTTON_MAP, SHOT_BUTTON_MAP, SPIN_DELIVERIES as _SPIN_DELIVERIES
+from data import DELIVERY_BUTTON_MAP, SHOT_BUTTON_MAP
 
 # Playstyle "narratives" chosen on a player's card (/cardmaker, /editcard,
 # /setplaystylelogo) are looked up by player name and switched on here.
@@ -238,6 +238,11 @@ ATTR_EFFECTS = {
 # Names a card can carry that the engine knows under another name.
 _ATTR_ALIASES: dict[str, str] = {}   # (Swing King used to alias Swing Master; they are separate now)
 
+# Delivery types classified as spin
+_SPIN_DELIVERIES = {
+    "Off Break", "Doosra", "Carrom Ball", "Arm Ball", "Top Spin",
+    "Drift Ball", "Leg Break", "Googly", "Flipper", "Top Spinner", "Slider",
+}
 _SWING_DELIVERIES  = {"Swing", "In Swinger", "Out Swinger", "Reverse Swing"}
 _YORKER_DELIVERIES = {"Yorker", "Yorker Full Toss"}
 _PACE_DELIVERIES   = {"Swing", "Good Length", "Fast", "Bouncer", "Full", "Yorker"}
@@ -289,11 +294,6 @@ def calculate_outcome(
     prev_delivery: str | None = None,
     bowler_balls_done: int = 0,
     bowler_max_balls: int = 0,
-    loft_zone_mod: dict | None = None,
-    ground_zone_mod: dict | None = None,
-    loft_field_chances: dict | None = None,
-    loft_power: float | None = None,
-    timing_mod: dict | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -308,26 +308,6 @@ def calculate_outcome(
       prev_delivery     – internal delivery type of the previous ball (None at start)
       bowler_balls_done – legal balls this bowler has already bowled
       bowler_max_balls  – this bowler's max balls in the match (overs/5 rule)
-      loft_zone_mod     – optional {"six_mult":.., "wkt_mult":..} from the
-                          two-step batting UI's direction grid; the caller
-                          only passes this when the shot height was "Loft",
-                          so no height check is needed here. None = no change.
-      ground_zone_mod   – optional multipliers from field_logic.get_field_modifier()
-                          (Field Placement). The caller only passes it for
-                          height == "Ground" shots. None = no change.
-      loft_field_chances – Field Placement: {"six": p, "wkt": p} for a LOFTED shot
-                          hit towards a fielder (field_logic.loft_field_chances).
-                          The six chance is multiplied by the batter's
-                          playstyle six boost; no four is possible; the rest
-                          is 0-3 runs. Applied last. None = no change.
-      loft_power        – batter's ability to clear the rope with a LOFTED
-                          shot that is NOT into a fielder (field_logic.loft_power).
-                          Low bat: almost no sixes, fewer fours, more wickets
-                          when going after it. High bat: sixes come easily.
-                          Only used when loft_field_chances is None.
-      timing_mod        – how well the batter's shot matched the landing spot
-                          (pitch_map.timing_for). Keys are outcome weights:
-                          {"0","1","2","3","4","6","W"}: multipliers. None = no change.
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
@@ -408,8 +388,6 @@ def calculate_outcome(
             w["2"]  = w["2"]  * 1.15
             w["W"]  = w["W"]  * 0.75
             w["6"]  = w["6"]  * 0.80
-
-    _six_pre_attr = w["6"]   # Field Placement: to measure the net playstyle six boost
 
     # ── Batsman attribute effects ────────────────────────────────────────────
 
@@ -625,12 +603,6 @@ def calculate_outcome(
     if w["6"] > _six_cap:
         w["6"] = _six_cap
 
-    # Net playstyle effect on sixes (Power Hitter, Aggressive, Breakthrough,
-    # Mr360, Low Batting/Bowling Quality, Mystery, Swing Master ... all of
-    # them, bowler side included, and the six cap). Used by the Field
-    # Placement loft rule below.
-    _six_attr_boost = (w["6"] / _six_pre_attr) if _six_pre_attr > 0 else 1.0
-
     # Split no-balls deterministically into a 70:30 NB vs NB+1 ratio.
     # ~30% of no-balls also score a single off the free hit (NB+1), the rest
     # are pure no-balls. Replaces a per-call random coin flip that confused
@@ -655,44 +627,6 @@ def calculate_outcome(
     elif guide_entry_exists:
         # Guide covered this delivery but batter ignored it → wrong-shot penalty
         w["W"] = w["W"] * 1.25
-
-    # ── Loft direction risk (optional, two-step batting UI) ─────────────────
-    # A lofted shot toward an awkward angle (behind square) is harder to
-    # clear than one down the ground — fewer sixes, a bit more wicket risk.
-    if loft_zone_mod:
-        w["6"] = max(0.02, w["6"] * loft_zone_mod.get("six_mult", 1.0))
-        w["W"] = w["W"] * loft_zone_mod.get("wkt_mult", 1.0)
-
-    # ── Loft power: can this batter clear the rope with a lofted ball? ───────
-    # Not used when the ball goes into a fielder (that has its own table).
-    if loft_power is not None and loft_field_chances is None:
-        lp = max(0.0, float(loft_power))
-        w["6"] = max(0.01, w["6"] * lp)
-        w["4"] = max(0.02, w["4"] * min(1.4, max(0.4, 0.4 + 0.6 * lp)))
-        if lp < 1.0:                                 # hitting out of reach: more risk
-            w["W"] = w["W"] * min(1.5, 1.0 + (1.0 - lp) * 0.5)
-
-    # ── Timing: did the shot match where the ball landed? ───────────────────
-    if timing_mod:
-        for k, m in timing_mod.items():
-            if k in w:
-                w[k] = w[k] * float(m)
-
-    # ── Field placement (ground shots only; see field_logic.py) ─────────────
-    # Fielder in the shot's direction: boundaries mostly cut down to 1-2 runs
-    # and more catches/run-outs. Gap in the field: slightly more boundaries.
-    # Multiplies on top of everything above; no existing weight logic changed.
-    if ground_zone_mod:
-        if ground_zone_mod.get("no_boundary"):
-            w["4"] = 0.0          # ground ball into a fielder: no four / six,
-            w["6"] = 0.0          # only 0-3 runs (or a wicket)
-        else:
-            w["4"] = max(0.02, w["4"] * ground_zone_mod.get("boundary_mult", 1.0))
-        for k in ("1", "2"):
-            w[k] = w[k] * ground_zone_mod.get("single_mult", 1.0)
-        w["3"] = w["3"] * ground_zone_mod.get("three_mult", 1.0)
-        w["0"] = w["0"] * ground_zone_mod.get("dot_mult", 1.0)
-        w["W"] = w["W"] * ground_zone_mod.get("wkt_mult", 1.0)
 
     # ── DEFEND is a defensive shot: it can NEVER give a 4, a 6 or a 3 ────────
     # (a defended ball only dies for 0 / a quick single / 2, or the batter is
@@ -726,30 +660,6 @@ def calculate_outcome(
         elif ground_type == "medium_pace":
             if delivery_internal in _SEAM_DELIVERIES:
                 w["W"] = w["W"] * up
-
-    # ── Field placement: lofted shot INTO a fielder (applied last) ──────────
-    # Fixed distribution among legal balls: P(six) from the bat table x the
-    # playstyle six boost, P(wicket) from the table, no four, and the rest is
-    # shared between 0/1/2/3 in their current proportions. Extras keep their
-    # weights.
-    if loft_field_chances is not None:
-        _pw = min(0.95, max(0.0, loft_field_chances.get("wkt", 0.0)))
-        _boost = min(2.6, max(0.1, _six_attr_boost))
-        _p6 = max(0.0, loft_field_chances.get("six", 0.0)) * _boost
-        if _p6 + _pw > 0.97:                     # keep room for 0-3 runs
-            _p6 = max(0.0, 0.97 - _pw)
-        _legal = sum(v for k, v in w.items() if k not in ("Wd", "NB", "NB+1"))
-        _rest_keys = ("0", "1", "2", "3")
-        _rest = {k: max(0.0, w.get(k, 0.0)) for k in _rest_keys}
-        _rest_sum = sum(_rest.values())
-        if _rest_sum <= 0:
-            _rest, _rest_sum = {"0": 1.0, "1": 1.0, "2": 0.5, "3": 0.1}, 2.6
-        _left = 1.0 - _p6 - _pw
-        w["6"] = _legal * _p6
-        w["W"] = _legal * _pw
-        w["4"] = 0.0
-        for k in _rest_keys:
-            w[k] = _legal * _left * _rest[k] / _rest_sum
 
     outcome = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
     is_extra = outcome in ("Wd", "NB", "NB+1")

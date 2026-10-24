@@ -692,55 +692,6 @@ class SquadCog(commands.Cog, name="Squad"):
         )
         autoplay_kick(game)
 
-    # -- field (read-only) -----------------------------------------------
-    @commands.command(name="csfield")
-    @commands.cooldown(1, 20, commands.BucketType.user)
-    async def csfield(self, ctx: commands.Context):
-        """Show the current field (which fielder stands on which side). Batter only; changes nothing."""
-        import io as _io, asyncio as _asyncio
-        import field_logic
-        from views import active_games
-        from wagon_wheel import field_png
-        game = active_games.get(ctx.channel.id)
-        players = {getattr(game, "challenger", None), getattr(game, "opponent", None)} if game else set()
-        if game is None or ctx.author.id not in {getattr(p, "id", None) for p in players}:
-            await ctx.send("❌ You are not playing a match in this channel.")
-            return
-        if ctx.author.id != game.batting_user_id:
-            await ctx.send("🏏 Only the **batter** can use `csfield`.")
-            return
-        positions = getattr(game, "field_positions", None)
-        if positions is None:
-            await ctx.send("🧤 No field has been set yet.")
-            return
-
-        over_idx = getattr(game, "field_over_idx", None)
-        if over_idx is None:
-            over_idx = game.current_legal_balls // 6
-        over_no = over_idx + 1
-        phase = "Powerplay" if field_logic.is_powerplay(over_idx, game.overs) else "Non-restriction"
-        png = await _asyncio.to_thread(
-            field_png, positions, over_no, phase,
-            field_logic.max_fielders_allowed(over_idx, game.overs),
-        )
-
-        # Where the 11 fielders stand, in the same words as the wagon wheel.
-        side_lines = []
-        for k in field_logic.ZONE_KEYS:
-            n = int(positions.get(k, 0))
-            if n:
-                side_lines.append(f"{field_logic.zone_name(k)} x{n}" if n > 1 else field_logic.zone_name(k))
-        outside = field_logic.outside_count(positions)
-        text = (
-            f"🧤 **Field for over {over_no}** ({phase}) — "
-            f"{field_logic.total_count(positions)}/{field_logic.PLAYERS_TOTAL} players placed, "
-            f"{outside} outside the circle\n"
-            f"**Fielders:** {', '.join(side_lines) if side_lines else 'none'}"
-        )
-        f = discord.File(_io.BytesIO(png), filename="field.png") if png else None
-        await ctx.send(text, **({"file": f} if f else {}))
-
-    # -- swap ------------------------------------------------------------
     @commands.command(name="csswap")
     @commands.cooldown(1, 4, commands.BucketType.user)
     async def csswap(self, ctx: commands.Context, *, players: str):

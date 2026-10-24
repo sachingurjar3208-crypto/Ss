@@ -13,10 +13,8 @@ from discord import ui
 
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
-from commentary import build_ball_commentary, SIX_DISTANCES
-from wagon_wheel import wagon_wheel_png
+from commentary import build_ball_commentary
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
-import pitch_map
 from data import (
     TIMELINE_EMOJIS,
     FAST_STAGE1, FAST_STAGE2,
@@ -27,8 +25,6 @@ from data import (
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
     NOT_OUT_EMOJI, LBW_EMOJI,
-    DIRECTIONS, DIRECTIONS_BY_NAME, translate_shot,
-    LOFT_DIRECTION_RISK, USE_LOFT_DIRECTION_RISK,
 )
 import emojis
 from media import get_player_media, get_milestone_gif, get_umpire_gif
@@ -45,17 +41,6 @@ active_practice: dict[int, GameState] = {}   # channel_id → GameState
 
 def _timeline_emoji(outcome: str) -> str:
     return TIMELINE_EMOJIS.get(outcome, "•")
-
-
-async def _send_wheel(channel, wheel: bytes | None):
-    """Send the wagon-wheel picture (four / six only). Never raises."""
-    if not wheel:
-        return
-    try:
-        import io
-        await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
-    except Exception:
-        pass
 
 
 # ── Difficulty constants ──────────────────────────────────────────────────────
@@ -192,33 +177,17 @@ async def _practice_process_delivery(
     *,
     stage1_choice: str = "",
     is_recommended_shot: bool = False,
-    direction: str | None = None,
-    height: str | None = None,
 ):
     # Guard: match may have been cancelled
     ch = interaction.channel
     if ch and (ch.id not in active_practice or active_practice.get(ch.id) is not game):
         return
-    lock = game.__dict__.get("_ball_lock")
-    if lock is None:
-        lock = game.__dict__.setdefault("_ball_lock", asyncio.Lock())
     try:
-        async with lock:
-            if game.pending_delivery is None:   # this ball was already played (double tap)
-                try:
-                    await interaction.response.send_message(
-                        "This ball has already been played.", ephemeral=True
-                    )
-                except Exception:
-                    pass
-                return
-            await _practice_process_delivery_inner(
-                interaction, game, shot_button,
-                stage1_choice=stage1_choice,
-                is_recommended_shot=is_recommended_shot,
-                direction=direction,
-                height=height,
-            )
+        await _practice_process_delivery_inner(
+            interaction, game, shot_button,
+            stage1_choice=stage1_choice,
+            is_recommended_shot=is_recommended_shot,
+        )
     except Exception as e:
         import traceback
         print(f"[practice] delivery error: {e}\n{traceback.format_exc()}")
@@ -240,15 +209,10 @@ async def _practice_process_delivery_inner(
     *,
     stage1_choice: str = "",
     is_recommended_shot: bool = False,
-    direction: str | None = None,
-    height: str | None = None,
 ):
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
     delivery_button   = game.pending_delivery
     delivery_internal = game.pending_delivery_internal
-    # Consume the delivery so a second press for this ball is rejected by the lock check.
-    game.pending_delivery          = None
-    game.pending_delivery_internal = None
     bowler            = game.current_bowler
     striker           = game.striker
 
@@ -264,19 +228,9 @@ async def _practice_process_delivery_inner(
     bname = _pname(bowler)
     sname = _pname(striker)
 
-    # Two-step batting UI: remember exactly where/how the shot was played
-    # (None for the CPU batter or an old resumed game).
-    game.last_shot_direction = direction
-    game.last_shot_height    = height
-
     speed_range  = get_delivery_speed(delivery_button, (game.current_bowler or {}).get("bowling_type"))
     speed        = random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
-
-    loft_zone_mod = None
-    if USE_LOFT_DIRECTION_RISK and height == "Loft" and direction:
-        zone_key = DIRECTIONS_BY_NAME.get(direction)
-        loft_zone_mod = LOFT_DIRECTION_RISK.get(zone_key)
 
     outcome, is_extra = calculate_outcome(
         delivery_internal, shot_internal,
@@ -293,7 +247,6 @@ async def _practice_process_delivery_inner(
         prev_delivery      = getattr(game, "last_delivery_internal", None),
         bowler_balls_done  = game.bowler_ball_count.get(bname, 0),
         bowler_max_balls   = game.max_bowler_balls(),
-        loft_zone_mod      = loft_zone_mod,
     )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -307,9 +260,6 @@ async def _practice_process_delivery_inner(
     else:
         commentary_suffix = ""
 
-    # One six distance, used by both the commentary and the wagon-wheel picture.
-    six_distance = random.choice(SIX_DISTANCES) if outcome == "6" else None
-
     commentary = build_ball_commentary(
         bowler_name      = bname,
         bowler_ovr       = bowler.get("ovr", 80),
@@ -322,8 +272,6 @@ async def _practice_process_delivery_inner(
         outcome          = outcome,
         bowling_type     = bowler.get("bowling_type", "Fast"),
         stage1_choice    = stage1_choice,
-        direction        = direction,
-        six_distance     = six_distance,
     ) + commentary_suffix
 
     striker_runs_before   = game.batsman_stats.get(sname, {}).get("runs", 0)
@@ -354,8 +302,10 @@ async def _practice_process_delivery_inner(
         game.add_legal_ball()
         game.add_runs(int(outcome))
         game.timeline.append(_timeline_emoji(outcome))
-        if outcome in ("4", "6"):
-            game._do_record_boundary_direction(int(outcome), delivery_button, shot_button)
+        if outcome == "4" and sname in game.batsman_stats:
+            game.batsman_stats[sname]["fours"] = game.batsman_stats[sname].get("fours", 0) + 1
+        elif outcome == "6" and sname in game.batsman_stats:
+            game.batsman_stats[sname]["sixes"] = game.batsman_stats[sname].get("sixes", 0) + 1
         if outcome in ("1", "3"):
             game.rotate_strike()
 
@@ -403,17 +353,6 @@ async def _practice_process_delivery_inner(
                     gif_urls.append(gif)
                 break
 
-    # Wagon wheel: only for a four or a six.
-    wheel = None
-    if outcome in ("4", "6"):
-        try:
-            wheel = await asyncio.to_thread(
-                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal,
-                hand=pitch_map.batter_hand(striker),
-            )
-        except Exception:
-            wheel = None
-
     # Ack the interaction
     try:
         await interaction.response.edit_message(view=None)
@@ -438,7 +377,6 @@ async def _practice_process_delivery_inner(
         if outcome == "W":
             game.timeline.append(_timeline_emoji("W"))
         await channel.send(content=commentary, embed=embed)
-        await _send_wheel(channel, wheel)
         for url in gif_urls:
             await channel.send(url)
         if game.innings == 1:
@@ -458,7 +396,6 @@ async def _practice_process_delivery_inner(
         game.timeline.append("|")
         game.end_over()
         await channel.send(content=commentary, embed=embed)
-        await _send_wheel(channel, wheel)
         for url in gif_urls:
             await channel.send(url)
         await _practice_next_over(channel, game)
@@ -474,7 +411,6 @@ async def _practice_process_delivery_inner(
 
     # ── Normal continue ───────────────────────────────────────────────────
     await channel.send(content=commentary, embed=embed)
-    await _send_wheel(channel, wheel)
     for url in gif_urls:
         await channel.send(url)
     await _practice_send_bowling(channel, game)
@@ -1303,31 +1239,12 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
 # Human batting view — bot bowled already, human picks shot
 # ─────────────────────────────────────────────────────────────────────────────
 
-_STAGE1_STYLES = {
-    "Loft":   discord.ButtonStyle.danger,
-    "Ground": discord.ButtonStyle.success,
-    "Leave":  discord.ButtonStyle.secondary,
-}
-# (key, row) order for the 3x3 direction grid — same orientation as the live
-# BattingView (camera behind the bowler, right-handed batter).
-_DIRECTION_GRID = [
-    ("UL", 1), ("U", 1), ("UR", 1),
-    ("L",  2), ("C", 2), ("R",  2),
-    ("DL", 3), ("D", 3), ("DR", 3),
-]
-
-
 class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
-    """Two-step batting for the human batter in practice mode — same UI as
-    the live BattingView, just reporting to _practice_process_delivery."""
-
     def __init__(self, game: GameState, *, stage1_choice: str = "", is_free_hit: bool = False):
         super().__init__(timeout=VIEW_TIMEOUT)
         self.game          = game
         self.stage1_choice = stage1_choice
         self.is_free_hit   = is_free_hit
-        self.height        = ""
-        self.hand          = pitch_map.batter_hand(game.striker)   # R / L: LHB gets a mirrored grid
 
         delivery_btn = game.pending_delivery or ""
         if stage1_choice:
@@ -1335,89 +1252,38 @@ class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
         else:
             self.recommended = SPIN_SHOT_GUIDE.get(delivery_btn, [])
 
-        self._stage1_btns: list[ui.Button] = []
-        self._direction_btns: list[ui.Button] = []
-        self._direction_keys: list[str] = []
-        self._add_stage1_buttons()
+        self._add_buttons()
 
-    def _add_stage1_buttons(self):
-        for label in ("Loft", "Ground", "Leave"):
-            btn = ui.Button(label=label, style=_STAGE1_STYLES[label], row=0)
-            btn.callback = self._make_stage1_callback(label)
-            self._stage1_btns.append(btn)
+    def _add_buttons(self):
+        STYLES = {
+            "Drive":  discord.ButtonStyle.success,
+            "Loft":   discord.ButtonStyle.danger,
+            "Flick":  discord.ButtonStyle.success,
+            "Pull":   discord.ButtonStyle.danger,
+            "Cut":    discord.ButtonStyle.primary,
+            "Sweep":  discord.ButtonStyle.primary,
+            "Scoop":  discord.ButtonStyle.secondary,
+            "Defend": discord.ButtonStyle.secondary,
+            "Leave":  discord.ButtonStyle.secondary,
+        }
+        ROWS = {
+            "Drive": 0, "Loft": 0, "Flick": 0, "Pull": 0, "Cut": 0,
+            "Sweep": 1, "Scoop": 1, "Defend": 1, "Leave": 1,
+        }
+        for label in BATTING_BUTTONS:
+            btn          = ui.Button(label=label, style=STYLES.get(label, discord.ButtonStyle.secondary), row=ROWS.get(label, 0))
+            btn.callback = self._make_callback(label, label in self.recommended)
             self.add_item(btn)
 
-    def _add_direction_buttons(self):
-        for key, row in _DIRECTION_GRID:
-            arrow = DIRECTIONS[key][0]
-            bkey  = pitch_map.mirror_dir(key) if self.hand == "L" else key
-            name  = DIRECTIONS[bkey][1]
-            style = discord.ButtonStyle.primary if key == "C" else discord.ButtonStyle.secondary
-            btn   = ui.Button(label=f"{arrow} {name}", style=style, row=row)
-            btn.callback = self._make_direction_callback(key)
-            self._direction_btns.append(btn)
-            self._direction_keys.append(key)
-            self.add_item(btn)
-
-    def _make_stage1_callback(self, label: str):
+    def _make_callback(self, shot: str, is_recommended: bool):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.batting_user_id:
                 await interaction.response.send_message("Only you bat!", ephemeral=True)
-                return
-            if self.height or self.is_finished():
-                try:
-                    await interaction.response.defer()
-                except Exception:
-                    pass
-                return
-
-            if label == "Leave":
-                self.stop()
-                await _practice_process_delivery(
-                    interaction, self.game, "Leave",
-                    stage1_choice=self.stage1_choice,
-                    is_recommended_shot=False,
-                )
-                return
-
-            self.height = label
-            for b in self._stage1_btns:
-                b.disabled = True
-                b.style    = discord.ButtonStyle.secondary
-            self._add_direction_buttons()
-            try:
-                await interaction.response.edit_message(view=self)
-            except Exception as e:
-                print(f"[practice batting] stage1 edit failed ({type(e).__name__}: {e})")
-        return callback
-
-    def _make_direction_callback(self, direction_key: str):
-        async def callback(interaction: discord.Interaction):
-            if interaction.user.id != self.game.batting_user_id:
-                await interaction.response.send_message("Only you bat!", ephemeral=True)
-                return
-            if not self.height:
-                await interaction.response.send_message("Pehle Loft ya Ground choose karo.", ephemeral=True)
-                return
-            if self.is_finished():
-                try:
-                    await interaction.response.defer()
-                except Exception:
-                    pass
                 return
             self.stop()
-
-            delivery_internal = self.game.pending_delivery_internal or ""
-            bkey = pitch_map.mirror_dir(direction_key) if self.hand == "L" else direction_key
-            shot_button = translate_shot(self.height, bkey, delivery_internal)
-            is_recommended = shot_button in self.recommended
-            _, direction_name = DIRECTIONS[bkey]
-
             await _practice_process_delivery(
-                interaction, self.game, shot_button,
+                interaction, self.game, shot,
                 stage1_choice=self.stage1_choice,
                 is_recommended_shot=is_recommended,
-                direction=direction_name,
-                height=self.height,
             )
         return callback

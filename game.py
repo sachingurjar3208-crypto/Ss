@@ -255,15 +255,6 @@ class GameState:
         self.pending_delivery: str | None = None
         self.pending_delivery_speed: float | None = None
         self.pending_stage1_choice: str = ""
-        # Where the current ball will pitch, as (row, batter-frame column). Picked when
-        # the bowler chooses the delivery and shown to the batter BEFORE the shot
-        # (pitch_map.landing_png); the result then uses this same spot.
-        self.pending_landing = None
-        # Direction/height of the shot just played (two-step batting UI).
-        # Set right before the outcome is calculated; None when a direction
-        # wasn't given (CPU batter, Leave, resumed games with old data).
-        self.last_shot_direction: str | None = None
-        self.last_shot_height: str | None = None
         self.current_ball_free_hit: bool = False
         # DRS reviews left per user id (set when the toss decision is made)
         self.drs_reviews: dict[int, int] = {}
@@ -312,16 +303,6 @@ class GameState:
         self.balls_since_wicket: int = 999
         self.consecutive_dots: int = 0
         self.pending_free_hit: bool = False
-
-        # Field Placement (see field_logic.py). None = no field set -> the
-        # match behaves exactly as before. Otherwise {zone_key: number of
-        # fielders there}; the counts always add up to 11 (PLAYERS_TOTAL).
-        self.field_positions: dict[str, int] | None = None
-        self.field_over_idx: int | None = None   # 0-based over this field was set FOR
-
-        # Serialises ball processing: two button presses for the same ball
-        # (double-tap / lag) can never both change the score.
-        self._ball_lock = asyncio.Lock()
 
     @property
     def batting_user(self):
@@ -662,10 +643,6 @@ class GameState:
         self.wagon_wheel_data.append(bw)
 
     def _choose_direction(self, delivery: str, shot: str, runs: int) -> str:
-        # The two-step batting UI already tells us exactly where the batter
-        # aimed — use that instead of guessing from the shot alone.
-        if self.last_shot_direction:
-            return self.last_shot_direction
         direction_bias = {
             "Fine Leg": "5 o'clock",
             "Square Leg": "6 o'clock",
@@ -892,14 +869,6 @@ class GameState:
             return True
         return False
 
-    def set_field(self, counts) -> None:
-        """Lock in the field for the NEXT over (called after end_over(), or at
-        the start of an innings once the first bowler is picked).
-        `counts` is {zone_key: number of fielders}."""
-        import field_logic as _fl
-        self.field_positions = _fl.clean_counts(counts)
-        self.field_over_idx = self.current_legal_balls // 6
-
     def start_second_innings(self) -> None:
         # Keep innings-1 stats for the end-of-match summary card (they are reset below).
         import copy as _copy
@@ -924,8 +893,6 @@ class GameState:
         self.bowler_stats = {}
         self.batsman_stats = {}
         self.last_delivery_internal = None
-        self.field_positions = None   # new innings -> new bowling side, field reset
-        self.field_over_idx = None
         self._over_ended_flag = False
         self.last_ball_was_wicket = False
         self.last_wicket_dismissed_name = ""
