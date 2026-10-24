@@ -272,6 +272,7 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
         label = f"{stage1_choice} {game.pending_delivery}".strip()
         batting_view = BattingView(game, stage1_choice=stage1_choice, is_free_hit=is_free_hit)
         batting_view._channel = channel
+        await _send_landing_picture(channel, game)
         content = (
             _delivery_announcement(label, speed, game.batting_user, free_hit=is_free_hit)
             if speed is not None
@@ -1092,6 +1093,34 @@ async def _send_commentary_with_gifs(
             pass
 
 
+async def _send_landing_picture(channel, game) -> None:
+    """Picture of where THIS ball will pitch (Short/Good/Full/Yorker x line), sent as
+    soon as the bowler has chosen the delivery and before the batter picks a shot.
+
+    The spot is picked once and kept in game.pending_landing; _process_delivery_locked
+    reuses it for the result, so the picture and the outcome always agree. Calling
+    this again for the same ball (match recovery) re-sends the SAME spot. A failure
+    here never blocks the match."""
+    try:
+        if not pitch_map.ENABLED:
+            return
+        striker  = game.striker
+        delivery = game.pending_delivery
+        if not striker or not delivery:
+            return
+        hand = pitch_map.batter_hand(striker)
+        landing = getattr(game, "pending_landing", None)
+        if landing is None:
+            landing = pitch_map.pick_landing(delivery, hand)
+            game.pending_landing = landing
+        label = f"{getattr(game, 'pending_stage1_choice', '') or ''} {delivery}".strip()
+        png = await asyncio.to_thread(pitch_map.landing_png, _pname(striker), hand, label, landing)
+        if png:
+            await channel.send(file=discord.File(io.BytesIO(png), filename="pitch_landing.png"))
+    except Exception as e:
+        print(f"[pitch map] landing picture not sent ({type(e).__name__}: {e})")
+
+
 async def _post_delivery_prompt(interaction, channel, game, *, content, view, allowed_ids=None):
     """Show the next delivery the Glenn McGrath way:
     1) the old bowling message loses its buttons,
@@ -1105,6 +1134,9 @@ async def _post_delivery_prompt(interaction, channel, game, *, content, view, al
 
     async def _send():
         await channel.send(embed=build_scoreboard_embed(game))
+        # Right after the bowler picks the ball: show where it will pitch, so the
+        # batter can choose a direction. Shot buttons stay the LAST message.
+        await _send_landing_picture(channel, game)
         await channel.send(content=content, view=view)
 
     await _run_safely(_send, allowed_ids=allowed_ids, notify_channel=channel)
@@ -1260,6 +1292,8 @@ async def _process_delivery_locked(
     # clear it so match-recovery (_resume_prompt) doesn't think a shot is
     # still waiting to be picked once this ball has actually been bowled.
     _announced_speed               = game.pending_delivery_speed
+    _shown_landing                 = getattr(game, "pending_landing", None)   # spot the batter saw
+    game.pending_landing           = None
     game.pending_delivery          = None
     game.pending_delivery_internal = None
     game.pending_delivery_speed    = None
@@ -1306,6 +1340,7 @@ async def _process_delivery_locked(
             SHOT_BUTTON_MAP.get(shot_button, shot_button),
             DIRECTIONS_BY_NAME.get(direction) if direction else None,
             pitch_map.batter_hand(striker),
+            landing=_shown_landing,
         )
 
     if shot_button == "Leave":
@@ -2415,6 +2450,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             # with the exact same speed/label instead of losing it.
             self.game.pending_delivery_speed  = speed
             self.game.pending_stage1_choice   = self.stage1_choice
+            self.game.pending_landing         = None   # new ball: pick a fresh spot
 
             channel = _ch(interaction, self.game)
             batting_view = BattingView(self.game, stage1_choice=self.stage1_choice, is_free_hit=self.is_free_hit)
@@ -2495,6 +2531,7 @@ class BowlingView(_TimeoutMixin, ui.View):
             speed = random.uniform(*get_delivery_speed(delivery_button, btype))
             self.game.pending_delivery_speed = speed
             self.game.pending_stage1_choice  = ""
+            self.game.pending_landing        = None    # new ball: pick a fresh spot
 
             channel = _ch(interaction, self.game)
             batting_view = BattingView(self.game, is_free_hit=self.is_free_hit)

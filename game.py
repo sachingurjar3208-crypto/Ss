@@ -255,6 +255,10 @@ class GameState:
         self.pending_delivery: str | None = None
         self.pending_delivery_speed: float | None = None
         self.pending_stage1_choice: str = ""
+        # Where the current ball will pitch, as (row, batter-frame column). Picked when
+        # the bowler chooses the delivery and shown to the batter BEFORE the shot
+        # (pitch_map.landing_png); the result then uses this same spot.
+        self.pending_landing = None
         # Direction/height of the shot just played (two-step batting UI).
         # Set right before the outcome is calculated; None when a direction
         # wasn't given (CPU batter, Leave, resumed games with old data).

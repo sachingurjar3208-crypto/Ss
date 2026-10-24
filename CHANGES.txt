@@ -106,3 +106,14 @@ BATTER PHOTO + COMPACT LENGTHS v4
                    Length zones use real sizes from the crease: Yorker 2 m, Full 2 m, Good 4 m,
                    Short 3 m, so they cover about half the pitch (see _ZONE_M).
   batter_rhb.png   NEW. Put it in the same folder as pitch_map.py.
+
+LANDING PICTURE RIGHT AFTER THE BOWLER'S CHOICE v5
+==================================================
+  views.py         NEW _send_landing_picture(): as soon as the bowler picks the delivery, the
+                   "where will it pitch" picture is posted. Order in the channel:
+                   scoreboard -> landing picture -> "X is coming with N kmph" + shot buttons.
+                   Used by the fast/medium (2-stage) path, the spin (1-stage) path and the
+                   resume ("Tap to continue") path. Resume re-sends the SAME spot.
+                   _process_delivery_locked passes that spot to pitch_map.timing_for(landing=...)
+                   so the result matches the picture the batter saw, then clears it.
+  game.py          + pending_landing (the spot for the current ball).
