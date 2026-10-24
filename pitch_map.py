@@ -90,7 +90,7 @@ NO_DIRECTION = {"Defend"}
 TIMING_MOD: dict[str, dict[str, float]] = {
     "perfect": {"0": 0.6, "1": 1.0, "2": 1.0, "3": 1.0, "4": 1.5, "6": 1.6, "W": 0.6},
     "partial": {"0": 1.0, "1": 1.0, "2": 1.0, "3": 1.0, "4": 1.0, "6": 1.0, "W": 1.0},
-    "wrong":   {"0": 1.5, "1": 1.15, "2": 0.9, "3": 0.8, "4": 0.5, "6": 0.4, "W": 1.5},
+    "wrong":   {"0": 1.6, "1": 1.15, "2": 0.8, "3": 0.6, "4": 0.2, "6": 0.06, "W": 1.6},
 }
 TIMING_LABEL = {
     "perfect": "PERFECT TIMING",
@@ -188,10 +188,10 @@ def timing_for(delivery_button: str, shot_button: str, direction: str | None,
 
 
 # ── Picture ──────────────────────────────────────────────────────────────────
-# View from above, the way the batter sees the pitch: batter at the TOP facing
-# the bowler at the BOTTOM. RHB stands on the right of the stumps, LHB on the
-# left. Off side is on the batter's left-hand side as he looks at the bowler,
-# so for a RHB it is screen RIGHT and for a LHB it is screen LEFT.
+# View from above, camera behind the bowler (same as the wagon wheel and the
+# shot buttons): batter at the TOP facing the camera. ONE rule for everything:
+#   RHB: OFF side = screen LEFT,  LEG side = screen RIGHT, batter stands RIGHT of the stumps.
+#   LHB: exact mirror image (OFF = screen RIGHT, batter stands LEFT of the stumps).
 _W, _H = 600, 800
 _S = 2
 _PX0, _PX1 = 170, 430                  # pitch left/right
@@ -216,19 +216,20 @@ _STUMP_H = 66                          # batter's-end stumps, about knee high on
 _STUMP_GAP = 12
 _RESULT_COL = {"perfect": (60, 220, 110), "partial": (255, 196, 0), "wrong": (232, 72, 72)}
 
-# Unit direction from the batter's crease (screen coords, RHB: off = right).
+# Unit direction from the batter's crease (screen coords, RHB: off = LEFT).
+# Same screen layout as the shot buttons and the wagon wheel.
 DIR_VEC = {
-    "D": (0.0, 1.0), "DL": (0.7, 0.7), "L": (1.0, 0.2), "UL": (0.8, -0.5),
-    "U": (0.0, -1.0), "UR": (-0.8, -0.5), "R": (-1.0, 0.2), "DR": (-0.7, 0.7),
+    "D": (0.0, 1.0), "DL": (-0.7, 0.7), "L": (-1.0, 0.2), "UL": (-0.8, -0.5),
+    "U": (0.0, -1.0), "UR": (0.8, -0.5), "R": (1.0, 0.2), "DR": (0.7, 0.7),
 }
 
 
 def _col_x(bcol: int, hand: str) -> float:
     """Screen x (centre of a column) for a batter-frame column."""
     ci = COLS.index(bcol)
-    if hand == "L":                       # LHB: off side on screen left
-        return _PX0 + (ci + 0.5) * _COL_W
-    return _PX1 - (ci + 0.5) * _COL_W     # RHB: off side on screen right
+    if hand == "L":                       # LHB: off side on screen RIGHT
+        return _PX1 - (ci + 0.5) * _COL_W
+    return _PX0 + (ci + 0.5) * _COL_W     # RHB: off side on screen LEFT
 
 
 def _row_y(row: str) -> float:
@@ -300,10 +301,10 @@ _sprite_cache: dict = {}
 
 
 def _batter_side(hand: str) -> int:
-    """Screen side of the middle line the batter stands on. The off side is screen
-    RIGHT for a RHB, so a RHB stands on the leg side = LEFT of the stumps (and
-    faces the stumps / off side). A LHB is the mirror image."""
-    return -1 if hand == "R" else 1
+    """Screen side of the middle line the batter stands on. A RHB stands on the
+    leg side = screen RIGHT of the stumps (his chest faces the off side, screen
+    left). A LHB is the mirror image."""
+    return 1 if hand == "R" else -1
 
 
 def _batter_sprite(S: int, hand: str):
@@ -355,7 +356,7 @@ def _draw_batter_vector(d, S, hand: str, img=None):
     K = 1.12
     cx = _CX + side * 52
     feet_y = _PY0 - 2
-    flip = -side
+    flip = side
     LX, LY = -0.62, -0.78                      # light direction on screen (upper left)
 
     def P(x, y):
@@ -522,7 +523,7 @@ def landing_png(batter: str, hand: str, delivery_name: str, landing) -> bytes | 
 
 
 def _side_labels(d, S, hand):
-    off_right = hand == "R"
+    off_right = hand == "L"
     d.text(((_W - 22 if off_right else 22) * S, _H / 2 * S), "OFF", font=_font(14), fill=(200, 205, 215), anchor="mm")
     d.text(((22 if off_right else _W - 22) * S, _H / 2 * S), "LEG", font=_font(14), fill=(200, 205, 215), anchor="mm")
 

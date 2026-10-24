@@ -1616,7 +1616,7 @@ async def _process_delivery_locked(
         try:
             wheel = await asyncio.to_thread(
                 wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal,
-                field_positions=_fp_view,
+                field_positions=_fp_view, hand=pitch_map.batter_hand(striker),
             )
         except Exception:
             wheel = None
@@ -1625,7 +1625,7 @@ async def _process_delivery_locked(
         try:
             wheel = await asyncio.to_thread(
                 catch_wheel_png, direction, caught_zone_key, sname,
-                _fp_view, shot_internal,
+                _fp_view, shot_internal, pitch_map.batter_hand(striker),
             )
         except Exception:
             wheel = None

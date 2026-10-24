@@ -44,6 +44,14 @@ _FALLBACK = {
     "Lofted": ["D", "DL", "DR", "R", "UR", "L"],
 }
 
+def _ang(key: str, hand: str = "R") -> float:
+    """Screen angle of a direction/zone key (batter frame). A LEFT-hand batter is
+    the exact mirror image: Cover is bottom-RIGHT, Mid-wicket bottom-LEFT, and so
+    on. RHB: off side = screen left."""
+    base = _ANGLE[key] if key in _ANGLE else _INNER_ANGLE[key]
+    return 180 - base if hand == "L" else base
+
+
 _FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 _W = _H = 700
 _S = 2                                  # supersampling
@@ -61,7 +69,7 @@ def _font(size):
 
 
 # ── Fielder placement ────────────────────────────────────────────────────────
-def fielder_points(counts) -> list[dict]:
+def fielder_points(counts, hand: str = "R") -> list[dict]:
     """Every fielder as {zone, x, y, num} in unscaled picture units.
 
     Fielders in one zone are fanned out along an arc so none overlap. The
@@ -75,12 +83,12 @@ def fielder_points(counts) -> list[dict]:
         if n <= 0:
             continue
         if zone in FL.FIELD_POSITIONS:
-            base, radius, step = _ANGLE[zone], _OUTER_R, 13.0
+            base, radius, step = _ang(zone, hand), _OUTER_R, 13.0
         else:
-            base, radius, step = _INNER_ANGLE[zone], _INNER_R, 22.0
+            base, radius, step = _ang(zone, hand), _INNER_R, 22.0
         for i in range(n):
             num += 1
-            ang = math.radians(base + (i - (n - 1) / 2.0) * step)
+            ang = math.radians(base + (i - (n - 1) / 2.0) * step * (-1 if hand == "L" else 1))
             pts.append({
                 "zone": zone, "num": num,
                 "x": math.cos(ang) * radius, "y": -math.sin(ang) * radius,
@@ -88,25 +96,25 @@ def fielder_points(counts) -> list[dict]:
     return pts
 
 
-def _draw_fielders(d, cx, cy, S, counts) -> None:
+def _draw_fielders(d, cx, cy, S, counts, hand: str = "R") -> None:
     """One red dot per fielder, numbered 1-11."""
-    for p in fielder_points(counts):
+    for p in fielder_points(counts, hand):
         fx, fy = cx + p["x"] * S, cy + p["y"] * S
         d.ellipse([fx - 13 * S, fy - 13 * S, fx + 13 * S, fy + 13 * S],
                   fill=_FIELDER, outline=(255, 255, 255), width=2 * S)
         d.text((fx, fy), str(p["num"]), font=_font(12), fill=(255, 255, 255), anchor="mm")
 
 
-def _catch_point(zone: str, counts) -> tuple[float, float] | None:
+def _catch_point(zone: str, counts, hand: str = "R") -> tuple[float, float] | None:
     """Picture position of the first fielder in `zone` (the one who takes it)."""
-    for p in fielder_points(counts):
+    for p in fielder_points(counts, hand):
         if p["zone"] == zone:
             return p["x"], p["y"]
     return None
 
 
 # ── Base ground ──────────────────────────────────────────────────────────────
-def _base(S):
+def _base(S, hand: str = "R"):
     """The ground (circle, 30-yard ring, pitch, spokes, labels). Shared by the
     wagon wheel, the catch wheel and the field picture. Returns (img, d, cx, cy, R)."""
     from PIL import Image, ImageDraw
@@ -123,10 +131,11 @@ def _base(S):
         d.arc([cx - r30, cy - r30, cx + r30, cy + r30], a, a + 6, fill=(235, 235, 235), width=2 * S)
     d.rectangle([cx - 9 * S, cy - 48 * S, cx + 9 * S, cy + 48 * S], fill=(196, 170, 120))   # pitch
 
-    for k, ang in _ANGLE.items():                   # faint spokes + labels
+    for k in _ANGLE:                                # faint spokes + labels (mirrored for LHB)
+        ang = _ang(k, hand)
         a = math.radians(ang)
         d.line([cx, cy, cx + R * math.cos(a), cy - R * math.sin(a)], fill=(60, 140, 80), width=S)
-        axis = (ang % 90 == 0)
+        axis = (round(ang) % 90 == 0)
         lx = cx + (R + (44 if axis else 70) * S) * math.cos(a)
         ly = cy - (R + (26 if axis else 40) * S) * math.sin(a)
         lx = min(max(lx, 52 * S), (_W - 52) * S)
@@ -156,15 +165,15 @@ def _count_line(counts) -> str:
 
 
 def field_png(field_positions, over_no: int | None = None, phase: str = "",
-              max_allowed: int | None = None) -> bytes | None:
+              max_allowed: int | None = None, hand: str = "R") -> bytes | None:
     """The current field as a picture: all fielders numbered on the ground.
     Returns PNG bytes, or None on any drawing problem."""
     if field_positions is None:
         return None
     try:
         S = _S
-        img, d, cx, cy, R = _base(S)
-        _draw_fielders(d, cx, cy, S, field_positions)
+        img, d, cx, cy, R = _base(S, hand)
+        _draw_fielders(d, cx, cy, S, field_positions, hand)
         d.ellipse([cx - 6 * S, cy - 6 * S, cx + 6 * S, cy + 6 * S], fill=(255, 255, 255))
         title = f"FIELD · OVER {over_no}" if over_no else "FIELD"
         d.text((24 * S, 22 * S), title, font=_font(30), fill=(255, 255, 255), anchor="la")
@@ -191,11 +200,12 @@ def wagon_wheel_png(
     batter: str = "",
     shot_internal: str | None = None,
     field_positions=None,
+    hand: str = "R",
 ) -> bytes | None:
     if outcome not in ("4", "6"):
         return None
     try:
-        return _draw(direction, outcome, meters, batter, shot_internal, field_positions)
+        return _draw(direction, outcome, meters, batter, shot_internal, field_positions, hand)
     except Exception as e:          # never break a match over a picture
         print(f"[wagon wheel] skipped ({type(e).__name__}: {e})")
         return None
@@ -207,24 +217,22 @@ def catch_wheel_png(
     batter: str = "",
     field_positions=None,
     shot_internal: str | None = None,
+    hand: str = "R",
 ) -> bytes | None:
     """A lofted shot that was caught: a RED curved line from the batter to the
     fielder who took it, with OUT at the end. None on any drawing problem."""
     try:
         from PIL import Image, ImageDraw
         S = _S
-        img, d, cx, cy, R = _base(S)
-        _draw_fielders(d, cx, cy, S, field_positions)
+        img, d, cx, cy, R = _base(S, hand)
+        _draw_fielders(d, cx, cy, S, field_positions, hand)
 
-        pt = _catch_point(catch_zone, field_positions)
+        pt = _catch_point(catch_zone, field_positions, hand)
         if pt is None:
             # No fielder recorded there: aim at the zone's own spot instead.
-            if catch_zone in FL.FIELD_POSITIONS:
-                a = math.radians(_ANGLE[catch_zone])
-                pt = (math.cos(a) * _OUTER_R, -math.sin(a) * _OUTER_R)
-            else:
-                a = math.radians(_INNER_ANGLE[catch_zone])
-                pt = (math.cos(a) * _INNER_R, -math.sin(a) * _INNER_R)
+            a = math.radians(_ang(catch_zone, hand))
+            rr = _OUTER_R if catch_zone in FL.FIELD_POSITIONS else _INNER_R
+            pt = (math.cos(a) * rr, -math.sin(a) * rr)
         ex, ey = cx + pt[0] * S, cy + pt[1] * S
 
         # Quadratic curve: lifted up the picture like a high catch.
@@ -263,20 +271,20 @@ def catch_wheel_png(
         return None
 
 
-def _draw(direction, outcome, meters, batter, shot_internal, field_positions=None) -> bytes | None:
+def _draw(direction, outcome, meters, batter, shot_internal, field_positions=None, hand="R") -> bytes | None:
     from PIL import Image, ImageDraw
 
     key = _resolve_key(direction, shot_internal)
     if key is None:
         return None
     S = _S
-    img, d, cx, cy, R = _base(S)
+    img, d, cx, cy, R = _base(S, hand)
 
     if field_positions is not None:
-        _draw_fielders(d, cx, cy, S, field_positions)
+        _draw_fielders(d, cx, cy, S, field_positions, hand)
 
     col = _SIX if outcome == "6" else _FOUR
-    a = math.radians(_ANGLE[key])
+    a = math.radians(_ang(key, hand))
     end = R + 16 * S if outcome == "6" else R
     ex, ey = cx + end * math.cos(a), cy - end * math.sin(a)
 

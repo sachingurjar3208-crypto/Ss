@@ -408,7 +408,8 @@ async def _practice_process_delivery_inner(
     if outcome in ("4", "6"):
         try:
             wheel = await asyncio.to_thread(
-                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal
+                wagon_wheel_png, direction, outcome, six_distance, sname, shot_internal,
+                hand=pitch_map.batter_hand(striker),
             )
         except Exception:
             wheel = None
