@@ -36,7 +36,7 @@ ROWS = ("Yorker", "Full", "Good", "Short")          # batter's crease -> bowler'
 COLS = (-2, -1, 0, 1, 2)                              # batter frame
 
 # Batter-frame column of each compass direction (same keys as data.DIRECTIONS).
-DIR_COL = {"UL": -2, "L": -2, "DL": -1, "D": 0, "U": 0, "UR": 2, "R": 2, "DR": 1}
+DIR_COL = {"UL": -2, "L": -2, "DL": -1, "D": 0, "U": 0, "UR": 0, "R": 0, "DR": 0}
 
 # Where a delivery is aimed, in the BOWLER frame: (rows, cols). The landing
 # spot is picked at random from these, so each ball is a little different.
@@ -136,13 +136,31 @@ def to_batter_col(bowler_col: int, hand: str) -> int:
     return bowler_col if hand == "R" else -bowler_col
 
 
+# Chance that a ball pitches OUTSIDE the wide lines (the two red lines at the edge
+# of the grid). Anything outside those lines is ALWAYS a wide; inside is never.
+WIDE_CHANCE_DEFAULT = 0.03
+WIDE_CHANCE = {"Swing": 0.05, "Outswing": 0.05, "Drift Ball": 0.05, "Drifter": 0.05,
+               "Full": 0.04, "Bouncer": 0.04, "Yorker": 0.03}
+WIDE_COL = 3
+LEG_WIDE_KEEP = 0.08      # share of leg-side pitches that really go wide down the leg side
+
+
 def pick_landing(delivery_button: str, hand: str, rng: random.Random | None = None):
-    """Random landing spot for this delivery, as (row, batter-frame col)."""
+    """Random landing spot for this delivery, as (row, batter-frame col).
+    col +-3 means outside the wide lines (always a wide)."""
     rng = rng or random
     rows, cols = DELIVERY_ZONES.get(delivery_button, DEFAULT_DELIVERY)
     row = rng.choice(rows)
-    bcol = rng.choice(cols)
-    return row, to_batter_col(bcol, hand)
+    if rng.random() < WIDE_CHANCE.get(delivery_button, WIDE_CHANCE_DEFAULT):
+        avg = sum(cols) / len(cols)                      # bowler frame: which side it drifts to
+        side = -1 if avg < 0 else 1 if avg > 0 else (-1 if rng.random() < 0.7 else 1)
+        if to_batter_col(side, hand) > 0:                  # down the leg side (batter frame)
+            return row, 2
+        return row, -WIDE_COL
+    bcol = to_batter_col(rng.choice(cols), hand)
+    if bcol >= 1 and rng.random() > LEG_WIDE_KEEP:        # leg side is a wide: mostly
+        bcol = 0                                          # keep it on the stumps line
+    return row, bcol
 
 
 def judge(landing, shot_button: str, direction: str | None):
@@ -165,6 +183,26 @@ def judge(landing, shot_button: str, direction: str | None):
     return "wrong", shot_col
 
 
+def is_wide_landing(landing) -> bool:
+    """True when the ball pitched outside a wide line. Batter frame, same for RHB
+    and LHB: OFF side = beyond the outer edge of the grid (col <= -3), LEG side =
+    anything beyond the leg-stump line (col >= +1)."""
+    return bool(landing) and (landing[1] >= 1 or landing[1] <= -WIDE_COL)
+
+
+def result_label(timing: dict, outcome: str) -> str:
+    """Headline that never contradicts the ball's result (no 'PERFECT TIMING'
+    on a wide, no 'WRONG LINE' on a six, no 'PERFECT TIMING' on a wicket)."""
+    res = timing["result"]
+    if outcome == "W":
+        return "OUT!" if res == "wrong" else "GOOD SHOT, BUT OUT"
+    if outcome in ("4", "6"):
+        return "MISHIT, BUT IT GOES" if res == "wrong" else timing["label"]
+    if outcome == "0":
+        return "WELL FIELDED" if res == "perfect" else ("DOT BALL" if res == "partial" else timing["label"])
+    return timing["label"]
+
+
 def timing_for(delivery_button: str, shot_button: str, direction: str | None,
                hand: str, rng: random.Random | None = None, landing=None):
     """Everything views needs for one ball. None when the feature is off or the
@@ -178,12 +216,17 @@ def timing_for(delivery_button: str, shot_button: str, direction: str | None,
     result, shot_col = judge(landing, shot_button, direction)
     if result is None:
         return None
+    mod = dict(TIMING_MOD[result])
+    # A wide must LOOK wide: the random wide roll is switched off here. A ball
+    # outside the wide lines is forced to a wide by views, every other ball can
+    # never be one.
+    mod["Wd"] = 0.0
     return {
         "result": result,
         "label": TIMING_LABEL[result],
         "landing": landing,
         "shot_col": shot_col,
-        "mod": dict(TIMING_MOD[result]),
+        "mod": mod,
     }
 
 
@@ -226,6 +269,9 @@ DIR_VEC = {
 
 def _col_x(bcol: int, hand: str) -> float:
     """Screen x (centre of a column) for a batter-frame column."""
+    if abs(bcol) >= WIDE_COL:             # outside the wide line, on the grass
+        off_left = (bcol < 0) == (hand == "R")   # screen-left wide ball?
+        return _PX0 - 100 if off_left else _PX1 + 28   # left side clears the row names
     ci = COLS.index(bcol)
     if hand == "L":                       # LHB: off side on screen RIGHT
         return _PX1 - (ci + 0.5) * _COL_W
@@ -247,7 +293,7 @@ def _font(size):
             return ImageFont.load_default()
 
 
-def _draw_base(d, S):
+def _draw_base(d, S, hand: str = "R"):
     """Grass, pitch, grid, row names, stumps at both ends and the crease lines."""
     d.rectangle([0, 0, _W * S, _H * S], fill=(40, 118, 64))
     d.rectangle([(_PX0 - 14) * S, (_PY0 - 12) * S, (_PX1 + 14) * S, (_PY1 + 12) * S],
@@ -261,6 +307,13 @@ def _draw_base(d, S):
     # row names on the left (they read top = batter's end)
     for row in ROWS:
         d.text(((_PX0 - 20) * S, _row_y(row) * S), row, font=_font(13), fill=(230, 230, 230), anchor="rm")
+    # wide lines (batter frame, mirrored for a LHB): OFF = outer edge of the grid,
+    # LEG = the leg-stump line (edge of the middle column). Outside = wide.
+    off_x = _PX0 if hand == "R" else _PX1
+    leg_x = _CX + _COL_W / 2 if hand == "R" else _CX - _COL_W / 2
+    for _x in (off_x, leg_x):
+        d.line([_x * S, (_ZY0 - 8) * S, _x * S, (_ZY1 + 8) * S], fill=(205, 50, 50), width=4 * S)
+        d.text((_x * S, (_ZY1 + 12) * S), "WIDE", font=_font(11), fill=(255, 150, 150), anchor="mt")
     # creases
     d.line([(_PX0 - 14) * S, (_PY0 + 6) * S, (_PX1 + 14) * S, (_PY0 + 6) * S], fill=(240, 240, 240), width=2 * S)
     d.line([(_PX0 - 14) * S, (_PY1 - 6) * S, (_PX1 + 14) * S, (_PY1 - 6) * S], fill=(240, 240, 240), width=2 * S)
@@ -501,20 +554,23 @@ def _png(img) -> bytes:
     return buf.getvalue()
 
 
-def landing_png(batter: str, hand: str, delivery_name: str, landing) -> bytes | None:
+def landing_png(batter: str, hand: str, delivery_name: str, landing,
+                title: str = "BALL INCOMING", sub: str = "", title_col=(255, 255, 255)) -> bytes | None:
     """Shown BEFORE the batter picks a shot: where this ball is going to pitch."""
     try:
         from PIL import Image, ImageDraw
         S = _S
         img = Image.new("RGB", (_W * S, _H * S), (22, 26, 36))
         d = ImageDraw.Draw(img)
-        _draw_base(d, S)
+        _draw_base(d, S, hand)
         _draw_batter(d, S, hand, img)
         _landing_dot(d, S, landing, hand)
-        d.text((20 * S, 18 * S), "BALL INCOMING", font=_font(26), fill=(255, 255, 255), anchor="la")
+        d.text((20 * S, 18 * S), title, font=_font(26), fill=title_col, anchor="la")
         d.text((20 * S, 52 * S), f"{batter} · {hand}HB", font=_font(16), fill=(210, 214, 224), anchor="la")
         d.text((20 * S, 74 * S), f"Ball: {delivery_name} · pitching {landing[0]}",
                font=_font(15), fill=(180, 186, 200), anchor="la")
+        if sub:
+            d.text((_W / 2 * S, (_H - 22) * S), sub, font=_font(18), fill=(255, 255, 255), anchor="mm")
         _side_labels(d, S, hand)
         return _png(img)
     except Exception as e:
@@ -540,7 +596,7 @@ def pitch_png(batter: str, hand: str, shot_button: str, direction: str | None,
         S = _S
         img = Image.new("RGB", (_W * S, _H * S), (22, 26, 36))
         d = ImageDraw.Draw(img)
-        _draw_base(d, S)
+        _draw_base(d, S, hand)
 
         # Perfect length rows for this shot, drawn in the middle line only.
         rows = SHOT_ROWS.get(shot_button, ())
@@ -559,6 +615,8 @@ def pitch_png(batter: str, hand: str, shot_button: str, direction: str | None,
         d = ImageDraw.Draw(img)
         _draw_fielder_marker(d, S, direction, fielder_zone is not None, hand, _batter_origin(hand))
         _landing_dot(d, S, timing["landing"], hand)
+        for _row in ROWS:                                   # names above the shot line
+            d.text(((_PX0 - 20) * S, _row_y(_row) * S), _row, font=_font(13), fill=(230, 230, 230), anchor="rm")
         _side_labels(d, S, hand)
 
         col = _RESULT_COL.get(timing["result"], (255, 255, 255))

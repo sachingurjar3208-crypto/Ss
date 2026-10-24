@@ -1417,6 +1417,12 @@ async def _process_delivery_locked(
             loft_power=loft_pow,
             timing_mod=timing["mod"] if timing else None,
         )
+    # Wide rule: a ball that pitched outside the wide lines is ALWAYS a wide
+    # (even if the batter left it); any other ball is never a wide.
+    _land = timing["landing"] if timing else _shown_landing
+    _wide_ball = pitch_map.is_wide_landing(_land)
+    if _wide_ball:
+        outcome, is_extra = "Wd", True
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
 
@@ -1595,18 +1601,31 @@ async def _process_delivery_locked(
     # Pitch picture: landing spot vs the shot line, with the result. Sent with
     # the ball; None when there was no timing for this ball.
     pitch = None
-    if timing is not None:
+    if timing is not None or _wide_ball:
         try:
-            _txt = {"6": "SIX", "4": "FOUR", "W": "OUT"}.get(outcome, f"{outcome} run" + ("" if outcome == "1" else "s"))
-            pitch = await asyncio.to_thread(
-                pitch_map.pitch_png, sname, pitch_map.batter_hand(striker),
-                SHOT_BUTTON_MAP.get(shot_button, shot_button),
-                DIRECTIONS_BY_NAME.get(direction) if direction else None,
-                timing, delivery_button,
-                field_logic.catch_zone_for(DIRECTIONS_BY_NAME.get(direction) if direction else None,
-                                           _fp_view),
-                _txt,
-            )
+            _hand = pitch_map.batter_hand(striker)
+            if outcome in ("Wd", "NB", "NB+1"):
+                # Extras: the batter's shot never counted, so no timing / shot line.
+                _is_wd = outcome == "Wd"
+                pitch = await asyncio.to_thread(
+                    pitch_map.landing_png, sname, _hand, delivery_button, _land,
+                    "WIDE" if _is_wd else "NO BALL",
+                    "Wide: +1 run, re-bowled" if _is_wd else "No ball: free hit, re-bowled",
+                    (255, 196, 0) if _is_wd else (232, 72, 72),
+                )
+            else:
+                _txt = {"6": "SIX", "4": "FOUR", "W": "OUT", "0": "DOT BALL"}.get(
+                    outcome, f"{outcome} run" + ("" if outcome == "1" else "s"))
+                _timing_shown = dict(timing, label=pitch_map.result_label(timing, outcome))
+                pitch = await asyncio.to_thread(
+                    pitch_map.pitch_png, sname, _hand,
+                    SHOT_BUTTON_MAP.get(shot_button, shot_button),
+                    DIRECTIONS_BY_NAME.get(direction) if direction else None,
+                    _timing_shown, delivery_button,
+                    field_logic.catch_zone_for(DIRECTIONS_BY_NAME.get(direction) if direction else None,
+                                               _fp_view),
+                    _txt,
+                )
         except Exception:
             pitch = None
 
