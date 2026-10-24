@@ -79,3 +79,30 @@ PITCH MAP - landing spot vs shot, RHB / LHB
                     picture is sent with the ball message.
   xi_display.py,
   ranked.py         Player dicts now carry batting_hand (R/L). Missing = R.
+
+PITCH PICTURE v2 - shown before the shot
+========================================
+  pitch_map.py     Batter at the top of the picture, bowler at the bottom. RHB stands
+                   on the right of the middle line, LHB on the left (mirrored). The
+                   batter is bigger and bent forward. The perfect-length band is always
+                   on the middle line. landing_png() is the picture shown BEFORE the shot.
+  game.py          pending_landing: the spot the ball will pitch on.
+  views.py         _send_landing_picture() is sent before the batting prompt (3 paths:
+                   normal, single-step bowling, resume). The result uses the same landing
+                   the batter saw (pending_landing), so the picture and the outcome match.
+
+BATTER STANCE v3
+================
+  pitch_map.py     The batter is drawn in the reference stance: side-on, knees bent,
+                   back arched, head forward, bat raised beside the head. RHB stands
+                   right of the middle line and faces left; LHB is mirrored.
+
+BATTER PHOTO + COMPACT LENGTHS v4
+=================================
+  pitch_map.py     Batter is now a photo cutout (batter_rhb.png, mirrored for LHB); the old
+                   drawn figure is the fallback if the PNG is missing.
+                   RHB stands on the LEG side (screen left of the stumps), LHB is the mirror.
+                   The batter hides one stump. Batter's-end stumps are tall (about knee high).
+                   Length zones use real sizes from the crease: Yorker 2 m, Full 2 m, Good 4 m,
+                   Short 3 m, so they cover about half the pitch (see _ZONE_M).
+  batter_rhb.png   NEW. Put it in the same folder as pitch_map.py.
