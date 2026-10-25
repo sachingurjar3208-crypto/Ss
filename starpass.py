@@ -2,8 +2,10 @@
 
 How it works
 - An admin starts a season with /starpassmaker (length 10D / 15D / 30D and a number of levels).
-  Only ONE season can run at a time. When its time is up it simply disappears: every
-  function below treats an expired season as "no Star Pass running".
+  Several DIFFERENT passes can run at the same time (the normal "Star Pass" has pass_key "star",
+  an event pass like "Halloween Pass" has its own key, theme and background). Only ONE season
+  per pass_key can run at a time. When its time is up it simply disappears: every function
+  below treats an expired season as "that pass is not running".
 - Daily quests give STARPASS_QUEST_CREDITS credits each (quest.py calls
   award_quest_credits() inside the SAME database transaction that marks the quest done,
   so a quest can never pay credits twice).
@@ -20,13 +22,15 @@ How it works
   so pressing the button many times can never pay twice.
 
 Tables (created automatically, see ensure_tables):
-    starpass_season  one row per season
+    starpass_season  one row per season (pass_key, theme, premium role and bonus per season)
+    starpass_bg      custom background image per pass_key
     starpass_reward  admin overrides: (season, level, row) -> reward
     starpass_user    credits + "premium bonus given" flag per user per season
     starpass_claim   what a user has already collected
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -48,6 +52,20 @@ MAX_LEVELS = 500
 DURATIONS = {"10D": 10, "15D": 15, "30D": 30}
 CSSTARPASS_COOLDOWN = 2 * 60         # normal users; Premium / Star Pass role: none
 DAY = 86_400
+
+# ── Several passes at once ───────────────────────────────────────────────────
+DEFAULT_PASS = "star"                # the normal Star Pass (all old seasons are "star")
+THEMES = ("default", "halloween", "diwali", "christmas")   # looks, see starpass_image.THEMES
+MAX_BG_BYTES = 8 * 1024 * 1024       # biggest background upload
+
+
+def norm_key(text) -> str:
+    """'Halloween Pass!' -> 'halloween'. Empty / None -> 'star'."""
+    s = re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+    if s.endswith("-pass") and len(s) > 5:           # "Halloween Pass" -> "halloween"
+        s = s[:-5]
+    s = s[:30].strip("-")
+    return s or DEFAULT_PASS
 
 FREE, PREMIUM = "free", "premium"
 ROWS = (FREE, PREMIUM)
@@ -143,6 +161,19 @@ def _ensure(conn) -> None:
         "start_ts REAL NOT NULL, end_ts REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, "
         "created_by INTEGER)"
     )
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(starpass_season)")}
+    for col, ddl in (                      # old databases get the new columns, old rows become the normal "star" pass
+        ("pass_key", "TEXT NOT NULL DEFAULT 'star'"),
+        ("theme", "TEXT NOT NULL DEFAULT 'default'"),
+        ("premium_role_id", "INTEGER"),
+        ("bonus_credits", "INTEGER"),
+    ):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE starpass_season ADD COLUMN {col} {ddl}")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS starpass_bg ("
+        "pass_key TEXT PRIMARY KEY, data BLOB NOT NULL, ts REAL NOT NULL)"
+    )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS starpass_reward ("
         "season_id INTEGER NOT NULL, level INTEGER NOT NULL, row TEXT NOT NULL, "
@@ -175,58 +206,132 @@ def ensure_tables() -> None:
         conn.close()
 
 
-def _active(conn):
-    """The running season row, or None (also None when the time is up)."""
+def _active(conn, pass_key: str = DEFAULT_PASS):
+    """The running season row of one pass, or None (also None when the time is up)."""
     _ensure(conn)
     return conn.execute(
-        "SELECT * FROM starpass_season WHERE active = 1 AND end_ts > ? ORDER BY id DESC LIMIT 1",
-        (time.time(),),
+        "SELECT * FROM starpass_season WHERE active = 1 AND end_ts > ? AND pass_key = ? "
+        "ORDER BY id DESC LIMIT 1",
+        (time.time(), norm_key(pass_key)),
     ).fetchone()
+
+
+def _active_all(conn) -> list:
+    """Every running season (one per pass), oldest first."""
+    _ensure(conn)
+    return conn.execute(
+        "SELECT * FROM starpass_season WHERE active = 1 AND end_ts > ? ORDER BY id", (time.time(),)
+    ).fetchall()
 
 
 def _season_dict(row) -> dict:
     left = max(0.0, float(row["end_ts"]) - time.time())
+    keys = row.keys()
+    role = row["premium_role_id"] if "premium_role_id" in keys else None
+    bonus = row["bonus_credits"] if "bonus_credits" in keys else None
     return {
         "id": int(row["id"]), "name": row["name"], "levels": int(row["levels"]),
         "start_ts": float(row["start_ts"]), "end_ts": float(row["end_ts"]),
         "seconds_left": int(left), "days_left": int(-(-left // DAY)),     # rounds up: 0.2 day = 1
+        "pass_key": (row["pass_key"] if "pass_key" in keys else None) or DEFAULT_PASS,
+        "theme": (row["theme"] if "theme" in keys else None) or "default",
+        "premium_role": int(role) if role else STARPASS_PREMIUM_ROLE_ID,
+        "bonus": int(bonus) if bonus is not None else PREMIUM_BONUS_CREDITS,
     }
 
 
-def get_active_season() -> dict | None:
+def get_active_season(pass_key: str = DEFAULT_PASS) -> dict | None:
     with economy._tx() as conn:
-        row = _active(conn)
+        row = _active(conn, pass_key)
         return _season_dict(row) if row else None
 
 
-def create_season(levels: int, duration_key: str, admin_id: int = 0) -> dict | str:
-    """Start a new season. Returns the season dict, or an error message (string)."""
+def list_active_seasons() -> list[dict]:
+    """Every pass that is running right now (the normal Star Pass first)."""
+    with economy._tx() as conn:
+        out = [_season_dict(r) for r in _active_all(conn)]
+    out.sort(key=lambda s: (s["pass_key"] != DEFAULT_PASS, s["id"]))
+    return out
+
+
+def list_pass_keys() -> list[tuple[str, str]]:
+    """[(pass_key, latest season name)] of every pass that ever existed (for admin autocomplete)."""
+    with economy._tx() as conn:
+        _ensure(conn)
+        rows = conn.execute("SELECT pass_key, name FROM starpass_season ORDER BY id").fetchall()
+    seen: dict[str, str] = {}
+    for r in rows:
+        seen[r["pass_key"] or DEFAULT_PASS] = r["name"]
+    return list(seen.items())
+
+
+# ── Backgrounds ──────────────────────────────────────────────────────────────
+
+def set_background(pass_key: str, data: bytes | None) -> None:
+    """Save (or with None remove) the custom background of a pass. `data` is a ready image."""
+    key = norm_key(pass_key)
+    with economy._tx() as conn:
+        _ensure(conn)
+        if data is None:
+            conn.execute("DELETE FROM starpass_bg WHERE pass_key = ?", (key,))
+        else:
+            conn.execute("INSERT OR REPLACE INTO starpass_bg (pass_key, data, ts) VALUES (?, ?, ?)",
+                         (key, data, time.time()))
+
+
+def get_background(pass_key: str) -> bytes | None:
+    with economy._tx() as conn:
+        _ensure(conn)
+        r = conn.execute("SELECT data FROM starpass_bg WHERE pass_key = ?", (norm_key(pass_key),)).fetchone()
+    return bytes(r["data"]) if r else None
+
+
+def create_season(levels: int, duration_key: str, admin_id: int = 0, pass_name: str | None = None,
+                  theme: str = "default", premium_role_id: int | None = None,
+                  bonus_credits: int | None = None) -> dict | str:
+    """Start a new season. Returns the season dict, or an error message (string).
+
+    pass_name   empty = the normal Star Pass ("Season N"). Otherwise a separate event pass such as
+                "Halloween Pass": it runs next to the Star Pass and has its own credits and rewards.
+    """
     if duration_key not in DURATIONS:
         return "Pick a duration of 10D, 15D or 30D."
+    if theme not in THEMES:
+        return "Unknown theme."
+    pass_name = (pass_name or "").strip()
+    key = norm_key(pass_name) if pass_name else DEFAULT_PASS
+    if pass_name and key == DEFAULT_PASS and pass_name.lower() != DEFAULT_PASS:
+        return "Please use letters or numbers in the pass name."
     levels = int(levels)
     if not 1 <= levels <= MAX_LEVELS:
         return f"The number of levels must be between 1 and {MAX_LEVELS}."
     now = time.time()
     with economy._tx() as conn:
-        running = _active(conn)
+        running = _active(conn, key)
         if running is not None:
             s = _season_dict(running)
             return (f"{s['name']} is still running with {s['days_left']} day(s) left. "
-                    f"End it first with /starpassend before starting a new one.")
-        n = conn.execute("SELECT COUNT(*) AS n FROM starpass_season").fetchone()["n"]
-        name = f"Season {int(n) + 1}"
+                    f"End it first with /starpassend (pass_key {key}) before starting a new one.")
+        n = int(conn.execute("SELECT COUNT(*) AS n FROM starpass_season WHERE pass_key = ?",
+                             (key,)).fetchone()["n"])
+        if key == DEFAULT_PASS and not pass_name:
+            name = f"Season {n + 1}"
+        else:
+            name = pass_name[:40] if n == 0 else f"{pass_name[:36]} {n + 1}"
         cur = conn.execute(
-            "INSERT INTO starpass_season (name, levels, start_ts, end_ts, active, created_by) "
-            "VALUES (?, ?, ?, ?, 1, ?)",
-            (name, levels, now, now + DURATIONS[duration_key] * DAY, int(admin_id)),
+            "INSERT INTO starpass_season (name, levels, start_ts, end_ts, active, created_by, "
+            "pass_key, theme, premium_role_id, bonus_credits) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
+            (name, levels, now, now + DURATIONS[duration_key] * DAY, int(admin_id),
+             key, theme, int(premium_role_id) if premium_role_id else None,
+             int(bonus_credits) if bonus_credits is not None else None),
         )
         return _season_dict(conn.execute("SELECT * FROM starpass_season WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-def end_season() -> dict | None:
-    """Stop the running season right now. Returns it, or None if nothing was running."""
+def end_season(pass_key: str = DEFAULT_PASS) -> dict | None:
+    """Stop the running season of one pass right now. Returns it, or None if nothing was running."""
     with economy._tx() as conn:
-        row = _active(conn)
+        row = _active(conn, pass_key)
         if row is None:
             return None
         conn.execute("UPDATE starpass_season SET active = 0 WHERE id = ?", (row["id"],))
@@ -234,27 +339,33 @@ def end_season() -> dict | None:
 
 
 def reopen_season(season_no: int | None = None, days: int | None = None,
-                  replace_running: bool = False) -> dict | str:
+                  replace_running: bool = False, pass_key: str = DEFAULT_PASS) -> dict | str:
     """Admin: bring an ended (or expired) season back. Returns the season dict or an error message.
 
-    season_no        the season number (Season 1 = 1). Empty = the latest season that is not running.
+    season_no        the season number inside this pass (Season 1 = 1). Empty = the latest season
+                     of this pass that is not running.
+    pass_key         which pass (default "star").
     days             run it for this many days from now. Empty = keep the old end time; if that
                      time is already over, `days` is required.
-    replace_running  another season is running right now (for example Season 2): it is paused
-                     (NOT deleted, all its credits/claims stay and it can be reopened later)
-                     and the chosen season takes its place. Only ONE season runs at a time.
+    replace_running  another season of the SAME pass is running right now (for example Season 2):
+                     it is paused (NOT deleted, all its credits/claims stay and it can be reopened
+                     later) and the chosen season takes its place. Only ONE season per pass runs.
     """
     now = time.time()
     with economy._tx() as conn:
         _ensure(conn)
-        running = _active(conn)
+        key = norm_key(pass_key)
+        running = _active(conn, key)
         if season_no is None:
-            q = "SELECT * FROM starpass_season "
+            q = "SELECT * FROM starpass_season WHERE pass_key = ? "
+            args: tuple = (key,)
             if running is not None:
-                q += "WHERE id != %d " % int(running["id"])
-            row = conn.execute(q + "ORDER BY id DESC LIMIT 1").fetchone()
-        else:
-            row = conn.execute("SELECT * FROM starpass_season WHERE id = ?", (int(season_no),)).fetchone()
+                q += "AND id != ? "
+                args = (key, int(running["id"]))
+            row = conn.execute(q + "ORDER BY id DESC LIMIT 1", args).fetchone()
+        else:                                    # the Nth season of this pass
+            row = conn.execute("SELECT * FROM starpass_season WHERE pass_key = ? ORDER BY id LIMIT 1 OFFSET ?",
+                               (key, max(0, int(season_no) - 1))).fetchone()
         if row is None:
             return "I could not find that season."
         if running is not None and int(running["id"]) == int(row["id"]):
@@ -277,8 +388,9 @@ def reopen_season(season_no: int | None = None, days: int | None = None,
 
 # ── Rewards ──────────────────────────────────────────────────────────────────
 
-def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | None = None) -> str | dict:
-    """Admin: change the reward of one level in the running season.
+def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | None = None,
+               pass_key: str = DEFAULT_PASS) -> str | dict:
+    """Admin: change the reward of one level in the running season of a pass.
     Returns the season dict on success or an error message."""
     if row not in ROWS or kind not in KINDS:
         return "Invalid reward."
@@ -290,9 +402,9 @@ def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | 
     if kind == "voucher" and qty > economy.MAX_VOUCHERS:
         return "That is too many vouchers."
     with economy._tx() as conn:
-        season = _active(conn)
+        season = _active(conn, pass_key)
         if season is None:
-            return "There is no Star Pass running right now. Start one with /starpassmaker first."
+            return "That pass is not running right now. Start one with /starpassmaker first."
         if not 1 <= int(level) <= int(season["levels"]):
             return f"This season has levels 1 to {season['levels']}."
         # Admins may change a reward at any time, even after players collected it: those who
@@ -333,11 +445,12 @@ def award_quest_credits(conn, user_id: int, finished_quests: int) -> int:
         n = int(finished_quests)
         if n <= 0:
             return 0
-        season = _active(conn)
-        if season is None:
+        seasons = _active_all(conn)                 # every running pass earns the credits
+        if not seasons:
             return 0
         amount = n * STARPASS_QUEST_CREDITS
-        _add_credits(conn, int(season["id"]), int(user_id), amount)
+        for season in seasons:
+            _add_credits(conn, int(season["id"]), int(user_id), amount)
         return amount
     except Exception as e:                      # a Star Pass problem must never break quests
         print(f"[starpass] could not add quest credits: {type(e).__name__}: {e}")
@@ -358,8 +471,8 @@ def award_ranked_match_credits(user_ids) -> dict:
     day = now.strftime("%Y-%m-%d")
     cutoff = (now - timedelta(days=10)).strftime("%Y-%m-%d")
     with economy._tx() as conn:
-        season = _active(conn)
-        if season is None:
+        seasons = _active_all(conn)                 # every running pass earns the credits
+        if not seasons:
             return out
         conn.execute("DELETE FROM starpass_ranked_daily WHERE day < ?", (cutoff,))
         for uid in {int(u) for u in user_ids if u is not None}:
@@ -378,34 +491,38 @@ def award_ranked_match_credits(user_ids) -> dict:
                 "ON CONFLICT(user_id, day) DO UPDATE SET n = n + 1",
                 (uid, day),
             )
-            _add_credits(conn, int(season["id"]), uid, STARPASS_RANKED_CREDITS)
+            for season in seasons:
+                _add_credits(conn, int(season["id"]), uid, STARPASS_RANKED_CREDITS)
             out[uid] = {"credits": STARPASS_RANKED_CREDITS, "n": n + 1}
     return out
 
 
-def grant_premium_bonus(user_id: int) -> int:
-    """Give the one-time Premium bonus for the running season. Returns the credits given
-    (0 if no season, or the bonus was already given this season)."""
+def grant_premium_bonus(user_id: int, pass_key: str = DEFAULT_PASS) -> int:
+    """Give the one-time Premium bonus for the running season of a pass. Returns the credits
+    given (0 if no season, or the bonus was already given this season)."""
     uid = int(user_id)
     with economy._tx() as conn:
-        season = _active(conn)
+        season = _active(conn, pass_key)
         if season is None:
+            return 0
+        bonus = _season_dict(season)["bonus"]
+        if bonus <= 0:
             return 0
         sid = int(season["id"])
         conn.execute("INSERT OR IGNORE INTO starpass_user (season_id, user_id) VALUES (?, ?)", (sid, uid))
         cur = conn.execute(
             "UPDATE starpass_user SET credits = credits + ?, bonus_given = 1 "
             "WHERE season_id = ? AND user_id = ? AND bonus_given = 0",
-            (PREMIUM_BONUS_CREDITS, sid, uid),
+            (bonus, sid, uid),
         )
-        return PREMIUM_BONUS_CREDITS if cur.rowcount == 1 else 0
+        return bonus if cur.rowcount == 1 else 0
 
 
-def admin_add_credits(user_id: int, amount: int) -> int | None:
-    """Admin helper: add credits in the running season. Returns the new total or None."""
+def admin_add_credits(user_id: int, amount: int, pass_key: str = DEFAULT_PASS) -> int | None:
+    """Admin helper: add credits in the running season of a pass. Returns the new total or None."""
     uid = int(user_id)
     with economy._tx() as conn:
-        season = _active(conn)
+        season = _active(conn, pass_key)
         if season is None:
             return None
         _add_credits(conn, int(season["id"]), uid, int(amount))
@@ -425,11 +542,11 @@ def _state(level: int, row: str, unlocked: int, premium: bool, claimed: set) -> 
     return "ready" if level <= unlocked else "locked"
 
 
-def get_board(user_id: int, premium: bool) -> dict | None:
-    """Everything csstarpass needs for one user, or None when no season is running."""
+def get_board(user_id: int, premium: bool, pass_key: str = DEFAULT_PASS) -> dict | None:
+    """Everything csstarpass needs for one user, or None when that pass is not running."""
     uid = int(user_id)
     with economy._tx() as conn:
-        season = _active(conn)
+        season = _active(conn, pass_key)
         if season is None:
             return None
         sid, total = int(season["id"]), int(season["levels"])
@@ -463,7 +580,8 @@ def get_board(user_id: int, premium: bool) -> dict | None:
 
 # ── Collecting ───────────────────────────────────────────────────────────────
 
-def collect(user_id: int, premium: bool, player_values: dict[str, int] | None = None) -> dict | str:
+def collect(user_id: int, premium: bool, player_values: dict[str, int] | None = None,
+            pass_key: str = DEFAULT_PASS) -> dict | str:
     """Collect every unlocked, not yet collected reward in ONE transaction.
 
     `player_values` = {player_key: coin value} used when the user already owns a card
@@ -475,9 +593,9 @@ def collect(user_id: int, premium: bool, player_values: dict[str, int] | None = 
     uid = int(user_id)
     values = player_values or {}
     with economy._tx() as conn:
-        season = _active(conn)
+        season = _active(conn, pass_key)
         if season is None:
-            return "The Star Pass has ended."
+            return "This Star Pass has ended."
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return "You haven't debuted yet."
         sid, total = int(season["id"]), int(season["levels"])
@@ -514,7 +632,7 @@ def collect(user_id: int, premium: bool, player_values: dict[str, int] | None = 
 
 
 def _pay(conn, uid: int, rw: Reward, level: int, row: str, out: dict, values: dict) -> None:
-    reason = f"Star Pass level {level} ({row})"
+    reason = f"Star Pass level {level} ({row})"      # same text for every pass (old logs stay readable)
     if rw.kind == "coins":
         economy._apply_coins(conn, uid, rw.qty, reason)
         out["coins"] += rw.qty
@@ -546,10 +664,10 @@ def _pay(conn, uid: int, rw: Reward, level: int, row: str, out: dict, values: di
                 out["refund"] += refund
 
 
-def player_keys_in_pass() -> list[str]:
-    """Every player card used as a reward in the running season (for duplicate pricing)."""
+def player_keys_in_pass(pass_key: str = DEFAULT_PASS) -> list[str]:
+    """Every player card used as a reward in the running season of a pass (for duplicate pricing)."""
     with economy._tx() as conn:
-        season = _active(conn)
+        season = _active(conn, pass_key)
         if season is None:
             return []
         return [r["player_key"] for r in conn.execute(

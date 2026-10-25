@@ -14,7 +14,7 @@ import io
 import math
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 import starpass
 
@@ -35,6 +35,23 @@ WHITE, DIM = (240, 244, 255), (135, 150, 190)
 TEAL, GOLD = (47, 191, 155), (244, 196, 82)
 CARD, LINE = (24, 31, 52), (42, 53, 84)
 LOCK_COL = (120, 132, 165)
+
+# ── Themes: the look of a pass (colors only, the layout is the same) ─────────
+# gold = Premium row accent, teal = Free row accent. "default" is the normal Star Pass look.
+THEMES = {
+    "default": dict(bg_top=BG_TOP, bg_bot=BG_BOT, glow1=(110, 70, 230), glow2=(47, 191, 155),
+                    gold=GOLD, teal=TEAL, prem_line=(150, 118, 44), free_line=(52, 100, 120),
+                    prem_bg=(44, 36, 20), free_bg=(18, 44, 50), pill_bg=(70, 52, 18), star_hi=(255, 226, 130)),
+    "halloween": dict(bg_top=(16, 8, 24), bg_bot=(34, 14, 30), glow1=(255, 120, 20), glow2=(130, 60, 220),
+                      gold=(255, 140, 38), teal=(170, 112, 255), prem_line=(170, 92, 28), free_line=(92, 62, 150),
+                      prem_bg=(52, 28, 14), free_bg=(32, 20, 52), pill_bg=(72, 38, 12), star_hi=(255, 190, 110)),
+    "diwali": dict(bg_top=(22, 10, 30), bg_bot=(44, 16, 40), glow1=(255, 170, 40), glow2=(255, 70, 130),
+                   gold=(255, 196, 66), teal=(255, 100, 140), prem_line=(170, 128, 40), free_line=(150, 56, 90),
+                   prem_bg=(52, 38, 14), free_bg=(48, 20, 38), pill_bg=(74, 52, 12), star_hi=(255, 226, 130)),
+    "christmas": dict(bg_top=(22, 8, 12), bg_bot=(10, 28, 22), glow1=(220, 50, 60), glow2=(60, 190, 110),
+                      gold=(240, 200, 92), teal=(80, 205, 120), prem_line=(150, 120, 50), free_line=(48, 112, 78),
+                      prem_bg=(46, 36, 20), free_bg=(16, 44, 34), pill_bg=(70, 52, 18), star_hi=(255, 236, 170)),
+}
 
 K = 4                                      # icons are drawn 4x and scaled down (smooth edges)
 
@@ -306,6 +323,38 @@ def _tick(d, cx, cy, s, col, w=4):
     d.line([(cx - s, cy), (cx - s * 0.3, cy + s * 0.7), (cx + s, cy - s * 0.7)], fill=col, width=w, joint="curve")
 
 
+def prepare_background(raw: bytes) -> bytes:
+    """Admin upload -> the stored background: cropped to the Star Pass size, saved as JPEG.
+    Raises ValueError with a readable message when the file is not a usable image."""
+    if len(raw) > starpass.MAX_BG_BYTES:
+        raise ValueError("That image is too big (max 8 MB).")
+    try:
+        im = Image.open(io.BytesIO(raw))
+        im.load()
+    except Exception:
+        raise ValueError("I could not read that file. Please upload a PNG or JPG image.")
+    if im.width < 600 or im.height < 300:
+        raise ValueError("That image is too small. Use at least 1400 x 930 pixels for a sharp background.")
+    im = ImageOps.exif_transpose(im).convert("RGB")
+    im = ImageOps.fit(im, (W, H), method=Image.LANCZOS, centering=(0.5, 0.5))
+    out = io.BytesIO()
+    im.save(out, format="JPEG", quality=90)
+    return out.getvalue()
+
+
+def _custom_background(pass_key: str):
+    """The saved background as an RGBA image of size (W, H), or None."""
+    try:
+        raw = starpass.get_background(pass_key)
+        if not raw:
+            return None
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        return ImageOps.fit(im, (W, H), method=Image.LANCZOS).convert("RGBA")
+    except Exception as e:                      # a bad background must never break the Star Pass
+        print(f"[starpass] background could not be loaded: {type(e).__name__}: {e}")
+        return None
+
+
 def _time_left(season: dict) -> tuple[str, str]:
     left = int(season["seconds_left"])
     if left >= starpass.DAY:
@@ -319,6 +368,9 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
     import card_db
 
     season = board["season"]
+    th = THEMES.get(season.get("theme") or "default", THEMES["default"])
+    BG_TOP, BG_BOT, GOLD, TEAL = th["bg_top"], th["bg_bot"], th["gold"], th["teal"]   # this pass' colors
+    main_pass = season.get("pass_key", starpass.DEFAULT_PASS) == starpass.DEFAULT_PASS
     pages = starpass.page_ranges(season["levels"])
     page = max(0, min(int(page), len(pages) - 1))
     first, last = pages[page]
@@ -341,21 +393,38 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
     for y in range(H):
         t = y / (H - 1)
         d.line([(0, y), (W, y)], fill=tuple(int(BG_TOP[i] + (BG_BOT[i] - BG_TOP[i]) * t) for i in range(3)))
-    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    gd.ellipse((-200, -250, 520, 300), fill=(110, 70, 230, 60))
-    gd.ellipse((900, -300, 1600, 260), fill=(47, 191, 155, 45))
-    img = Image.alpha_composite(img.convert("RGBA"), glow.filter(ImageFilter.GaussianBlur(90)))
+    bg = _custom_background(season.get("pass_key", starpass.DEFAULT_PASS))
+    if bg is not None:                          # own background: darken it so text and cards stay readable
+        img = Image.alpha_composite(bg, Image.new("RGBA", (W, H), (6, 8, 18, 115)))
+    else:
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gd = ImageDraw.Draw(glow)
+        gd.ellipse((-200, -250, 520, 300), fill=th["glow1"] + (60,))
+        gd.ellipse((900, -300, 1600, 260), fill=th["glow2"] + (45,))
+        img = Image.alpha_composite(img.convert("RGBA"), glow.filter(ImageFilter.GaussianBlur(90)))
     d = ImageDraw.Draw(img)
 
-    # header
-    d.rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, fill=CARD, outline=LINE, width=2)
+    # header (a little see-through on a custom background)
+    if bg is not None:
+        hl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(hl).rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, fill=CARD + (215,))
+        img = Image.alpha_composite(img, hl)
+        d = ImageDraw.Draw(img)
+        d.rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, outline=LINE, width=2)
+    else:
+        d.rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, fill=CARD, outline=LINE, width=2)
     d.polygon(_star(82, 84, 34, 14), fill=GOLD)
-    d.polygon(_star(82, 84, 26, 10), fill=(255, 226, 130))
-    _spaced(d, (135, 38), "STAR PASS", _f(_NUM, 62), WHITE, 5)
-    d.text((137, 112), season["name"].upper(), font=_f(_LAB, 24), fill=DIM)
+    d.polygon(_star(82, 84, 26, 10), fill=th["star_hi"])
+    if main_pass:
+        _spaced(d, (135, 38), "STAR PASS", _f(_NUM, 62), WHITE, 5)
+        d.text((137, 112), season["name"].upper(), font=_f(_LAB, 24), fill=DIM)
+    else:                                       # event pass: its own name is the title
+        title = season["name"].upper()
+        tf = _fit_font(_NUM, title, 280 - 5 * max(0, len(title) - 1), 62, 26)
+        _spaced(d, (135, 38 + (62 - getattr(tf, "size", 62)) // 2), title, tf, WHITE, 5)
+        d.text((137, 112), "STAR PASS EVENT", font=_f(_LAB, 24), fill=DIM)
     if premium:
-        d.rounded_rectangle((137, 150, 300, 188), radius=19, fill=(70, 52, 18), outline=GOLD, width=2)
+        d.rounded_rectangle((137, 150, 300, 188), radius=19, fill=th["pill_bg"], outline=GOLD, width=2)
         _spaced(d, (218, 158), "PREMIUM", _f(_NUM, 22), GOLD, 3, "m")
     else:
         d.rounded_rectangle((137, 150, 300, 188), radius=19, fill=(30, 40, 64), outline=(70, 84, 120), width=2)
@@ -393,7 +462,7 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
         rw = entry[row]["reward"]
         st = entry[row]["state"]
         prem_row = row == starpass.PREMIUM
-        base_line = (150, 118, 44) if prem_row else (52, 100, 120)
+        base_line = th["prem_line"] if prem_row else th["free_line"]
         base_fill = (34, 30, 38) if prem_row else (22, 34, 52)
         accent = GOLD if prem_row else TEAL
         ready = st == "ready"
@@ -429,7 +498,7 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
         d.text((x + cw / 2, y + PH - 26), label, font=font, fill=col, anchor="mm")
 
         tag = {"ready": "READY", "claimed": "CLAIMED", "locked": "LOCKED", "premium_locked": "PREMIUM ONLY"}[st]
-        tc = {"ready": accent, "claimed": (110, 200, 150), "locked": (95, 108, 140), "premium_locked": (150, 118, 44)}[st]
+        tc = {"ready": accent, "claimed": (110, 200, 150), "locked": (95, 108, 140), "premium_locked": th["prem_line"]}[st]
         _spaced(d, (x + cw / 2, y + 12), tag, _f(_LAB, 16 if cw >= 170 else 14), tc, 3, "m")
         if st in ("locked", "premium_locked"):
             _lock(d, x + cw - 26, y + 80, 11, LOCK_COL, base_fill)
@@ -471,8 +540,8 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
         rot = tmp.rotate(90, expand=True)
         img.paste(rot, (PAD + (X0 - 14 - PAD - 70) // 2, y), rot)
 
-    side(PY, "PREMIUM", GOLD, (44, 36, 20))
-    side(FY, "FREE", TEAL, (18, 44, 50))
+    side(PY, "PREMIUM", GOLD, th["prem_bg"])
+    side(FY, "FREE", TEAL, th["free_bg"])
     d = ImageDraw.Draw(img)
 
     fy = FY + PH + 16
