@@ -95,6 +95,7 @@ _NEW_CARD_COLUMNS = [
     ("s2_name_color", "TEXT"),      # Style 2 only: display-name colour (red/blue/yellow/pink/green/orange), NULL = default cream
     ("s2_line_color", "TEXT"),      # Style 2 only: colour of the line under the name (black/white/blue), NULL = default cream
     ("s2_fade_legs", "INTEGER"),    # Style 2 only: 1 = player image fades out above the name (legs/shorts hidden), NULL/0 = full image
+    ("s2_theme",  "TEXT"),         # Style 2 only: NULL = normal purple card, "halloween" = Halloween frame + orange/bone text
     # ── Events (set with /cardmaker and /editcard, events made with /eventmaker) ──
     ("event_key",  "TEXT"),                              # NULL = normal card, else events.event_key
     ("obtainable", "INTEGER NOT NULL DEFAULT 1"),       # 1 = packs / claims / draft / shop, 0 = manual only (Star Pass, admin give)
@@ -290,6 +291,7 @@ def clone_card(
     obtainable: bool,
     created_by: int,
     displayname: str | None = None,
+    theme: str | None = None,
 ) -> str | None:
     """Make a new card from an existing one (used by /eventplayermaker).
 
@@ -320,6 +322,7 @@ def clone_card(
             "obtainable": 1 if obtainable else 0,
             "player_group": src["player_group"] or src["playername_key"],
             "image_path": None, "extra_stats": None,
+            "s2_theme": theme if theme in CARD_THEMES else None,   # never inherited from the source card
             "created_by": created_by, "created_at": now, "updated_at": now,
         })
         names = [n for n in values if n in cols]
@@ -638,6 +641,7 @@ def set_card_obtainable(playername: str, obtainable: bool) -> bool:
 # ── Style 2 card design: style switch + extra stats ──────────────────────
 
 CARD_STYLES = ("classic", "style2")
+CARD_THEMES = ("halloween",)      # Style 2 themes (NULL in the database = normal card)
 
 
 def set_card_style(playername: str, style: str) -> bool:
@@ -654,7 +658,7 @@ def set_card_style(playername: str, style: str) -> bool:
 
 
 def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET, transparent=_UNSET, fade_legs=_UNSET,
-                       name_color=_UNSET, line_color=_UNSET) -> bool:
+                       name_color=_UNSET, line_color=_UNSET, theme=_UNSET) -> bool:
     """Style 2 extras. bg: backgrounds.pathname or None (= built-in purple).
     icon: "gold", "bronze" or None. fade_legs: True = the player cutout fades out above
     the name so legs / shorts do not show behind the name and stats, False/None = full image.
@@ -662,6 +666,9 @@ def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET, transparent=_UNS
     if get_card(playername) is None:
         return False
     sets, vals = [], []
+    if theme is not _UNSET:
+        sets.append("s2_theme = ?")
+        vals.append(theme if theme in CARD_THEMES else None)    # None / "default" = normal card
     if name_color is not _UNSET:
         sets.append("s2_name_color = ?")
         vals.append(name_color)

@@ -67,6 +67,62 @@ LINE_COLORS = {
 
 ROLE_WORD = {"BAT": "BAT", "BOWL": "BOWL", "AR": "AR", "WK": "WK"}
 
+# ── Themes (card_db column s2_theme; NULL = the normal purple card) ──────
+# A theme brings its own frame image (replaces the purple shield + gold border) and its own
+# text colours. Set it with `theme:` in /cardmaker, /eventplayermaker, /editcard or /cardstats.
+# To add another theme later: drop its frame PNG next to this file and add an entry here.
+THEMES = {
+    "halloween": {
+        "frame": "halloween_frame.png",          # 1037 x 1517 PNG, transparent outside the frame
+        # inner art area of the frame as (x%, y%) points: the player and the dark fades are
+        # clipped to it, so they never cover the frame border.
+        "inner": [(10, 12.5), (40, 6.8), (50, 11), (60, 6.8), (90, 12.5), (90, 80),
+                  (80, 85.5), (60, 90), (50, 88), (40, 90), (20, 85.5), (10, 80)],
+        "num":     (255, 146, 28, 255),          # ovr + the 6 stat numbers: pumpkin orange
+        "label":   (247, 236, 208, 255),         # role word, stat labels, country text: bone white
+        "name":    (247, 236, 208, 255),         # display name
+        "line":    (255, 146, 28, 255),          # lines
+        "outline": (20, 4, 30),                  # dark outline round all text
+        "glow":    (255, 90, 0),                 # soft glow behind ovr + name
+        "stat_ys": [1160, 1262, 1364],           # stat rows sit a little higher than the normal card,
+        "stat_size": 100,                        # so they stay clear of the frame's bottom corners
+        "stat_line": (1130, 1395),
+        "bottom_line": False,                    # the frame has a gem where the small bottom line would be
+    },
+}
+
+
+def _card_theme(card_row) -> str | None:
+    key = str(ci._col(card_row, "s2_theme", "") or "").strip().lower()
+    return key if key in THEMES else None
+
+
+_THEME_CACHE: dict = {}
+
+
+def _theme_static(key: str) -> dict | None:
+    """Frame image, clip masks and the clipped dark fade of a theme, built once. None if the
+    frame file is missing (the card is then drawn as a normal card, never a crash)."""
+    with _STATIC_LOCK:
+        hit = _THEME_CACHE.get(key)
+        if hit is not None:
+            return hit
+        try:
+            cfg = THEMES[key]
+            frame = Image.open(Path(__file__).with_name(cfg["frame"])).convert("RGBA")
+            frame = frame.resize((CW, CH), Image.LANCZOS)
+            alpha = frame.getchannel("A")
+            inner = Image.new("L", (CW, CH), 0)
+            ImageDraw.Draw(inner).polygon(
+                [(int(px / 100 * CW), int(py / 100 * CH)) for px, py in cfg["inner"]], fill=255)
+            inner = inner.filter(ImageFilter.GaussianBlur(S))          # soft 1px edge
+            shade = ImageChops.multiply(_static_nolock()["shade"], inner)
+            hit = {"frame": frame, "alpha": alpha, "inner": inner, "shade": shade}
+        except Exception:
+            return None
+        _THEME_CACHE[key] = hit
+        return hit
+
 
 # ── Small helpers ────────────────────────────────────────────────────────
 
@@ -177,11 +233,16 @@ def _build_static() -> dict:
     return {"mask": mask, "bg": bg_rgb, "shade": shade, "border": border}
 
 
+def _static_nolock() -> dict:
+    """Same as _static() but for callers that already hold _STATIC_LOCK."""
+    if not _STATIC:
+        _STATIC.update(_build_static())
+    return _STATIC
+
+
 def _static() -> dict:
     with _STATIC_LOCK:
-        if not _STATIC:
-            _STATIC.update(_build_static())
-        return _STATIC
+        return _static_nolock()
 
 
 
@@ -243,6 +304,21 @@ def _draw_medal_icon(canvas: Image.Image, cx: float, cy: float, r: float, kind: 
     d.polygon([gem[2], gem[3], _p(cx, cy)], fill=shadow)    # shadow facet
 
 
+def _glow_text(canvas: Image.Image, xy, text: str, font, anchor: str, rgb, radius: float = 9) -> None:
+    """Soft coloured glow behind a piece of text (small layer only, so it stays fast)."""
+    try:
+        x0, y0, x1, y1 = ImageDraw.Draw(canvas).textbbox(xy, text, font=font, anchor=anchor)
+        pad = int(radius * S * 3)
+        box = (int(x0) - pad, int(y0) - pad, int(x1) + pad, int(y1) + pad)
+        layer = Image.new("L", (box[2] - box[0], box[3] - box[1]), 0)
+        ImageDraw.Draw(layer).text((xy[0] - box[0], xy[1] - box[1]), text, font=font, fill=255,
+                                   anchor=anchor, stroke_width=S * 2)
+        layer = layer.filter(ImageFilter.GaussianBlur(radius * S)).point(lambda v: int(v * 0.85))
+        canvas.paste(tuple(rgb) + (255,), (box[0], box[1]), layer)
+    except Exception:
+        pass   # a glow is decoration only
+
+
 # ── Per-card drawing ─────────────────────────────────────────────────────
 
 def _draw_player(canvas: Image.Image, card_row, fg) -> None:
@@ -279,23 +355,37 @@ def _draw_player(canvas: Image.Image, card_row, fg) -> None:
         pass   # a bad cutout must never stop the card
 
 
-def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, role: str) -> None:
+def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, role: str, th: dict | None = None) -> None:
     cx = 372
+    num_c = th["num"] if th else CREAM          # ovr number
+    lab_c = th["label"] if th else CREAM        # role word, country text
+    line_c = th["line"] if th else CREAM
+    outline = th["outline"] if th else None
     # OVR number
     try:
         text = str(card_row["ovr"])
         font = _fit_font(draw, text, 250, 190)
-        draw.text(_p(cx, 365), text, font=font, fill=CREAM, anchor="mm")
+        if th:
+            _glow_text(canvas, _p(cx, 365), text, font, "mm", th["glow"], 10)
+            draw = ImageDraw.Draw(canvas)
+            draw.text(_p(cx, 365), text, font=font, fill=num_c, anchor="mm",
+                      stroke_width=S * 2, stroke_fill=outline)
+        else:
+            draw.text(_p(cx, 365), text, font=font, fill=CREAM, anchor="mm")
     except Exception:
         pass
     # Role word
     try:
         word = ROLE_WORD.get(role, role)
         font = _fit_font(draw, word, 110, 190)
-        draw.text(_p(cx, 500), word, font=font, fill=CREAM, anchor="mm")
+        if th:
+            draw.text(_p(cx, 500), word, font=font, fill=lab_c, anchor="mm",
+                      stroke_width=S * 2, stroke_fill=outline)
+        else:
+            draw.text(_p(cx, 500), word, font=font, fill=CREAM, anchor="mm")
     except Exception:
         pass
-    _line(draw, 322, 558, 424, 558)
+    _line(draw, 322, 558, 424, 558, color=line_c)
 
     # Flag (or the country name in small text if there is no flag)
     flag_done = False
@@ -311,10 +401,10 @@ def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, 
             country = str(ci._col(card_row, "country", "")).upper()
             if country:
                 font = _fit_font(draw, country, 44, 170)
-                draw.text(_p(371, 633), country, font=font, fill=CREAM, anchor="mm")
+                draw.text(_p(371, 633), country, font=font, fill=lab_c, anchor="mm")
         except Exception:
             pass
-    _line(draw, 322, 712, 424, 712)
+    _line(draw, 322, 712, 424, 712, color=line_c)
 
     # Playstyle logos (slot 1, then slot 2). No logo = nothing drawn.
     logos = []
@@ -348,30 +438,74 @@ def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, 
             pass
 
 
-def _draw_name_and_stats(draw: ImageDraw.ImageDraw, card_row) -> None:
+def _draw_name_and_stats(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, th: dict | None = None) -> None:
     # Name
     try:
         name = str(card_row["displayname"]).upper()
         font = _fit_font(draw, name, 150, 640)
-        name_fill = NAME_COLORS.get(str(ci._col(card_row, "s2_name_color", "")).lower(), CREAM)
+        default_name = th["name"] if th else CREAM
+        name_fill = NAME_COLORS.get(str(ci._col(card_row, "s2_name_color", "")).lower(), default_name)
+        if th:
+            _glow_text(canvas, _p(640, 1045), name, font, "ms", th["glow"], 10)
+            draw = ImageDraw.Draw(canvas)
         draw.text(_p(640, 1045), name, font=font, fill=name_fill, anchor="ms",
-                  stroke_width=max(2, round(font.size * 0.05)), stroke_fill=(0, 0, 0))
+                  stroke_width=max(2, round(font.size * 0.05)),
+                  stroke_fill=th["outline"] if th else (0, 0, 0))
     except Exception:
         pass
-    line_fill = LINE_COLORS.get(str(ci._col(card_row, "s2_line_color", "")).lower(), CREAM)
+    default_line = th["line"] if th else CREAM
+    line_fill = LINE_COLORS.get(str(ci._col(card_row, "s2_line_color", "")).lower(), default_line)
     _line(draw, 303, 1097, 998, 1097, color=line_fill)
 
     # 6-stat grid. Numbers are right-aligned so 3-digit values never touch the label.
-    font = _lfont(112)
+    font = _lfont(th["stat_size"] if th else 112)
     rows = card_stat_rows(card_row)
-    ys = [1190, 1302, 1415]
+    ys = th["stat_ys"] if th else [1190, 1302, 1415]
+    num_c = th["num"] if th else CREAM
+    lab_c = th["label"] if th else CREAM
+    sk = {"stroke_width": S * 2, "stroke_fill": th["outline"]} if th else {}
     for i, (label, value) in enumerate(rows[:6]):
         col, y = i // 3, ys[i % 3]
         num_x, lab_x = (400, 420) if col == 0 else (850, 870)
-        draw.text(_p(num_x, y), str(value), font=font, fill=CREAM, anchor="rm")
-        draw.text(_p(lab_x, y), label, font=font, fill=CREAM, anchor="lm")
-    _line(draw, 646, 1143, 646, 1448)
-    _line(draw, 573, 1495, 721, 1495)
+        draw.text(_p(num_x, y), str(value), font=font, fill=num_c, anchor="rm", **sk)
+        draw.text(_p(lab_x, y), label, font=font, fill=lab_c, anchor="lm", **sk)
+    if th:
+        _line(draw, 646, th["stat_line"][0], 646, th["stat_line"][1], color=(176, 122, 92, 255))
+        if th.get("bottom_line"):
+            _line(draw, 573, 1495, 721, 1495, color=th["line"])
+    else:
+        _line(draw, 646, 1143, 646, 1448)
+        _line(draw, 573, 1495, 721, 1495)
+
+
+def _build_themed(card_row, fg_image, role: str, key: str, ts: dict) -> io.BytesIO:
+    """Style 2 card with a theme: the theme frame replaces the purple shield + gold border."""
+    th = THEMES[key]
+    canvas = ts["frame"].copy()
+
+    tmp = canvas.copy()                                  # player drawn on a copy, then clipped to the art area
+    _draw_player(tmp, card_row, fg_image)
+    canvas.paste(tmp, (0, 0), ts["inner"])
+    del tmp
+
+    canvas.paste(SHADE + (255,), (0, 0), ts["shade"])    # dark fades, only inside the art area
+
+    draw = ImageDraw.Draw(canvas)
+    _draw_left_column(canvas, draw, card_row, role, th)
+    _draw_name_and_stats(canvas, ImageDraw.Draw(canvas), card_row, th)
+
+    solid = Image.new("RGB", canvas.size, NAVY)
+    solid.paste(canvas.convert("RGB"), (0, 0), ts["alpha"])
+    del canvas
+    solid = solid.resize((OUT_W, OUT_H), Image.LANCZOS)
+    alpha = ts["alpha"].resize((OUT_W, OUT_H), Image.LANCZOS)
+    out = solid.convert("RGBA")
+    out.putalpha(alpha)
+    del solid
+    buf = io.BytesIO()
+    out.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 
 def build_card_style2(card_row, fg_image) -> io.BytesIO:
@@ -380,6 +514,13 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
 
     static = _static()
     role = effective_role(card_row)
+
+    theme_key = _card_theme(card_row)
+    if theme_key:
+        ts = _theme_static(theme_key)
+        if ts is not None:                               # frame missing -> falls through to the normal card
+            with _RENDER_LOCK:
+                return _build_themed(card_row, fg_image, role, theme_key, ts)
 
     with _RENDER_LOCK:
         canvas = (_custom_bg(card_row) or static["bg"]).convert("RGBA")
@@ -390,7 +531,7 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
 
         draw = ImageDraw.Draw(canvas)
         _draw_left_column(canvas, draw, card_row, role)
-        _draw_name_and_stats(draw, card_row)
+        _draw_name_and_stats(canvas, draw, card_row)
 
         # Gold border, then clip to the shield. Pixels outside the shield get an
         # RGB of NAVY, so code that flattens to RGB shows navy and not pure black.

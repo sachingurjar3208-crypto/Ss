@@ -26,6 +26,11 @@ from cardmaker_cog import (
     _regenerate_and_send,
 )
 
+THEME_CHOICES = [
+    app_commands.Choice(name="Normal (purple)", value="default"),
+    app_commands.Choice(name="Halloween 🎃", value="halloween"),
+]
+
 STYLE_CHOICES = [
     app_commands.Choice(name="Style 2 (new design)", value="style2"),
     app_commands.Choice(name="Classic (old design)", value="classic"),
@@ -95,6 +100,7 @@ class CardStatsCog(commands.Cog):
         transparency="Style 2: On = player image fades out above the name (legs/shorts hidden), Off = full image",
         namecolor="Style 2: colour of the display name (red/blue/yellow/pink/green/orange)",
         linecolor="Style 2: colour of the line under the display name (black/white/blue)",
+        theme="Style 2 theme: Halloween = Halloween frame + orange text. Normal = back to purple",
         pwr="Power hitting (batter / all-rounder / keeper)",
         run="Running between wickets (batter / keeper)",
         tim="Timing (batter)",
@@ -111,7 +117,8 @@ class CardStatsCog(commands.Cog):
         ctl="Control (spinner)",
     )
     @app_commands.choices(style=STYLE_CHOICES, icon=ICON_CHOICES, transparency=TRANSPARENCY_CHOICES,
-                      namecolor=NAME_COLOR_CHOICES, linecolor=LINE_COLOR_CHOICES)
+                      namecolor=NAME_COLOR_CHOICES, linecolor=LINE_COLOR_CHOICES,
+                      theme=THEME_CHOICES)
     @app_commands.autocomplete(player=playername_autocomplete, background=background_autocomplete)
     @is_owner()
     async def cardstats(
@@ -124,6 +131,7 @@ class CardStatsCog(commands.Cog):
         transparency: app_commands.Choice[str] | None = None,
         namecolor: app_commands.Choice[str] | None = None,
         linecolor: app_commands.Choice[str] | None = None,
+        theme: app_commands.Choice[str] | None = None,
         pwr: Stat | None = None,
         run: Stat | None = None,
         tim: Stat | None = None,
@@ -193,9 +201,15 @@ class CardStatsCog(commands.Cog):
             set_style2_options(player, line_color=None if linecolor.value == "default" else linecolor.value)
             bg_note = (bg_note + " • " if bg_note else "") + f"Line colour: {linecolor.name}"
 
+        if theme is not None:
+            set_style2_options(player, theme=None if theme.value == "default" else theme.value)
+            bg_note = (bg_note + " • " if bg_note else "") + f"Theme: {theme.name}"
+
         if to_save:
             set_extra_stats(player, to_save)
         chosen_style = style.value if style is not None else "style2"
+        if theme is not None and theme.value == "halloween":
+            chosen_style = "style2"                      # Halloween only exists in Style 2
         set_card_style(player, chosen_style)
 
         # Redraw the card and post it.

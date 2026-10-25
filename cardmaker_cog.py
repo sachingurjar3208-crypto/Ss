@@ -86,6 +86,26 @@ NARRATIVE_CHOICES = [app_commands.Choice(name=n, value=n) for n in NARRATIVE_NAM
 # /editcard only: lets you clear a narrative slot.
 NARRATIVE_CHOICES_EDIT = NARRATIVE_CHOICES + [app_commands.Choice(name="None (remove)", value="NONE")]
 
+# Card theme (Style 2). Halloween = Halloween frame + orange / bone-white text. It always uses the
+# Style 2 design, and it brings its own frame, so the `background` you pick is not shown on it.
+THEME_CHOICES = [
+    app_commands.Choice(name="Normal", value="default"),
+    app_commands.Choice(name="Halloween 🎃", value="halloween"),
+]
+THEME_HELP = "Card theme. Halloween = Halloween frame + orange text (uses the Style 2 design)"
+
+
+def _apply_theme(playername: str, theme) -> None:
+    """Switch a card to a theme. Halloween forces Style 2; Normal only clears the theme."""
+    if theme is None:
+        return
+    if theme.value == "halloween":
+        set_card_style(playername, "style2")
+        set_style2_options(playername, theme="halloween")
+    else:
+        set_style2_options(playername, theme=None)
+
+
 TARGET_CHOICES = [
     app_commands.Choice(name="Both logos", value="both"),
     app_commands.Choice(name="Logo 1 only", value="1"),
@@ -333,11 +353,12 @@ class CardMakerCog(commands.Cog):
         event="Event of this card (from /eventmaker). Its emoji shows in the XI. Empty = normal card",
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand. Default True",
         player="Real player this card belongs to, e.g. Virat Kohli. Many cards can share it; XI takes only one. Empty = same as playername",
+        theme=THEME_HELP,
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
         narrative1=NARRATIVE_CHOICES, narrative2=NARRATIVE_CHOICES,
-        bowlingtype=BOWLTYPE_CHOICES,
+        bowlingtype=BOWLTYPE_CHOICES, theme=THEME_CHOICES,
     )
     @app_commands.autocomplete(background=background_autocomplete, countryflag=country_autocomplete,
                                event=event_autocomplete)
@@ -361,6 +382,7 @@ class CardMakerCog(commands.Cog):
         event: str | None = None,
         obtainable: bool = True,
         player: str | None = None,
+        theme: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer()
 
@@ -413,6 +435,7 @@ class CardMakerCog(commands.Cog):
             obtainable=obtainable,
             player_group=player,
         )
+        _apply_theme(playername, theme)
 
         try:
             await _regenerate_and_send(interaction, playername, "✅ Card created")
@@ -444,11 +467,12 @@ class CardMakerCog(commands.Cog):
         eventname="Event of this card (from /eventmaker). Its emoji shows in the XI",
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand. Default True",
         displayname="Short name shown big in the card corner. Empty = same as the copied card",
+        theme=THEME_HELP,
     )
     @app_commands.choices(design=[
         app_commands.Choice(name="Old design (Classic)", value="classic"),
         app_commands.Choice(name="New design (Style 2)", value="style2"),
-    ])
+    ], theme=THEME_CHOICES)
     @app_commands.autocomplete(foreground=playername_autocomplete, background=background_autocomplete,
                                eventname=event_autocomplete)
     @is_owner()
@@ -465,6 +489,7 @@ class CardMakerCog(commands.Cog):
         eventname: str,
         obtainable: bool = True,
         displayname: str | None = None,
+        theme: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer()
 
@@ -497,11 +522,14 @@ class CardMakerCog(commands.Cog):
             await interaction.followup.send(f"❌ Unknown background `{background}`.\nAvailable: {hint}")
             return
 
+        halloween = theme is not None and theme.value == "halloween"
         err = await asyncio.to_thread(
             clone_card, src["playername"], playername,
-            ovr=ovr, bat=bat, bowl=bowl, background=bg["pathname"], style=design,
+            ovr=ovr, bat=bat, bowl=bowl, background=bg["pathname"],
+            style="style2" if halloween else design,          # Halloween is always Style 2
             event_key=event_row["event_key"], obtainable=obtainable,
             created_by=interaction.user.id, displayname=displayname,
+            theme="halloween" if halloween else None,
         )
         if err:
             reason = {
@@ -544,11 +572,12 @@ class CardMakerCog(commands.Cog):
         panel="Stats-panel overlay image (added via /paneladder) — type none to remove",
         event="Event of this card (from /eventmaker) — type none to remove it from its event",
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand",
+        theme="Card theme. Halloween = Halloween frame + orange text. Normal = back to purple",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
         narrative1=NARRATIVE_CHOICES_EDIT, narrative2=NARRATIVE_CHOICES_EDIT,
-        bowlingtype=BOWLTYPE_CHOICES,
+        bowlingtype=BOWLTYPE_CHOICES, theme=THEME_CHOICES,
     )
     @app_commands.autocomplete(
         playername=playername_autocomplete,
@@ -577,6 +606,7 @@ class CardMakerCog(commands.Cog):
         panel: str | None = None,
         event: str | None = None,
         obtainable: bool | None = None,
+        theme: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer()
 
@@ -661,7 +691,7 @@ class CardMakerCog(commands.Cog):
                 new_event_key = erow["event_key"]
 
         if (not updates and not slot_updates and not panel_update_pending
-                and not event_update_pending and obtainable is None):
+                and not event_update_pending and obtainable is None and theme is None):
             await interaction.followup.send("❌ Nothing to change — give at least one field besides playername.")
             return
 
@@ -687,6 +717,7 @@ class CardMakerCog(commands.Cog):
             set_card_event(playername, new_event_key)
         if obtainable is not None:
             set_card_obtainable(playername, obtainable)
+        _apply_theme(playername, theme)
 
         try:
             await _regenerate_and_send(interaction, playername, "✏️ Card updated")
