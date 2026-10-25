@@ -133,3 +133,22 @@ LEFT-HAND BATTER: MIRRORED SHOTS v6
   practice_views.py  Same grid mirroring for practice mode.
   Unchanged        RHB behaves exactly as before. Fielders still stand at fixed ground spots;
                    field editor / formations are not changed.
+
+DRAFT EVENTS (Halloween Draft ...) - same idea as the Star Pass seasons
+=======================================================================
+  draft_event.py   NEW. Event drafts: own timer, theme, background image, Pool A / B cards,
+                   Pool A chance, guarantee counter and Pool C OVR range. Runs NEXT TO the normal
+                   draft (key "main"). Vouchers are shared.
+  draft_cog.py     csdraft halloween / cshalloweendraft open an event draft. While an event runs a
+                   "Switch draft" dropdown appears under the image. Admin slash commands:
+                   /draftmaker  /draftbg  /draftend  /draftreopen.
+                   /pool add | remove | list got an optional `event` option (empty = normal draft).
+                   csvoucher check also shows the event counters.
+  draft_image.py   Themes (default, halloween, diwali, christmas), custom 1280x720 background,
+                   event title + "ENDS IN" timer. The normal draft looks exactly as before.
+  economy.py       4 new tables (created automatically), draft_spin(event_id=...) checks that the
+                   event is still running INSIDE the transaction and keeps a separate Pool A counter
+                   per event run. Full user reset also clears event counters.
+  How to start     /draftmaker event_name:Halloween Draft duration:7D theme:Halloween background:<image>
+                   /pool add pool:A player:<card> chance:30 event:halloween
+                   players: csdraft halloween

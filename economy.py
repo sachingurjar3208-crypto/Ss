@@ -1085,6 +1085,31 @@ def _ensure_draft_tables(conn: sqlite3.Connection) -> None:
         "player_key TEXT PRIMARY KEY, pool TEXT NOT NULL CHECK (pool IN ('A','B')), "
         "weight REAL NOT NULL CHECK (weight > 0))"
     )
+    # Draft events (Halloween Draft ...): see draft_event.py
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS draft_event ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, event_key TEXT NOT NULL, name TEXT NOT NULL, "
+        "theme TEXT NOT NULL DEFAULT 'default', start_ts REAL NOT NULL, end_ts REAL NOT NULL, "
+        "active INTEGER NOT NULL DEFAULT 1, created_by INTEGER NOT NULL DEFAULT 0, "
+        "pity_every INTEGER NOT NULL DEFAULT 50, odds_a REAL NOT NULL DEFAULT 3, "
+        "c_min INTEGER NOT NULL DEFAULT 60, c_max INTEGER NOT NULL DEFAULT 79)"
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_draft_event_key ON draft_event (event_key, id)")
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS draft_event_bg ("
+        "event_key TEXT PRIMARY KEY, data BLOB NOT NULL, ts REAL NOT NULL)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS draft_event_cards ("
+        "event_key TEXT NOT NULL, player_key TEXT NOT NULL, "
+        "pool TEXT NOT NULL CHECK (pool IN ('A','B')), weight REAL NOT NULL CHECK (weight > 0), "
+        "PRIMARY KEY (event_key, player_key))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS draft_event_pity ("
+        "event_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+        "since_a INTEGER NOT NULL DEFAULT 0 CHECK (since_a >= 0), PRIMARY KEY (event_id, user_id))"
+    )
 
 
 def ensure_draft_tables() -> None:
@@ -1202,7 +1227,8 @@ def get_draft_pity(user_id) -> int:
         conn.close()
 
 
-def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_value_fn) -> dict | str:
+def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_value_fn,
+               event_id: int | None = None) -> dict | str:
     """Run `count` drafts in ONE transaction. Returns a dict or an error text.
 
     roll_fn(force_a: bool) -> (pool_letter, player_key) | None   (picks one card)
@@ -1212,6 +1238,9 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
     is a guaranteed Pool A card. Any Pool A card (lucky or guaranteed) resets it.
     Result: {"results": [{"pool","key","status","refund"}], "refund": n,
              "vouchers": left, "pity": counter}
+
+    event_id: None = the normal draft. A number = a draft EVENT run (draft_event.py): it must
+    still be running (checked inside the transaction) and it has its own Pool A counter.
     """
     uid = _uid(user_id)
     count = int(count)
@@ -1222,6 +1251,15 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
         _ensure_draft_tables(conn)
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return "You haven't debuted yet."
+        tag = ""
+        if event_id is not None:
+            erow = conn.execute(
+                "SELECT event_key FROM draft_event WHERE id = ? AND active = 1 AND end_ts > ?",
+                (int(event_id), time.time()),
+            ).fetchone()
+            if erow is None:
+                return "This draft event has ended."
+            tag = f" [{erow['event_key']}]"
         # Squad limit: every pack can add one card, so the squad (owned + cards already
         # waiting) must have room for ALL packs. Checked before anything is charged.
         _ensure_pending_table(conn)
@@ -1238,10 +1276,15 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
         have = int(row["amount"]) if row else 0
         if have < cost:
             return f"Not enough vouchers (need {cost}, you have {have})."
-        prow = conn.execute("SELECT since_a FROM draft_pity WHERE user_id = ?", (uid,)).fetchone()
+        if event_id is None:
+            prow = conn.execute("SELECT since_a FROM draft_pity WHERE user_id = ?", (uid,)).fetchone()
+        else:
+            prow = conn.execute(
+                "SELECT since_a FROM draft_event_pity WHERE event_id = ? AND user_id = ?", (int(event_id), uid)
+            ).fetchone()
         since = int(prow["since_a"]) if prow else 0
 
-        left = _voucher_change(conn, uid, -cost, f"Draft x{count}")
+        left = _voucher_change(conn, uid, -cost, f"Draft x{count}{tag}")
         results, seen, total_refund = [], set(), 0
         for _ in range(count):
             since += 1
@@ -1256,7 +1299,7 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
             if key in seen:
                 status = "dupe"
             else:
-                status = _grant(conn, uid, key, f"Draft pool {pool}",
+                status = _grant(conn, uid, key, f"Draft pool {pool}{tag}",
                                 allow_disabled=pool in ("A", "B"))
                 seen.add(key)
             refund = 0
@@ -1265,12 +1308,19 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
                 total_refund += refund
             results.append({"pool": pool, "key": key, "status": status, "refund": refund})
         if total_refund:
-            _apply_coins(conn, uid, total_refund, f"Duplicate refund (draft x{count})")
-        conn.execute(
-            "INSERT INTO draft_pity (user_id, since_a) VALUES (?, ?) "
-            "ON CONFLICT(user_id) DO UPDATE SET since_a = excluded.since_a",
-            (uid, since),
-        )
+            _apply_coins(conn, uid, total_refund, f"Duplicate refund (draft x{count}{tag})")
+        if event_id is None:
+            conn.execute(
+                "INSERT INTO draft_pity (user_id, since_a) VALUES (?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET since_a = excluded.since_a",
+                (uid, since),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO draft_event_pity (event_id, user_id, since_a) VALUES (?, ?, ?) "
+                "ON CONFLICT(event_id, user_id) DO UPDATE SET since_a = excluded.since_a",
+                (int(event_id), uid, since),
+            )
         return {"results": results, "refund": total_refund, "vouchers": left, "pity": since}
 
 
@@ -1460,6 +1510,7 @@ def reset_everything(user_id) -> dict:
         _ensure_draft_tables(conn)
         conn.execute("DELETE FROM vouchers WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM draft_pity WHERE user_id = ?", (uid,))
+        conn.execute("DELETE FROM draft_event_pity WHERE user_id = ?", (uid,))
         if old:
             conn.execute(
                 "INSERT INTO ledger (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, 0, ?)",
