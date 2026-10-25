@@ -87,21 +87,25 @@ NARRATIVE_CHOICES = [app_commands.Choice(name=n, value=n) for n in NARRATIVE_NAM
 NARRATIVE_CHOICES_EDIT = NARRATIVE_CHOICES + [app_commands.Choice(name="None (remove)", value="NONE")]
 
 # Card theme (Style 2). Halloween = Halloween frame + orange / bone-white text. It always uses the
-# Style 2 design, and it brings its own frame, so the `background` you pick is not shown on it.
+# Style 2 design. The `background` you pick (add the Halloween frame image with /bgadder) is used as its frame.
 THEME_CHOICES = [
     app_commands.Choice(name="Normal", value="default"),
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
 ]
-THEME_HELP = "Card theme. Halloween = Halloween frame + orange text (uses the Style 2 design)"
+THEME_HELP = "Card theme. Halloween = background used as frame + orange text (Style 2)"
 
 
-def _apply_theme(playername: str, theme) -> None:
-    """Switch a card to a theme. Halloween forces Style 2; Normal only clears the theme."""
+def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
+    """Switch a card to a theme. Halloween forces Style 2 and uses `frame_bg` (a /bgadder name) as its
+    frame; Normal only clears the theme."""
     if theme is None:
         return
     if theme.value == "halloween":
         set_card_style(playername, "style2")
-        set_style2_options(playername, theme="halloween")
+        if frame_bg:
+            set_style2_options(playername, theme="halloween", bg=frame_bg)
+        else:
+            set_style2_options(playername, theme="halloween")
     else:
         set_style2_options(playername, theme=None)
 
@@ -435,7 +439,7 @@ class CardMakerCog(commands.Cog):
             obtainable=obtainable,
             player_group=player,
         )
-        _apply_theme(playername, theme)
+        _apply_theme(playername, theme, bg["pathname"])
 
         try:
             await _regenerate_and_send(interaction, playername, "✅ Card created")
@@ -717,7 +721,7 @@ class CardMakerCog(commands.Cog):
             set_card_event(playername, new_event_key)
         if obtainable is not None:
             set_card_obtainable(playername, obtainable)
-        _apply_theme(playername, theme)
+        _apply_theme(playername, theme, updates.get("background"))
 
         try:
             await _regenerate_and_send(interaction, playername, "✏️ Card updated")

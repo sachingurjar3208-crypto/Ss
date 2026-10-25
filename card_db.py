@@ -323,6 +323,7 @@ def clone_card(
             "player_group": src["player_group"] or src["playername_key"],
             "image_path": None, "extra_stats": None,
             "s2_theme": theme if theme in CARD_THEMES else None,   # never inherited from the source card
+            **({"s2_bg": background.strip()} if theme in CARD_THEMES else {}),   # themed card: the picked background IS the frame
             "created_by": created_by, "created_at": now, "updated_at": now,
         })
         names = [n for n in values if n in cols]

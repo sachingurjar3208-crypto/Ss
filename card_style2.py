@@ -73,7 +73,7 @@ ROLE_WORD = {"BAT": "BAT", "BOWL": "BOWL", "AR": "AR", "WK": "WK"}
 # To add another theme later: drop its frame PNG next to this file and add an entry here.
 THEMES = {
     "halloween": {
-        "frame": "halloween_frame.png",          # 1037 x 1517 PNG, transparent outside the frame
+        "frame": "halloween_frame.png",          # OPTIONAL built-in fallback (not needed when the frame is added with /bgadder)
         # inner art area of the frame as (x%, y%) points: the player and the dark fades are
         # clipped to it, so they never cover the frame border.
         "inner": [(10, 12.5), (40, 6.8), (50, 11), (60, 6.8), (90, 12.5), (90, 80),
@@ -97,31 +97,59 @@ def _card_theme(card_row) -> str | None:
     return key if key in THEMES else None
 
 
-_THEME_CACHE: dict = {}
+_THEME_CACHE: dict = {}      # (theme, frame path, mtime) -> built layers; tiny on purpose (RAM)
 
 
-def _theme_static(key: str) -> dict | None:
-    """Frame image, clip masks and the clipped dark fade of a theme, built once. None if the
-    frame file is missing (the card is then drawn as a normal card, never a crash)."""
+def _theme_frame_path(key: str, card_row) -> list:
+    """Frame image candidates for a themed card, best first: the card's Style 2 background and its
+    background (both picked with /bgadder, so the frame lives on the VPS and NOT in GitHub), then an
+    optional built-in file next to this script."""
+    paths = []
+    try:
+        from card_db import get_background
+        for col in ("s2_bg", "background"):
+            name = ci._col(card_row, col)
+            row = get_background(name) if name else None
+            if row is not None and Path(row["local_path"]).exists():
+                paths.append(Path(row["local_path"]))
+    except Exception:
+        pass
+    builtin = Path(__file__).with_name(THEMES[key]["frame"])
+    if builtin.exists():
+        paths.append(builtin)
+    return paths
+
+
+def _theme_static(key: str, card_row) -> dict | None:
+    """Frame image, clip masks and the clipped dark fade of a theme, built once per frame file.
+    None if no usable frame exists (the card is then drawn as a normal card, never a crash).
+    A usable frame has see-through corners, so a plain purple template is not mistaken for one."""
+    cfg = THEMES[key]
     with _STATIC_LOCK:
-        hit = _THEME_CACHE.get(key)
-        if hit is not None:
-            return hit
-        try:
-            cfg = THEMES[key]
-            frame = Image.open(Path(__file__).with_name(cfg["frame"])).convert("RGBA")
-            frame = frame.resize((CW, CH), Image.LANCZOS)
-            alpha = frame.getchannel("A")
-            inner = Image.new("L", (CW, CH), 0)
-            ImageDraw.Draw(inner).polygon(
-                [(int(px / 100 * CW), int(py / 100 * CH)) for px, py in cfg["inner"]], fill=255)
-            inner = inner.filter(ImageFilter.GaussianBlur(S))          # soft 1px edge
-            shade = ImageChops.multiply(_static_nolock()["shade"], inner)
-            hit = {"frame": frame, "alpha": alpha, "inner": inner, "shade": shade}
-        except Exception:
-            return None
-        _THEME_CACHE[key] = hit
-        return hit
+        for path in _theme_frame_path(key, card_row):
+            try:
+                ck = (key, str(path), path.stat().st_mtime)
+                hit = _THEME_CACHE.get(ck)
+                if hit is not None:
+                    return hit
+                frame = Image.open(path).convert("RGBA")
+                if frame.getpixel((0, 0))[3] > 128:          # opaque corner = not a frame
+                    continue
+                frame = frame.resize((CW, CH), Image.LANCZOS)
+                alpha = frame.getchannel("A")
+                inner = Image.new("L", (CW, CH), 0)
+                ImageDraw.Draw(inner).polygon(
+                    [(int(px / 100 * CW), int(py / 100 * CH)) for px, py in cfg["inner"]], fill=255)
+                inner = inner.filter(ImageFilter.GaussianBlur(S))          # soft 1px edge
+                shade = ImageChops.multiply(_static_nolock()["shade"], inner)
+                hit = {"frame": frame, "alpha": alpha, "inner": inner, "shade": shade}
+                if len(_THEME_CACHE) >= 2:
+                    _THEME_CACHE.pop(next(iter(_THEME_CACHE)))
+                _THEME_CACHE[ck] = hit
+                return hit
+            except Exception:
+                continue
+        return None
 
 
 # ── Small helpers ────────────────────────────────────────────────────────
@@ -517,7 +545,7 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
 
     theme_key = _card_theme(card_row)
     if theme_key:
-        ts = _theme_static(theme_key)
+        ts = _theme_static(theme_key, card_row)
         if ts is not None:                               # frame missing -> falls through to the normal card
             with _RENDER_LOCK:
                 return _build_themed(card_row, fg_image, role, theme_key, ts)
