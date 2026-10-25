@@ -323,7 +323,7 @@ class SetXIView(discord.ui.View):
         self.pending[cat] = sel_view.selected_ids
         return True
 
-    async def _refresh(self, interaction: discord.Interaction):
+    async def _redraw(self, interaction: discord.Interaction):
         self._update_confirm_state()
         xi = self._xi_as_dicts()
         embed = build_builder_embed(interaction.user, xi)
@@ -343,32 +343,32 @@ class SetXIView(discord.ui.View):
             )
             return
         self.pending = result
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.button(label="🏏 Batsmen", style=discord.ButtonStyle.secondary, row=0)
     async def set_bat(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._run_role_selector(interaction, "BAT"):
-            await self._refresh(interaction)
+            await self._redraw(interaction)
 
     @discord.ui.button(label="🧤 Wicket Keeper", style=discord.ButtonStyle.secondary, row=0)
     async def set_wk(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._run_role_selector(interaction, "WK"):
-            await self._refresh(interaction)
+            await self._redraw(interaction)
 
     @discord.ui.button(label="🔄 All Rounders", style=discord.ButtonStyle.secondary, row=1)
     async def set_ar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._run_role_selector(interaction, "AR"):
-            await self._refresh(interaction)
+            await self._redraw(interaction)
 
     @discord.ui.button(label="🎯 Bowlers", style=discord.ButtonStyle.secondary, row=1)
     async def set_bowl(self, interaction: discord.Interaction, button: discord.ui.Button):
         if await self._run_role_selector(interaction, "BOWL"):
-            await self._refresh(interaction)
+            await self._redraw(interaction)
 
     @discord.ui.button(label="🗑️ Clear XI", style=discord.ButtonStyle.danger, row=2)
     async def clear_xi(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.pending = {"BAT": [], "WK": [], "AR": [], "BOWL": []}
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.button(
         label="✅ Confirm & Save",

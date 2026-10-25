@@ -147,7 +147,7 @@ class StarPassView(OwnedView):
         await interaction.response.defer()
         self.pass_key = self.select.values[0]
         self.page = None                              # open on the page of the user's level
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     def _sync(self, board: dict | None) -> None:
         self.prev_btn.disabled = self.page <= 0
@@ -156,7 +156,7 @@ class StarPassView(OwnedView):
         self.collect_btn.label = "Collect All" if ready >= 2 else "Collect"
         self.collect_btn.disabled = ready <= 0
 
-    async def _refresh(self, interaction: discord.Interaction) -> None:
+    async def _redraw(self, interaction: discord.Interaction) -> None:
         embed, file, board, page = await _render(interaction.user, self.page, self.pass_key)
         if board is None:                              # this pass ended: fall back to another running pass
             others = await asyncio.to_thread(starpass.list_active_seasons)
@@ -179,7 +179,7 @@ class StarPassView(OwnedView):
     async def prev_btn(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.defer()
         self.page = max(0, (self.page or 0) - 1)
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @ui.button(label="Collect", style=discord.ButtonStyle.success, row=0)
     async def collect_btn(self, interaction: discord.Interaction, button: ui.Button):
@@ -193,7 +193,7 @@ class StarPassView(OwnedView):
     async def next_btn(self, interaction: discord.Interaction, button: ui.Button):
         await interaction.response.defer()
         self.page = min(self.pages - 1, (self.page or 0) + 1)
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     async def _collect(self, interaction: discord.Interaction) -> None:
         uid = self.user_id
@@ -204,7 +204,7 @@ class StarPassView(OwnedView):
         season = await asyncio.to_thread(starpass.get_active_season, key)
         if season is None:                            # ended a moment ago
             await interaction.followup.send("This Star Pass has ended.", ephemeral=True)
-            await self._refresh(interaction)
+            await self._redraw(interaction)
             return
         premium = _pass_premium(interaction.user, season)
         if premium:
@@ -218,14 +218,14 @@ class StarPassView(OwnedView):
         result = await asyncio.to_thread(starpass.collect, uid, premium, values, key)
         if isinstance(result, str):
             await interaction.followup.send(result, ephemeral=True)
-            await self._refresh(interaction)
+            await self._redraw(interaction)
             return
 
         await interaction.followup.send(
             embed=await _summary_embed(interaction.user, result, season),
             allowed_mentions=discord.AllowedMentions.none(),
         )
-        await self._refresh(interaction)
+        await self._redraw(interaction)
         if result["pending"]:
             await send_next_pending(interaction.channel, uid)
 

@@ -220,16 +220,16 @@ class DraftView(OwnedView):
     def _make_pool_cb(self, pool: str):
         async def cb(interaction: discord.Interaction):
             self.pool, self.page = pool, 0
-            await self._refresh(interaction)
+            await self._redraw(interaction)
         return cb
 
     def _page_cb(self, step: int):
         async def cb(interaction: discord.Interaction):
             self.page += step
-            await self._refresh(interaction)
+            await self._redraw(interaction)
         return cb
 
-    async def _refresh(self, interaction: discord.Interaction):
+    async def _redraw(self, interaction: discord.Interaction):
         await interaction.response.defer()
         embed, file, self.page = await _render_screen(self.uid, self.pool, self.page)
         self._build()
