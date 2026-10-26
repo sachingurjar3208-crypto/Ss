@@ -26,9 +26,11 @@ class AnnounceCog(commands.Cog):
         self.bot = bot
 
     @commands.command(name="announce")
-    async def announce(self, ctx: commands.Context, *, message: str):
+    async def announce(self, ctx: commands.Context, *, message: str = ""):
         if ctx.author.id != OWNER_ID:
             return await ctx.send("❌ Only the bot owner can use this.")
+        if not message.strip() or message.strip().lower() == "test":
+            return await ctx.send("Usage: `announce <message>`  or  `announce test <message>`")
 
         # `economy.list_users()` = every player who used csdebut (users table in economy.db)
         ids = [int(u["user_id"]) for u in economy.list_users()
@@ -56,3 +58,4 @@ class AnnounceCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(AnnounceCog(bot))
+    print("[announce] ready: owner command `announce` loaded")
