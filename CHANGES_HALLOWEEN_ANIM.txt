@@ -1,0 +1,23 @@
+HALLOWEEN SUMMARY - ANIMATED (GIF)
+
+NEW FILE: summary_anim.py
+CHANGED:  summary_image.py, match_summary.py, views.py, summary_theme_cog.py
+Sab 5 files same naam se repo me replace/upload karo, phir: git pull + systemctl restart ssbot
+(koi nayi library nahi chahiye, sirf Pillow - jo already hai)
+
+KYA DIKHTA HAI (sirf Halloween theme)
+  - upar uthte hue angare (embers), udte chamgadad (bats), top-right me jhoolti spider
+  - 4 kono me jaale (cobwebs), neeche halki aag jaisi roshni
+  - text ke glow ka candle jaisa flicker
+  - loop bina jhatke ke chalta hai
+
+DISCORD LIMIT
+  - GIF me har frame sirf badla hua hissa store karta hai + ek hi palette -> file chhoti rehti hai
+  - limit 7.4 MB (Discord 10 MB deta hai). Bada ho jaye to khud chhota banata hai:
+    20 frames -> 16 -> 14 (1280px) -> 12 (1152px) -> 10 (1024px)
+  - phir bhi na aaye to normal PNG summary jaata hai. Match end kabhi nahi rukta.
+
+RULES
+  - Diwali / Christmas / normal blue summary pehle jaise PNG hi rahte hain.
+  - /cssbset halloween ka preview bhi ab animated GIF aata hai.
+  - Tuning: summary_anim.py me MAX_BYTES, _LADDER, _DELAY_MS (speed).

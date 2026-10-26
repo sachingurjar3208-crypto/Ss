@@ -210,3 +210,19 @@ def build_summary_png(game) -> bytes:
     data = build_summary_data(game)
     style, img = _theme_for(game)
     return generate_summary_card(data, style, img)
+
+
+def build_summary_file(game) -> tuple[bytes, str]:
+    """(file bytes, filename) to send. Halloween theme = ANIMATED gif (kept under the Discord size limit);
+    everything else - or if the gif can't be made - is the normal static PNG, so the match end never breaks."""
+    data = build_summary_data(game)
+    style, img = _theme_for(game)
+    if style == "halloween" and img:
+        try:
+            import summary_anim
+            res = summary_anim.build_animated_summary(data, img, style)
+            if res:
+                return res
+        except Exception as e:
+            print(f"[summary-anim] skipped: {type(e).__name__}: {e}")
+    return generate_summary_card(data, style, img), "match_summary.png"

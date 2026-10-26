@@ -970,9 +970,9 @@ def _drs_overturn_chance(delivery_internal: str, shot_internal: str) -> float:
 async def _send_match_summary(channel, game) -> None:
     """Last message of a finished match: the Cricket Star SUMMARY card (never breaks the match end)."""
     try:
-        from match_summary import build_summary_png
-        png = await asyncio.to_thread(build_summary_png, game)
-        await channel.send(file=discord.File(io.BytesIO(png), filename="match_summary.png"))
+        from match_summary import build_summary_file
+        data, filename = await asyncio.to_thread(build_summary_file, game)
+        await channel.send(file=discord.File(io.BytesIO(data), filename=filename))
     except Exception as e:
         print(f"[summary] card failed: {type(e).__name__}: {e}")
 

@@ -121,13 +121,21 @@ class _Paint:
                         stroke_width=sw, stroke_fill=st["shadow"])
         self.d.text(xy, text, font=font, fill=fill, anchor=anchor, stroke_width=sw, stroke_fill=st["stroke"])
 
+    def layers(self) -> tuple[Image.Image | None, Image.Image]:
+        """(blurred glow layer or None, text layer) of a THEMED card. The animated summary keeps them apart
+        so it can flicker the glow and let bats / embers fly BEHIND the text."""
+        glow = None
+        if self.glow_layer is not None:
+            glow = self.glow_layer.filter(ImageFilter.GaussianBlur(int(self.st.get("glow_r", 7))))
+        return glow, self.text_layer
+
     def finish(self) -> Image.Image:
         if not self.st:
             return self.im
-        if self.glow_layer is not None:
-            glow = self.glow_layer.filter(ImageFilter.GaussianBlur(int(self.st.get("glow_r", 7))))
+        glow, text = self.layers()
+        if glow is not None:
             self.im.alpha_composite(glow)
-        self.im.alpha_composite(self.text_layer)
+        self.im.alpha_composite(text)
         return self.im
 
 
@@ -200,9 +208,8 @@ def _header(P, team: dict, cy: int):
     P.text((1250, cy + 10), f"{team.get('overs', '0.0')}", _f(_NUM, 34), _col(st, "name", WHITE), anchor="lm")
 
 
-def generate_summary_card(data: dict, style: str | None = None, bg_bytes: bytes | None = None) -> bytes:
-    """style = "halloween" | "diwali" | "christmas" | None.  bg_bytes = the owner's theme image.
-    A style without an image (or an image that can't be read) falls back to the normal card."""
+def _draw(data: dict, style: str | None, bg_bytes: bytes | None):
+    """Draws every text of the card. Returns (st, im, P): st is None for the normal blue card."""
     st = STYLES.get(style or "")
     im = None
     if st and bg_bytes:
@@ -250,6 +257,24 @@ def generate_summary_card(data: dict, style: str | None = None, bg_bytes: bytes 
     # footer
     if st:
         P.text((768, 935), st["foot"], _f(_LAB, 34), st["foot_fill"], anchor="mm")
+    return st, im, P
+
+
+def generate_summary_layers(data: dict, style: str, bg_bytes: bytes):
+    """For the animated summary: (background RGBA, blurred glow layer or None, text layer), all 1536x1024.
+    Returns None when the style / image is not usable (the caller then sends the normal static card)."""
+    st, im, P = _draw(data, style, bg_bytes)
+    if not st:
+        return None
+    glow, text = P.layers()
+    return im, glow, text
+
+
+def generate_summary_card(data: dict, style: str | None = None, bg_bytes: bytes | None = None) -> bytes:
+    """style = "halloween" | "diwali" | "christmas" | None.  bg_bytes = the owner's theme image.
+    A style without an image (or an image that can't be read) falls back to the normal card."""
+    st, im, P = _draw(data, style, bg_bytes)
+    if st:
         im = P.finish()
     else:
         # cover the blurry area of the template with a clean dark band
