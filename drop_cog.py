@@ -97,11 +97,11 @@ class Drop:
 
 def _drop_embed() -> discord.Embed:
     embed = discord.Embed(
-        title="🎁 Drop aaya!",
-        description="Sabse pehle **Catch** dabao, reward tumhara!",
+        title="🎁 A drop has appeared!",
+        description="Be the first to press **Catch** to claim it!",
         color=discord.Color.gold(),
     )
-    embed.set_footer(text=f"{cfg.DROP_EXPIRE_SECONDS} seconds me expire hoga")
+    embed.set_footer(text=f"Expires in {cfg.DROP_EXPIRE_SECONDS} seconds")
     return embed
 
 
@@ -310,7 +310,7 @@ class DropCog(commands.Cog):
             if drop.done:
                 return
             drop.done = True
-            drop.closed_text = "⌛ Ye drop expire ho gaya."
+            drop.closed_text = "⌛ This drop has expired."
         self.active.pop(drop.drop_id, None)
         await self._close(drop)
 
@@ -323,7 +323,7 @@ class DropCog(commands.Cog):
             reward = await asyncio.to_thread(self._grant_reward, drop, user.id)
             drop.claimed_by = user.id
             drop.done = True
-            drop.closed_text = f"✅ <@{user.id}> ne catch kiya!\n{reward}"
+            drop.closed_text = f"✅ <@{user.id}> caught it!\n{reward}"
 
         if drop.expire_task:
             drop.expire_task.cancel()
@@ -350,12 +350,12 @@ class DropCog(commands.Cog):
                 economy.add_coins(uid, refund, "Drop duplicate card")
                 text = f"🎴 **{name}** (duplicate) → +{economy.fmt_coins(refund)}"
             elif economy.give_card(uid, drop.card_key):
-                text = f"🎴 **{name}** — card mil gaya!"
+                text = f"🎴 **{name}** — card received!"
             else:
                 # Squad full (or card unavailable): pay the sell value instead.
                 refund = sell_value(card)
                 economy.add_coins(uid, refund, "Drop card (squad full)")
-                text = f"🎴 **{name}** — squad full, isliye +{economy.fmt_coins(refund)} mile"
+                text = f"🎴 **{name}** — squad full, so you got +{economy.fmt_coins(refund)} instead"
 
         elif drop.outcome == "voucher":
             economy.add_vouchers(uid, 1, "Drop catch")
@@ -375,7 +375,7 @@ class DropCog(commands.Cog):
     @app_commands.describe(n="How many drops to spawn (1-20)")
     async def spawn(self, interaction: discord.Interaction, n: app_commands.Range[int, 1, 20]):
         if interaction.user.id != OWNER_ID:
-            await interaction.response.send_message("❌ Iske liye permission nahi hai.", ephemeral=True)
+            await interaction.response.send_message("❌ You don't have permission for this.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
         spawned = 0
