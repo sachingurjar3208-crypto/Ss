@@ -84,7 +84,6 @@ async def load_cogs():
         "maintenance_cog",
         "cooldown_cog",
         "ranked_cog",
-        "drop_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:
