@@ -54,7 +54,7 @@ def owner_slash():
 
 THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78}
 NORMAL_COLOR = 0x5865F2
-MENU_COOLDOWN = 4                                         # seconds between two `cssb` menus per player
+MENU_COOLDOWN = 60                                        # seconds between two `cssb` menus per player
 BUTTON_GAP = 1.0                                          # seconds between two button presses per player
 _menu_cd = commands.CooldownMapping.from_cooldown(1, MENU_COOLDOWN, commands.BucketType.user)
 ANIMATED = {"halloween"}                                  # themes that move (gif) at the end of a match
