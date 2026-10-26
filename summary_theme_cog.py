@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 
 import discord
 from PIL import Image
@@ -53,6 +54,9 @@ def owner_slash():
 
 THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78}
 NORMAL_COLOR = 0x5865F2
+MENU_COOLDOWN = 4                                         # seconds between two `cssb` menus per player
+BUTTON_GAP = 1.0                                          # seconds between two button presses per player
+_menu_cd = commands.CooldownMapping.from_cooldown(1, MENU_COOLDOWN, commands.BucketType.user)
 ANIMATED = {"halloween"}                                  # themes that move (gif) at the end of a match
 _PREVIEW_CACHE: dict = {}
 
@@ -106,11 +110,17 @@ class ThemeMenu(discord.ui.View):
         super().__init__(timeout=180)
         self.user_id, self.idx = user_id, idx
         self.message: discord.Message | None = None
+        self._last = 0.0
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("This menu is not yours. Type cssb to open your own.", ephemeral=True)
             return False
+        now = time.monotonic()
+        if now - self._last < BUTTON_GAP:                  # pressed too fast: ignore quietly
+            await interaction.response.defer()
+            return False
+        self._last = now
         return True
 
     async def render(self):
@@ -284,6 +294,10 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
     @commands.group(name="cssb", aliases=["summarytheme"], invoke_without_command=True)
     async def cssb(self, ctx: commands.Context):
         """Theme menu: current theme, all themes, preview and buttons."""
+        bucket = _menu_cd.get_bucket(ctx.message)
+        retry = bucket.update_rate_limit() if bucket else None
+        if retry:
+            raise commands.CommandOnCooldown(bucket, retry, commands.BucketType.user)
         on = await asyncio.to_thread(st.equipped, ctx.author.id)
         idx = st.NAMES.index(on) if on in st.NAMES else 0           # open on the theme that is ON
         view = ThemeMenu(ctx.author.id, idx)
