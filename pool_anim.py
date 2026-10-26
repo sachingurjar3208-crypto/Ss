@@ -1,7 +1,9 @@
 """Pool animations: the GIF shown before the result when someone pulls a Pool A player.
 
 Managed with the owner/admin slash commands in draft_cog:
-    /pool animation pool:A pathname:<name> url:<link>    add a new animation
+    /pool animation pool:A pathname:<name> url:<link> [event:<name>]   add a new animation
+                                       (event empty = every draft, event set = only THAT event)
+    /pool animation_remove pathname:<name>               delete an animation
     /pool animation_merge pathname:<name> url:<link>     replace that animation completely
 
 How it is stored
@@ -11,6 +13,9 @@ How it is stored
 - merge puts the new file in place first and only then deletes the old file, so a failed
   download never leaves a pool without its animation.
 - If a pool has several animations, one is picked at random each time.
+- Event animations: an animation added with `event:<name>` plays ONLY in that event's draft.
+  An event without an animation of its own uses the general ones (event empty). The normal
+  draft only uses the general ones.
 
 Safety (admin-only commands, but still): only http(s) links, the host must resolve to a public
 address (no localhost / private network), at most 4 redirects (each one re-checked),
@@ -54,6 +59,9 @@ def _ensure(conn) -> None:
         "pathname TEXT PRIMARY KEY, pool TEXT NOT NULL, file TEXT NOT NULL, "
         "source_url TEXT, updated REAL NOT NULL)"
     )
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(pool_animation)")}
+    if "event_key" not in cols:                      # '' = general (all drafts), else one event
+        conn.execute("ALTER TABLE pool_animation ADD COLUMN event_key TEXT NOT NULL DEFAULT ''")
 
 
 def ensure_table() -> None:
@@ -79,17 +87,37 @@ def names(prefix: str = "", pool: str | None = None) -> list[str]:
     return [r["pathname"] for r in rows if p in r["pathname"].lower() and (pool is None or r["pool"] == pool)]
 
 
-def pick(pool: str = "A") -> Path | None:
-    """A random saved animation file of this pool (None if there is none)."""
+def listing(prefix: str = "") -> list[tuple[str, str]]:
+    """[(pathname, event_key)] ('' = general animation), for the admin autocomplete."""
+    with economy._tx() as conn:
+        _ensure(conn)
+        rows = conn.execute("SELECT pathname, event_key FROM pool_animation ORDER BY pathname").fetchall()
+    p = prefix.lower()
+    return [(r["pathname"], r["event_key"] or "") for r in rows if p in r["pathname"].lower()]
+
+
+def _files(conn, pool: str, event_key: str) -> list[Path]:
+    rows = conn.execute(
+        "SELECT file FROM pool_animation WHERE pool = ? AND event_key = ?", (pool, event_key)
+    ).fetchall()
+    return [f for f in (ANIM_DIR / r["file"] for r in rows) if f.is_file()]
+
+
+def pick(pool: str = "A", event_key: str = "") -> Path | None:
+    """A random saved animation file for this pool (None if there is none).
+
+    event_key '' (or 'main') = the normal draft: only general animations.
+    An event key = that event's own animations; if it has none, the general ones are used."""
+    ek = "" if (event_key or "").strip().lower() in ("", "main") else event_key.strip().lower()
     try:
         with economy._tx() as conn:
             _ensure(conn)
-            rows = conn.execute("SELECT file FROM pool_animation WHERE pool = ?", (pool,)).fetchall()
+            files = _files(conn, pool, ek) if ek else []
+            if not files:
+                files = _files(conn, pool, "")
     except Exception as e:
         print(f"[pool_anim] could not read animations: {e}")
         return None
-    files = [ANIM_DIR / r["file"] for r in rows]
-    files = [f for f in files if f.is_file()]
     return _rng.choice(files) if files else None
 
 
@@ -202,7 +230,7 @@ def _delete_file(fname: str | None) -> None:
         print(f"[pool_anim] could not delete old animation {fname}: {e}")
 
 
-async def add(pool: str, pathname: str, url: str) -> dict:
+async def add(pool: str, pathname: str, url: str, event_key: str = "") -> dict:
     """Save a NEW animation. Fails if the pathname already exists (use merge to replace)."""
     if pool not in POOLS:
         raise AnimError("Animations are only available for Pool A right now.")
@@ -216,14 +244,31 @@ async def add(pool: str, pathname: str, url: str) -> dict:
             with economy._tx() as conn:
                 _ensure(conn)
                 conn.execute(
-                    "INSERT INTO pool_animation (pathname, pool, file, source_url, updated) VALUES (?, ?, ?, ?, ?)",
-                    (name, pool, fname, url.strip()[:500], time.time()),
+                    "INSERT INTO pool_animation (pathname, pool, file, source_url, updated, event_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, pool, fname, url.strip()[:500], time.time(), event_key),
                 )
         await asyncio.to_thread(_insert)
     except Exception:
         _delete_file(fname)
         raise AnimError(f"Couldn't save **{name}**. Try again.")
-    return {"pathname": name, "pool": pool, "file": ANIM_DIR / fname, "size": len(data)}
+    return {"pathname": name, "pool": pool, "file": ANIM_DIR / fname, "size": len(data), "event_key": event_key}
+
+
+async def remove(pathname: str) -> dict:
+    """Delete an animation (the DB row first, then the file)."""
+    name = clean_name(pathname)
+    old = await asyncio.to_thread(get, name)
+    if old is None:
+        raise AnimError(f"No animation named **{name}**.")
+
+    def _drop():
+        with economy._tx() as conn:
+            _ensure(conn)
+            conn.execute("DELETE FROM pool_animation WHERE pathname = ?", (name,))
+    await asyncio.to_thread(_drop)
+    await asyncio.to_thread(_delete_file, old["file"])
+    return old
 
 
 async def merge(pathname: str, url: str) -> dict:
@@ -249,4 +294,5 @@ async def merge(pathname: str, url: str) -> dict:
         _delete_file(fname)
         raise AnimError(f"Couldn't replace **{name}**. The old animation is still in place.")
     await asyncio.to_thread(_delete_file, old["file"])      # only after the new one is live
-    return {"pathname": name, "pool": old["pool"], "file": ANIM_DIR / fname, "size": len(data)}
+    return {"pathname": name, "pool": old["pool"], "file": ANIM_DIR / fname, "size": len(data),
+            "event_key": old.get("event_key") or ""}

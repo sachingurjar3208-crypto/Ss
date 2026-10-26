@@ -1110,6 +1110,11 @@ def _ensure_draft_tables(conn: sqlite3.Connection) -> None:
         "event_id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
         "since_a INTEGER NOT NULL DEFAULT 0 CHECK (since_a >= 0), PRIMARY KEY (event_id, user_id))"
     )
+    # Pool B guarantee counter ("drafts since the last Pool B card"), added later
+    for tbl in ("draft_pity", "draft_event_pity"):
+        cols = {r["name"] for r in conn.execute(f"PRAGMA table_info({tbl})")}
+        if "since_b" not in cols:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN since_b INTEGER NOT NULL DEFAULT 0")
 
 
 def ensure_draft_tables() -> None:
@@ -1228,10 +1233,11 @@ def get_draft_pity(user_id) -> int:
 
 
 def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_value_fn,
-               event_id: int | None = None) -> dict | str:
+               event_id: int | None = None, pity_b_at: int = 0) -> dict | str:
     """Run `count` drafts in ONE transaction. Returns a dict or an error text.
 
-    roll_fn(force_a: bool) -> (pool_letter, player_key) | None   (picks one card)
+    roll_fn(force_a: bool, force_b: bool) -> (pool_letter, player_key) | None   (picks one card)
+    pity_b_at: every Nth draft since the last Pool B card is a guaranteed Pool B card (0 = off).
     dupe_value_fn(player_key) -> coins given back if the card is a duplicate
 
     Counter: every draft adds 1 to since_a. When it reaches `pity_at` that draft
@@ -1277,25 +1283,31 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
         if have < cost:
             return f"Not enough vouchers (need {cost}, you have {have})."
         if event_id is None:
-            prow = conn.execute("SELECT since_a FROM draft_pity WHERE user_id = ?", (uid,)).fetchone()
+            prow = conn.execute("SELECT since_a, since_b FROM draft_pity WHERE user_id = ?", (uid,)).fetchone()
         else:
             prow = conn.execute(
-                "SELECT since_a FROM draft_event_pity WHERE event_id = ? AND user_id = ?", (int(event_id), uid)
+                "SELECT since_a, since_b FROM draft_event_pity WHERE event_id = ? AND user_id = ?",
+                (int(event_id), uid),
             ).fetchone()
         since = int(prow["since_a"]) if prow else 0
+        since_b = int(prow["since_b"]) if prow else 0
 
         left = _voucher_change(conn, uid, -cost, f"Draft x{count}{tag}")
         results, seen, total_refund = [], set(), 0
         for _ in range(count):
             since += 1
+            since_b += 1
             force_a = since >= int(pity_at)
-            rolled = roll_fn(force_a)
+            force_b = (not force_a) and int(pity_b_at) > 0 and since_b >= int(pity_b_at)
+            rolled = roll_fn(force_a, force_b)
             if rolled is None:
                 # nothing could be rolled (no cards in game) -> undo everything
                 raise sqlite3.Error("draft roll failed")
             pool, key = rolled
             if pool == "A":
                 since = 0
+            elif pool == "B":
+                since_b = 0
             if key in seen:
                 status = "dupe"
             else:
@@ -1311,17 +1323,17 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
             _apply_coins(conn, uid, total_refund, f"Duplicate refund (draft x{count}{tag})")
         if event_id is None:
             conn.execute(
-                "INSERT INTO draft_pity (user_id, since_a) VALUES (?, ?) "
-                "ON CONFLICT(user_id) DO UPDATE SET since_a = excluded.since_a",
-                (uid, since),
+                "INSERT INTO draft_pity (user_id, since_a, since_b) VALUES (?, ?, ?) "
+                "ON CONFLICT(user_id) DO UPDATE SET since_a = excluded.since_a, since_b = excluded.since_b",
+                (uid, since, since_b),
             )
         else:
             conn.execute(
-                "INSERT INTO draft_event_pity (event_id, user_id, since_a) VALUES (?, ?, ?) "
-                "ON CONFLICT(event_id, user_id) DO UPDATE SET since_a = excluded.since_a",
-                (int(event_id), uid, since),
+                "INSERT INTO draft_event_pity (event_id, user_id, since_a, since_b) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(event_id, user_id) DO UPDATE SET since_a = excluded.since_a, since_b = excluded.since_b",
+                (int(event_id), uid, since, since_b),
             )
-        return {"results": results, "refund": total_refund, "vouchers": left, "pity": since}
+        return {"results": results, "refund": total_refund, "vouchers": left, "pity": since, "pity_b": since_b}
 
 
 def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:

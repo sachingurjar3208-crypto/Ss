@@ -17,12 +17,18 @@ POOL_C_OVR_MIN = 60
 POOL_C_OVR_MAX = 79
 
 # ── Odds (per draft, in %). Must add up to 100. ──────────────────────────────
-ODDS = {"A": 3, "B": 22, "C": 75}
+ODDS = {"A": 3, "B": 10, "C": 87}
 
 # ── Guarantee ────────────────────────────────────────────────────────────────
 # The 50th draft since the user's last Pool A card is a 100% Pool A card.
 # Any Pool A card (lucky 3% or guaranteed) restarts the count.
 PITY_A_EVERY = 50
+
+# Pool B guarantee: the 10th draft since the user's last Pool B card is a 100% Pool B card
+# (so after 9 drafts without Pool B, the next one is guaranteed). Any Pool B card (lucky 10%
+# or guaranteed) restarts the count. If Pool A is also due on the same draft, Pool A wins and
+# the Pool B guarantee is used on the very next draft. 0 = no Pool B guarantee.
+PITY_B_EVERY = 10
 
 # ── Cost ─────────────────────────────────────────────────────────────────────
 VOUCHERS_PER_DRAFT = 1

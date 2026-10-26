@@ -163,8 +163,9 @@ def create_event(name: str, duration_key: str, admin_id: int = 0, theme: str = "
             prev = conn.execute("SELECT MAX(id) AS pid FROM draft_event WHERE id < ?", (new_id,)).fetchone()["pid"]
             if prev is not None:
                 conn.execute(
-                    "INSERT OR IGNORE INTO draft_event_pity (event_id, user_id, since_a) "
-                    "SELECT ?, user_id, MIN(since_a, ?) FROM draft_event_pity WHERE event_id = ? AND since_a > 0",
+                    "INSERT OR IGNORE INTO draft_event_pity (event_id, user_id, since_a, since_b) "
+                    "SELECT ?, user_id, MIN(since_a, ?), since_b FROM draft_event_pity "
+                    "WHERE event_id = ? AND (since_a > 0 OR since_b > 0)",
                     (new_id, int(pity_every), int(prev)),
                 )
         return _event_dict(conn.execute("SELECT * FROM draft_event WHERE id = ?", (new_id,)).fetchone())

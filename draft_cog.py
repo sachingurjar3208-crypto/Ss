@@ -23,7 +23,10 @@ Owner / admin  (text commands, main server only)
     csvoucher check @user        see someone's vouchers + draft counter   (also: voucher check)
     csvoucher give @user <n>     give vouchers
     csvoucher remove @user <n>   take vouchers (stops at 0)
-    /pool animation pool:A pathname:<name> url:<link>   add a Pool A animation (plays on a Pool A pull)
+    /pool animation pool:A pathname:<name> url:<link> [event:<name>]
+                                        add a Pool A animation (plays on a Pool A pull);
+                                        with `event` it plays ONLY in that event's draft
+    /pool animation_remove pathname:<name>   delete an animation
     /pool animation_merge pathname:<name> url:<link>    replace that animation completely
 
 Safety
@@ -161,11 +164,13 @@ def _make_roll(pools: dict[str, list], weights: dict[str, float], odds: dict | N
     avail = {p: rows for p, rows in pools.items() if rows}
     odds = odds if odds is not None else cfg.ODDS
 
-    def roll(force_a: bool):
+    def roll(force_a: bool, force_b: bool = False):
         if not avail:
             return None
         if force_a and "A" in avail:
             pool = "A"
+        elif force_b and "B" in avail:
+            pool = "B"
         else:
             # Pool A is decided on its own: EXACTLY odds["A"]% per draft (3% normally), no matter
             # whether Pool B / C have cards. Only the pity draft can add more.
@@ -204,7 +209,10 @@ def draft_color(pool: str, event: dict | None = None) -> discord.Color:
 def _screen_embed(pool: str, event: dict | None = None) -> discord.Embed:
     embed = discord.Embed(color=draft_color(pool, event))
     embed.set_image(url=f"attachment://{draft_image.FILENAME}")
-    embed.set_footer(text=f"Pool A is guaranteed on every {_pity_at(event)}th draft")
+    foot = f"Pool A is guaranteed on every {_pity_at(event)}th draft"
+    if cfg.PITY_B_EVERY > 0:
+        foot += f" • Pool B on every {cfg.PITY_B_EVERY}th"
+    embed.set_footer(text=foot)
     return embed
 
 
@@ -375,6 +383,7 @@ class DraftView(OwnedView):
                     _make_roll(pools, get_weights(event), _odds(event)),
                     lambda k: sl.sell_value(by_key[k]) if k in by_key else 0,
                     event["id"] if event else None,
+                    cfg.PITY_B_EVERY,
                 )
             except Exception as e:                      # transaction rolled back: nothing was charged
                 print(f"[draft] spin failed for {uid}: {e}")
@@ -420,7 +429,7 @@ class DraftView(OwnedView):
         # `/pool animation` (one is picked at random); the old single file is the fallback.
         anim = None
         if got_a:
-            anim = await asyncio.to_thread(pool_anim.pick, "A")
+            anim = await asyncio.to_thread(pool_anim.pick, "A", event["event_key"] if event else "")
             if anim is None:
                 legacy = _HERE / cfg.POOL_A_ANIMATION_FILE
                 anim = legacy if legacy.exists() else None
@@ -527,8 +536,8 @@ def _check_cooldown(ctx: commands.Context) -> None:
 
 
 async def _anim_autocomplete(interaction: discord.Interaction, current: str):
-    found = await asyncio.to_thread(pool_anim.names, current)
-    return [app_commands.Choice(name=n, value=n) for n in found[:25]]
+    found = await asyncio.to_thread(pool_anim.listing, current)
+    return [app_commands.Choice(name=f"{n} ({ek or 'all drafts'})"[:100], value=n) for n, ek in found[:25]]
 
 
 class DraftCog(commands.Cog, name="Draft"):
@@ -873,19 +882,39 @@ class DraftCog(commands.Cog, name="Draft"):
         pool="Which pool (only Pool A for now)",
         pathname="A short name for this animation, e.g. golden_a (letters, numbers, - and _)",
         url="Link to the GIF (Giphy links work)",
+        event="Event draft (e.g. halloween): plays ONLY there. Empty = all drafts",
     )
     @app_commands.choices(pool=[app_commands.Choice(name="Pool A", value="A")])
+    @app_commands.autocomplete(event=_event_autocomplete)
     async def pool_animation(self, interaction: discord.Interaction, pool: app_commands.Choice[str],
-                             pathname: str, url: str):
+                             pathname: str, url: str, event: str | None = None):
+        if not await self._staff_only(interaction):
+            return
+        await interaction.response.defer(ephemeral=True)
+        ev = await _event_ref(event)
+        ekey = ev["event_key"] if ev else ""
+        try:
+            res = await pool_anim.add(pool.value, pathname, url, ekey)
+        except pool_anim.AnimError as e:
+            await interaction.followup.send(f"❌ {e}", ephemeral=True)
+            return
+        where = f" of **{esc(ev['name'])}**" if ev else ""
+        await self._anim_done(
+            interaction, f"✅ Animation **{res['pathname']}** saved for **Pool {res['pool']}**{where}.", res)
+
+    @pool.command(name="animation_remove", description="Delete a Pool animation")
+    @app_commands.describe(pathname="Name of the animation to delete")
+    @app_commands.autocomplete(pathname=_anim_autocomplete)
+    async def pool_animation_remove(self, interaction: discord.Interaction, pathname: str):
         if not await self._staff_only(interaction):
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            res = await pool_anim.add(pool.value, pathname, url)
+            old = await pool_anim.remove(pathname)
         except pool_anim.AnimError as e:
             await interaction.followup.send(f"❌ {e}", ephemeral=True)
             return
-        await self._anim_done(interaction, f"✅ Animation **{res['pathname']}** saved for **Pool {res['pool']}**.", res)
+        await interaction.followup.send(f"🗑️ Animation **{esc(old['pathname'])}** deleted.", ephemeral=True)
 
     @pool.command(name="animation_merge", description="Replace a Pool animation with a new one (the old one is deleted)")
     @app_commands.describe(
@@ -912,9 +941,11 @@ class DraftCog(commands.Cog, name="Draft"):
     async def _anim_done(interaction: discord.Interaction, text: str, res: dict) -> None:
         """Confirm to the admin, with a preview of the saved animation."""
         path = res["file"]
+        when = ("whenever someone pulls a Pool A player in that event"
+                if res.get("event_key") else "whenever someone pulls a Pool A player")
         try:
             await interaction.followup.send(
-                text + "\nIt plays whenever someone pulls a Pool A player.",
+                text + f"\nIt plays {when}.",
                 file=discord.File(str(path), filename=f"preview{path.suffix}"),
                 ephemeral=True,
             )
