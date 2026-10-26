@@ -1,7 +1,7 @@
 """Ranked matchmaking cog.
 
 Commands:
-  csmp ranked   join the ranked queue (5 overs, same-tier opponents only)
+  csmp ranked   join the ranked queue (2 overs, same-tier opponents only)
   csrank        your tier / stars / season record     (csrank @user for someone else)
   csranktop     global top 10 by stars
 

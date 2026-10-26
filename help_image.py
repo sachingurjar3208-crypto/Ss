@@ -46,7 +46,7 @@ SECTIONS = [
         ("`csdaily` `csweekly` (Premium) `csmonthly`", "Free coins + a player card"),
         ("`csclaim`", "Free random card every hour — Premium: every 35 min"),
         ("`cscd`", "Check when your claim cooldowns are ready"),
-        ("`csmp ranked`", "Rank-up mode queue (5 overs, same-tier opponents)"),
+        ("`csmp ranked`", "Rank-up mode queue (2 overs, same-tier opponents)"),
         ("`csrank`", "Your tier, stars and season record"),
         ("`csranktop`", "Global top 10 by stars"),
     ]),

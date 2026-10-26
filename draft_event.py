@@ -25,6 +25,9 @@ import economy
 MAIN = "main"                         # the normal draft
 DAY = 86_400
 DURATIONS = {"3D": 3, "7D": 7, "10D": 10, "15D": 15, "30D": 30}
+# True = when a NEW event starts, every player keeps the "drafts since last Pool A card" counter
+# they had in the previous event (so 40/50 in Halloween is still 40/50 in the next event).
+CARRY_OVER_PITY = True
 THEMES = ("default", "halloween", "diwali", "christmas")      # looks, see draft_image.THEMES
 MAIN_NAMES = {"main", "normal", "draft", "default", "star"}
 
@@ -155,7 +158,16 @@ def create_event(name: str, duration_key: str, admin_id: int = 0, theme: str = "
             (key, shown, theme, now, now + DURATIONS[duration_key] * DAY, int(admin_id),
              int(pity_every), float(odds_a), int(c_min), int(c_max)),
         )
-        return _event_dict(conn.execute("SELECT * FROM draft_event WHERE id = ?", (cur.lastrowid,)).fetchone())
+        new_id = int(cur.lastrowid)
+        if CARRY_OVER_PITY:
+            prev = conn.execute("SELECT MAX(id) AS pid FROM draft_event WHERE id < ?", (new_id,)).fetchone()["pid"]
+            if prev is not None:
+                conn.execute(
+                    "INSERT OR IGNORE INTO draft_event_pity (event_id, user_id, since_a) "
+                    "SELECT ?, user_id, MIN(since_a, ?) FROM draft_event_pity WHERE event_id = ? AND since_a > 0",
+                    (new_id, int(pity_every), int(prev)),
+                )
+        return _event_dict(conn.execute("SELECT * FROM draft_event WHERE id = ?", (new_id,)).fetchone())
 
 
 def end_event(key: str) -> dict | None:

@@ -816,23 +816,34 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send("❌ You haven't debuted yet. Use `csdebut`.")
             return
 
-        def line(emoji: str, label: str, cmd: str, wait: int, extra: str = "") -> str:
-            state = "✅ Ready now!" if wait <= 0 else f"⏳ Ready in **{fmt_wait(wait)}**"
-            return f"{emoji} **{label}** (`{cmd}`) — {state}{extra}"
+        def short(sec: int) -> str:
+            d, rem = divmod(int(sec), 86400)
+            h, rem = divmod(rem, 3600)
+            m, s_ = divmod(rem, 60)
+            if d:
+                return f"{d}d {h}h"
+            if h:
+                return f"{h}h {m}m"
+            if m:
+                return f"{m}m {s_}s"
+            return f"{s_}s"
 
-        lines = [line("☀️", "Daily", "csdaily", status["daily"])]
-        if premium:
-            lines.append(line("📅", "Weekly", "csweekly", status["weekly"]))
-        else:
-            lines.append("📅 **Weekly** (`csweekly`) — 💎 Premium members only")
+        def row(label: str, cmd: str, value: str) -> str:
+            return f"**{label}** `{cmd}`\n> `{value}`"
+
+        def state(wait: int) -> str:
+            return "Ready" if wait <= 0 else short(wait)
+
+        rows = [row("Daily", "csdaily", state(status["daily"]))]
+        rows.append(row("Weekly", "csweekly", state(status["weekly"]) if premium else "Premium only"))
         if status["monthly_locked"] > 0:
-            lines.append(f"🗓️ **Monthly** (`csmonthly`) — 🔒 Unlocks in **{fmt_wait(status['monthly_locked'])}**")
+            rows.append(row("Monthly", "csmonthly", f"Unlocks in {short(status['monthly_locked'])}"))
         else:
-            lines.append(line("🗓️", "Monthly", "csmonthly", status["monthly"]))
-        claim_extra = "" if premium else "  •  💎 Premium: 35 min cooldown"
-        lines.append(line("🎴", "Claim", "csclaim", status["claim"], claim_extra))
+            rows.append(row("Monthly", "csmonthly", state(status["monthly"])))
+        rows.append(row("Claim", "csclaim", state(status["claim"])))
 
-        embed = discord.Embed(title="⏱️ Your Cooldowns", description="\n".join(lines), color=discord.Color.teal())
+        embed = discord.Embed(title="Cooldowns", description="\n\n".join(rows), color=discord.Color.teal())
+        embed.set_footer(text=f"Requested by: {ctx.author.name}")
         await ctx.send(embed=embed)
 
     # -- packs -----------------------------------------------------------
