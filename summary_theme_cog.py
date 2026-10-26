@@ -11,7 +11,8 @@ Owner only (slash commands, hidden from everybody else, main server only)
                   give a theme to a player (a player can also win one in a Star Pass).
 
 Players (text commands, only for themes they own)
-    cssb                  see your themes and which one is on
+    cssb                  theme menu: the theme that is ON, all themes (ON / OWNED / LOCKED), a preview,
+                          and buttons  < Use this theme | Turn off >  to browse and switch
     cssb use halloween    turn an owned theme on (used when YOU win, or when the other player has none)
     cssb off              back to the normal summary
 """
@@ -21,6 +22,7 @@ import asyncio
 import io
 
 import discord
+from PIL import Image
 from discord import app_commands
 from discord.ext import commands
 
@@ -45,6 +47,125 @@ def owner_slash():
         return func
 
     return decorator
+
+
+# ── cssb menu (embed + preview + buttons) ────────────────────────────────────
+
+THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78}
+NORMAL_COLOR = 0x5865F2
+ANIMATED = {"halloween"}                                  # themes that move (gif) at the end of a match
+_PREVIEW_CACHE: dict = {}
+
+
+def _preview_jpeg(name: str, data: bytes) -> bytes | None:
+    """Small preview of a theme with sample numbers (static, so the menu opens fast). Cached."""
+    key = (name, len(data), hash(data))
+    if key in _PREVIEW_CACHE:
+        return _PREVIEW_CACHE[key]
+    try:
+        png = summary_image.generate_summary_card(_SAMPLE, name, data)
+        im = Image.open(io.BytesIO(png)).convert("RGB").resize((960, 640), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=88)
+        out = buf.getvalue()
+    except Exception as e:
+        print(f"[summary-theme] menu preview failed: {type(e).__name__}: {e}")
+        return None
+    if len(_PREVIEW_CACHE) >= 8:
+        _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
+    _PREVIEW_CACHE[key] = out
+    return out
+
+
+def menu_text(idx: int, mine: list[str], on: str | None, has_img: bool) -> str:
+    """The monospace block of the menu. '>' marks the theme you are looking at."""
+    rows = []
+    for i, n in enumerate(st.NAMES):
+        state = "ON" if n == on else ("OWNED" if n in mine else "LOCKED")
+        rows.append(f"{'>' if i == idx else ' '} {st.label(n).ljust(10)} {state}")
+    name = st.NAMES[idx]
+    owned = name in mine
+    lines = [
+        f"Current    {st.label(on) + ' (ON)' if on else 'Normal summary'}",
+        "",
+        *rows,
+        "",
+        f"Viewing    {st.label(name)}",
+        f"Card       {'Animated' if name in ANIMATED else 'Static'}",
+        f"Status     {'ON' if name == on else ('OWNED' if owned else 'LOCKED')}",
+    ]
+    if owned and not has_img:
+        lines.append("Image      not set yet (normal summary shows)")
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+class ThemeMenu(discord.ui.View):
+    """cssb menu. Only the person who opened it can press the buttons."""
+
+    def __init__(self, user_id: int, idx: int = 0):
+        super().__init__(timeout=180)
+        self.user_id, self.idx = user_id, idx
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("This menu is not yours. Type cssb to open your own.", ephemeral=True)
+            return False
+        return True
+
+    async def render(self):
+        """(embed, preview file or None). Also sets which buttons are usable."""
+        mine = await asyncio.to_thread(st.owned, self.user_id)
+        on = await asyncio.to_thread(st.equipped, self.user_id)
+        name = st.NAMES[self.idx]
+        data = await asyncio.to_thread(st.get_image, name)
+        self.use_btn.disabled = name not in mine or name == on
+        self.use_btn.label = "In use" if name == on else "Use this theme"
+        self.off_btn.disabled = on is None
+        embed = discord.Embed(title="SUMMARY THEMES", description=menu_text(self.idx, mine, on, bool(data)),
+                              color=THEME_COLORS.get(name, NORMAL_COLOR))
+        embed.set_footer(text=f"{self.idx + 1}/{len(st.NAMES)}  |  Themes come from the Star Pass and owner gifts")
+        file = None
+        if data:
+            jpg = await asyncio.to_thread(_preview_jpeg, name, data)
+            if jpg:
+                file = discord.File(io.BytesIO(jpg), filename="theme_preview.jpg")
+                embed.set_image(url="attachment://theme_preview.jpg")
+        return embed, file
+
+    async def _refresh(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        embed, file = await self.render()
+        await interaction.edit_original_response(embed=embed, attachments=[file] if file else [], view=self)
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.secondary, row=0)
+    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.idx = (self.idx - 1) % len(st.NAMES)
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Use this theme", style=discord.ButtonStyle.success, row=0)
+    async def use_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await asyncio.to_thread(st.equip, self.user_id, st.NAMES[self.idx])
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Turn off", style=discord.ButtonStyle.danger, row=0)
+    async def off_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await asyncio.to_thread(st.unequip, self.user_id)
+        await self._refresh(interaction)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.secondary, row=0)
+    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.idx = (self.idx + 1) % len(st.NAMES)
+        await self._refresh(interaction)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
 
 
 class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
@@ -162,15 +283,13 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
     # ── Players: cssb ────────────────────────────────────────────────────────
     @commands.group(name="cssb", aliases=["summarytheme"], invoke_without_command=True)
     async def cssb(self, ctx: commands.Context):
-        """Your summary themes."""
-        mine = await asyncio.to_thread(st.owned, ctx.author.id)
+        """Theme menu: current theme, all themes, preview and buttons."""
         on = await asyncio.to_thread(st.equipped, ctx.author.id)
-        if not mine:
-            await ctx.send("You don't own any summary theme yet. You can win one in a Star Pass event.")
-            return
-        lines = [f"{st.label(n)}{'  (ON)' if n == on else ''}" for n in mine]
-        await ctx.send("```\nYour summary themes\n" + "\n".join(lines) +
-                       "\n\nTurn on: cssb use <theme>   |   Turn off: cssb off\n```")
+        idx = st.NAMES.index(on) if on in st.NAMES else 0           # open on the theme that is ON
+        view = ThemeMenu(ctx.author.id, idx)
+        embed, file = await view.render()
+        view.message = await ctx.send(embed=embed, file=file, view=view) if file else \
+            await ctx.send(embed=embed, view=view)
 
     @cssb.command(name="use", aliases=["on", "equip"])
     async def cssb_use(self, ctx: commands.Context, *, pathname: str):
