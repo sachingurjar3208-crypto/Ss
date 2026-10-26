@@ -217,6 +217,37 @@ def _icon_voucher(size):
     return im.resize((size, size), Image.LANCZOS)
 
 
+_THEME_ACCENT = {"halloween": (255, 142, 32), "diwali": (255, 200, 70), "christmas": (255, 96, 96)}
+
+
+def _icon_theme(size, theme):
+    """Mini summary scoreboard in the colours of the theme."""
+    S = size * K
+    acc = _THEME_ACCENT.get(str(theme or "").lower(), (122, 92, 240))
+    im = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    x0, x1, y0, y1 = S * 0.08, S * 0.92, S * 0.20, S * 0.80
+    sh = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    ImageDraw.Draw(sh).ellipse((S * 0.14, y1 - S * 0.02, S * 0.86, y1 + S * 0.07), fill=(0, 0, 0, 100))
+    im.alpha_composite(sh)
+    rim = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    _paste_grad(rim, (x0, y0, x1, y1), acc, tuple(int(v * 0.55) for v in acc),
+                lambda m: m.rounded_rectangle((x0, y0, x1, y1), radius=S * 0.05, fill=255))
+    im.alpha_composite(rim)
+    b = S * 0.02
+    inner = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    _paste_grad(inner, (x0 + b, y0 + b, x1 - b, y1 - b), (36, 24, 56), (14, 10, 28),
+                lambda m: m.rounded_rectangle((x0 + b, y0 + b, x1 - b, y1 - b), radius=S * 0.04, fill=255))
+    im.alpha_composite(inner)
+    d = ImageDraw.Draw(im)
+    d.text((S * 0.5, y0 + S * 0.10), "SUMMARY", font=_f(_NUM, int(S * 0.09)), fill=acc, anchor="mm")
+    for i in range(3):
+        yy = y0 + S * (0.20 + i * 0.12)
+        d.rounded_rectangle((x0 + S * 0.06, yy, x1 - S * 0.06, yy + S * 0.075), radius=S * 0.02, fill=(60, 46, 88))
+        d.rectangle((x0 + S * 0.09, yy + S * 0.025, x0 + S * (0.30 + 0.05 * i), yy + S * 0.05), fill=(235, 235, 245))
+        d.rectangle((x1 - S * 0.22, yy + S * 0.025, x1 - S * 0.09, yy + S * 0.05), fill=acc)
+    return im.resize((size, size), Image.LANCZOS)
+
+
 def _icon_player(size, card):
     """The real card image if it exists, otherwise a drawn placeholder with the player's name."""
     path = card["image_path"] if card is not None and "image_path" in card.keys() else None
@@ -264,8 +295,8 @@ def _icon_player(size, card):
 _icon_cache: dict = {}
 
 
-def _make_icon(kind: str, size: int, card=None):
-    key = (kind, size, card["playername_key"] if card is not None else None)
+def _make_icon(kind: str, size: int, card=None, extra=None):
+    key = (kind, size, card["playername_key"] if card is not None else extra)
     hit = _icon_cache.get(key)
     if hit is not None and kind != "player":
         return hit
@@ -275,6 +306,8 @@ def _make_icon(kind: str, size: int, card=None):
         out = _icon_coins(size)
     elif kind == "voucher":
         out = _icon_voucher(size)
+    elif kind == "theme":
+        out = _icon_theme(size, extra)
     else:
         out = _icon_player(size, card)
     if kind != "player" and len(_icon_cache) < 64:
@@ -477,7 +510,7 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
 
         isz = min(170, cw - 18)
         card = cards.get((rw.player_key or "").lower()) if rw.kind == "player" else None
-        ic = _make_icon(rw.kind, isz, card)
+        ic = _make_icon(rw.kind, isz, card, rw.player_key if rw.kind == "theme" else None)
         if st != "ready":
             locked = st in ("locked", "premium_locked")
             is_card = rw.kind == "player"        # keep player cards clearly visible, just a bit dimmer

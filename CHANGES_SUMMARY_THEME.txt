@@ -1,0 +1,22 @@
+SUMMARY THEMES (Halloween / Diwali / Christmas)
+
+NEW FILES: summary_theme.py, summary_theme_cog.py
+CHANGED:   summary_image.py, match_summary.py, starpass.py, starpass_cog.py, starpass_image.py, main.py
+Sab 8 files same naam se repo me replace/upload karo, phir: git pull + systemctl restart ssbot
+Slash commands sync hone me thoda time lag sakta hai.
+
+OWNER ONLY (slash)
+  /cssbset    themeimage:<image> pathname:<Halloween|Diwali|Christmas>   (image ka preview bhi aata hai)
+  /cssbremove pathname:<theme> [user:@user]   (user ke bina = image delete, user ke saath = us player se theme wapas)
+  /cssbgive   user:@user pathname:<theme>
+
+PLAYERS
+  cssb | cssb use halloween | cssb off
+
+STAR PASS
+  /starpass-rewardadd ... summary_theme:<Halloween|Diwali|Christmas>  -> level reward me theme
+
+RULES
+  - Theme image 1536x1024 (3:2), normal summary jaisa hi layout (rows/cells same jagah).
+  - Match end par winner ki ON theme use hoti hai, nahi to dusre player ki, nahi to normal blue summary.
+  - Image set nahi hai to normal summary hi dikhta hai (match kabhi nahi rukta).

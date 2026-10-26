@@ -73,6 +73,7 @@ async def load_cogs():
         "draft_cog",
         "quest_cog",
         "starpass_cog",
+        "summary_theme_cog",
         "squad_cog",
         "stadium_cog",
         "gif_cog",

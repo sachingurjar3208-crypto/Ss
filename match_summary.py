@@ -192,5 +192,21 @@ def build_summary_data(game) -> dict:
     }
 
 
+def _theme_for(game):
+    """(style, image) of the winner's summary theme, else the other player's, else None."""
+    try:
+        import summary_theme
+        first, second = _team_uids(game)
+        t1, t2 = game.runs[0], game.runs[1]
+        order = [second, first] if t2 > t1 else [first, second]      # winner first (tie: batting first)
+        hit = summary_theme.pick_for_match(order)
+        return hit if hit else (None, None)
+    except Exception as e:                                             # the normal summary always works
+        print(f"[summary-theme] skipped: {type(e).__name__}: {e}")
+        return None, None
+
+
 def build_summary_png(game) -> bytes:
-    return generate_summary_card(build_summary_data(game))
+    data = build_summary_data(game)
+    style, img = _theme_for(game)
+    return generate_summary_card(data, style, img)

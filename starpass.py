@@ -72,10 +72,11 @@ ROWS = (FREE, PREMIUM)
 
 # Reward kinds
 PACK_KINDS = ("legendary", "gold", "silver", "bronze")
-KINDS = (*PACK_KINDS, "voucher", "coins", "player")
+KINDS = (*PACK_KINDS, "voucher", "coins", "player", "theme")
 KIND_LABEL = {
     "legendary": "Legendary Pack", "gold": "Gold Pack", "silver": "Silver Pack",
     "bronze": "Bronze Pack", "voucher": "Voucher", "coins": "Coins", "player": "Player Card",
+    "theme": "Summary Theme",
 }
 
 # ── Default rewards (edit here to change what every new season gives) ────────
@@ -98,6 +99,9 @@ class Reward:
             return f"{self.qty:,} Coins"
         if self.kind == "player":
             return player_name or (self.player_key or "Player Card")
+        if self.kind == "theme":                       # player_key holds the theme name (halloween ...)
+            import summary_theme
+            return f"{summary_theme.label(self.player_key)} Summary"
         base = KIND_LABEL[self.kind]
         return base if self.qty == 1 else f"{base} x{self.qty}"
 
@@ -395,8 +399,13 @@ def set_reward(level: int, row: str, kind: str, qty: int = 1, player_key: str | 
     if row not in ROWS or kind not in KINDS:
         return "Invalid reward."
     qty = int(qty)
-    if kind == "player":
+    if kind in ("player", "theme"):
         qty = 1
+    if kind == "theme":
+        import summary_theme
+        player_key = summary_theme.norm(player_key)
+        if player_key is None:
+            return "Unknown summary theme."
     if qty < 1 or qty > economy.MAX_PURSE:
         return "The quantity must be at least 1."
     if kind == "voucher" and qty > economy.MAX_VOUCHERS:
@@ -646,6 +655,10 @@ def _pay(conn, uid: int, rw: Reward, level: int, row: str, out: dict, values: di
             (uid, rw.kind, rw.qty),
         )
         out["packs"][rw.kind] = out["packs"].get(rw.kind, 0) + rw.qty
+    elif rw.kind == "theme" and rw.player_key:
+        import summary_theme
+        is_new = summary_theme.grant_conn(conn, uid, rw.player_key, f"Star Pass level {level}")
+        out.setdefault("themes", []).append((rw.player_key, is_new))
     elif rw.kind == "player" and rw.player_key:
         key = rw.player_key
         if key in out["new"] or key in out["pending"]:

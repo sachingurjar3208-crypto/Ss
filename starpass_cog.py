@@ -238,6 +238,10 @@ async def _summary_embed(user, result: dict, season: dict | None = None) -> disc
         lines.append(f"Vouchers: {result['vouchers']:,}")
     for kind, qty in result["packs"].items():
         lines.append(f"{sl.PACKS[kind]['label']}: x{qty}")
+    for tkey, is_new in result.get("themes", []):
+        import summary_theme
+        lines.append(f"Summary theme: {summary_theme.label(tkey)}" +
+                     (f" (turn on with cssb use {tkey})" if is_new else " (already owned)"))
     keys = result["new"] + result["pending"] + result["dupes"]
     cards = await asyncio.to_thread(card_db.get_cards, keys) if keys else {}
     name = lambda k: esc(cards[k]["playername"]) if k in cards else esc(k)
@@ -272,6 +276,8 @@ REWARD_CHOICES = [
     app_commands.Choice(name="VOUCHER", value="voucher"),
     app_commands.Choice(name="COINS", value="coins"),
 ]
+import summary_theme as _sb_theme
+THEME_CHOICES_SB = [app_commands.Choice(name=_sb_theme.label(n), value=n) for n in _sb_theme.NAMES]
 QTY_CAP = {"voucher": 10_000, "coins": 100_000_000}      # packs: PACK_QTY_CAP
 
 
@@ -538,8 +544,9 @@ class StarPassCog(commands.Cog, name="StarPass"):
         quantity="How many (for example 2000 coins)",
         playername="Give a player card as the reward (leave reward empty)",
         pass_key="Which pass (empty = the normal Star Pass)",
+        summary_theme="Give a match summary theme as the reward (leave reward and player empty)",
     )
-    @app_commands.choices(row=ROW_CHOICES, reward=REWARD_CHOICES)
+    @app_commands.choices(row=ROW_CHOICES, reward=REWARD_CHOICES, summary_theme=THEME_CHOICES_SB)
     @app_commands.autocomplete(playername=player_autocomplete, pass_key=pass_autocomplete)
     @admin_only()
     async def starpass_rewardadd(
@@ -551,17 +558,21 @@ class StarPassCog(commands.Cog, name="StarPass"):
         quantity: app_commands.Range[int, 1, 100_000_000] = 1,
         playername: str | None = None,
         pass_key: str | None = None,
+        summary_theme: app_commands.Choice[str] | None = None,
     ):
-        if reward is not None and playername:
+        if sum(x is not None and x != "" for x in (reward, playername, summary_theme)) > 1:
             await interaction.response.send_message(
-                "Choose either a reward type or a player name, not both.", ephemeral=True)
+                "Choose only one: a reward type, a player name or a summary theme.", ephemeral=True)
             return
-        if reward is None and not playername:
+        if reward is None and not playername and summary_theme is None:
             await interaction.response.send_message(
-                "Pick a reward type, or leave it empty and enter a player name.", ephemeral=True)
+                "Pick a reward type, a summary theme, or leave them empty and enter a player name.", ephemeral=True)
             return
 
-        if playername:
+        if summary_theme is not None:
+            kind, qty, key = "theme", 1, summary_theme.value
+            what = f"{summary_theme.name} Summary (summary theme)"
+        elif playername:
             card = await asyncio.to_thread(card_db.get_card, playername)
             if card is None:
                 await interaction.response.send_message(
