@@ -574,13 +574,10 @@ class SquadCog(commands.Cog, name="Squad"):
         if not found:
             await ctx.send(f"❌ No player found matching `{sl.discord_safe(query)}`.")
             return
-        # Typing the FULL exact name (e.g. "Virat Kohli (HW)") is still
-        # unambiguous on its own — only show the ◀ ▶ picker when the typed
-        # text doesn't already pin down one specific card.
-        if found[0]["playername_key"] == query.strip().lower():
-            cards = [found[0]]
-        else:
-            cards = found
+        # Every card whose name contains the typed text, exact match first
+        # (find_cards already orders it that way). More than one -> ◀ ▶ picker,
+        # so "Virat Kohli" also lets you flip to "Virat Kohli (S1)", "(HW)"...
+        cards = found
 
         if len(cards) == 1:
             embed = _show_embed(cards[0])
@@ -673,14 +670,9 @@ class SquadCog(commands.Cog, name="Squad"):
             )
             return
 
-        # Typing the FULL exact name still goes straight to that one card,
-        # same as csshow above — the ◀ ▶ picker is only for a name that
-        # matches more than one card you own (e.g. a normal + a Halloween card).
-        q = query.strip().lower()
-        if owned_matches[0]["playername_key"] == q:
-            cards = [owned_matches[0]]
-        else:
-            cards = owned_matches
+        # Same as csshow: every owned card matching the name, exact match first.
+        # More than one -> ◀ ▶ picker (e.g. a normal + a Halloween card).
+        cards = owned_matches
 
         if len(cards) == 1:
             kind, content = await self._csview_content(ctx.author, cards[0])
