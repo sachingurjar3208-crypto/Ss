@@ -21,6 +21,7 @@
     /eventmaker     make an event (name + emoji id). Cards of an event show its emoji first in every XI
     /eventdisable   switch an event off: nobody can get any card of it any more (/eventenable switches it on)
     /eventlist      list all events
+    /csrarity       (everyone) paged list of all cards: name, OVR, BAT, BOWL, price
     /rename card    rename a card's player name (frees the old name for a new card)
     /rename event   rename an event (cards of that event move to the new name automatically)
 
@@ -268,6 +269,146 @@ async def _check_emoji(interaction: discord.Interaction, emoji_id: str):
     except Exception:
         pass
     return None, False
+
+
+# ── /csrarity: paged player list (20 per page, one line per card) ─────────
+RARITY_PER_PAGE = 20
+
+
+def _short_price(n: int) -> str:
+    """28000000 -> 28M, 500000 -> 500K, 900 -> 900 (keeps each line short)."""
+    n = int(n)
+    if n >= 1_000_000:
+        v = n / 1_000_000 + 1e-9
+        return f"{v:.1f}".rstrip("0").rstrip(".") + "M"
+    if n >= 1_000:
+        v = n / 1_000 + 1e-9
+        return f"{v:.1f}".rstrip("0").rstrip(".") + "K"
+    return str(n)
+
+
+def _card_price(card) -> int:
+    from squad_logic import buy_price   # imported here to avoid a circular import
+    try:
+        return buy_price(card)
+    except Exception:
+        return 0
+
+
+def _rarity_summary_embed(cards) -> discord.Embed:
+    """The old view: card names grouped by OVR."""
+    groups: dict[int, list[str]] = {}
+    for c in cards:
+        groups.setdefault(c["ovr"], []).append(c["playername"])
+    embed = discord.Embed(
+        title="📊 Cards added, by OVR",
+        description=f"**{len(cards)}** card(s) total across **{len(groups)}** OVR rating(s).",
+        color=discord.Color.gold(),
+    )
+    for ovr in sorted(groups.keys(), reverse=True):
+        names = groups[ovr]
+        value = ", ".join(names)
+        if len(value) > 1024:
+            value = value[:1000] + f"… (+{len(names)} total)"
+        embed.add_field(name=f"{ovr} OVR  ·  {len(names)} card(s)", value=value, inline=False)
+        if len(embed.fields) >= 25:
+            break  # Discord embeds cap out at 25 fields
+    return embed
+
+
+class RarityListView(discord.ui.View):
+    """List mode: 20 cards per page, one line each. Summary mode: old OVR grouping."""
+
+    def __init__(self, cards, owner_id: int):
+        super().__init__(timeout=300)
+        self.cards = list(cards)              # already sorted by ovr DESC, name
+        self.owner_id = owner_id
+        self.page = 0
+        self.mode = "list"                    # "list" or "summary"
+        self.pages = max(1, -(-len(self.cards) // RARITY_PER_PAGE))
+        self.message: discord.Message | None = None
+        self._sync_buttons()
+
+    # ---- building the embed ------------------------------------------
+    def build_embed(self) -> discord.Embed:
+        if self.mode == "summary":
+            return _rarity_summary_embed(self.cards)
+
+        start = self.page * RARITY_PER_PAGE
+        chunk = self.cards[start:start + RARITY_PER_PAGE]
+        lines = ["**#  Name  ·  OVR | BAT | BOWL | Price**", ""]
+        for i, c in enumerate(chunk, start=start + 1):
+            name = c["playername"]
+            if len(name) > 18:
+                name = name[:17] + "…"
+            flag = c["country_emoji"] or ""
+            lines.append(
+                f"`{i:>3}.` {name} {flag} · **{c['ovr']}** | {c['bat']} | {c['bowl']} | {_short_price(_card_price(c))}"
+            )
+        embed = discord.Embed(
+            title="🃏 Cards (OVR wise)",
+            description="\n".join(lines),
+            color=discord.Color.gold(),
+        )
+        embed.set_footer(text=f"Page {self.page + 1}/{self.pages} · {len(self.cards)} cards")
+        return embed
+
+    # ---- button state ------------------------------------------------
+    def _sync_buttons(self):
+        in_list = self.mode == "list"
+        first = not in_list or self.page <= 0
+        last = not in_list or self.page >= self.pages - 1
+        self.btn_first.disabled = first
+        self.btn_prev.disabled = first
+        self.btn_next.disabled = last
+        self.btn_last.disabled = last
+        self.btn_mode.label = "Summary" if in_list else "List"
+        self.btn_mode.emoji = "📊" if in_list else "🃏"
+
+    async def _refresh(self, interaction: discord.Interaction):
+        self._sync_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("This list isn't yours. Run `/csrarity` yourself.", ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass
+
+    # ---- buttons -----------------------------------------------------
+    @discord.ui.button(label="⏪", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_first(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = 0
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="<", style=discord.ButtonStyle.primary, row=0)
+    async def btn_prev(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        await self._refresh(interaction)
+
+    @discord.ui.button(label=">", style=discord.ButtonStyle.primary, row=0)
+    async def btn_next(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = min(self.pages - 1, self.page + 1)
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="⏩", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_last(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = self.pages - 1
+        await self._refresh(interaction)
+
+    @discord.ui.button(label="Summary", emoji="📊", style=discord.ButtonStyle.secondary, row=1)
+    async def btn_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.mode = "summary" if self.mode == "list" else "list"
+        await self._refresh(interaction)
 
 
 class CardMakerCog(commands.Cog):
@@ -854,7 +995,7 @@ class CardMakerCog(commands.Cog):
     # ── /csrarity ────────────────────────────────────────────────────
     @app_commands.command(
         name="csrarity",
-        description="See which cards have been added at each OVR so far (only visible to you)",
+        description="All cards by OVR: name, BAT, BOWL, price (only visible to you)",
     )
     async def csrarity(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -864,27 +1005,11 @@ class CardMakerCog(commands.Cog):
             await interaction.followup.send("No cards have been added yet.", ephemeral=True)
             return
 
-        # Group by OVR, highest first. list_all_cards() is already sorted
-        # by ovr DESC, playername, so cards within a group arrive in order.
-        groups: dict[int, list[str]] = {}
-        for c in cards:
-            groups.setdefault(c["ovr"], []).append(c["playername"])
-
-        embed = discord.Embed(
-            title="🃏 Cards added, by OVR",
-            description=f"**{len(cards)}** card(s) total across **{len(groups)}** OVR rating(s).",
-            color=discord.Color.gold(),
+        # list_all_cards() is already sorted by ovr DESC, playername.
+        view = RarityListView(cards, interaction.user.id)
+        view.message = await interaction.followup.send(
+            embed=view.build_embed(), view=view, ephemeral=True, wait=True
         )
-        for ovr in sorted(groups.keys(), reverse=True):
-            names = groups[ovr]
-            value = ", ".join(names)
-            if len(value) > 1024:
-                value = value[:1000] + f"… (+{len(names)} total)"
-            embed.add_field(name=f"{ovr} OVR  ·  {len(names)} card(s)", value=value, inline=False)
-            if len(embed.fields) >= 25:
-                break  # Discord embeds cap out at 25 fields
-
-        await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ── /bgmerge ─────────────────────────────────────────────────────
     @app_commands.command(
