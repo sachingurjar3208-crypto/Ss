@@ -64,21 +64,22 @@ TIER_BY_NAME = {t["name"]: t for t in TIERS}
 # One-time reward the first time a tier is reached in a season.
 # "card": (min ovr, max ovr) of the random card.
 TIER_UP_REWARDS = {
-    "Silver":    {"vouchers": 2},
-    "Gold":      {"vouchers": 5,  "card": (87, 87)},
-    "Platinum":  {"vouchers": 8,  "card": (88, 88)},
-    "Legendary": {"vouchers": 15, "card": (92, 92)},
-    "Ruby":      {"vouchers": 20, "card": (95, 95)},
+    "Silver":    {"vouchers": 5,  "card": (86, 90)},
+    "Gold":      {"vouchers": 10, "card": (88, 91)},
+    "Platinum":  {"vouchers": 15, "card": (90, 93)},
+    "Legendary": {"vouchers": 25, "card": (94, 97)},
+    "Ruby":      {"vouchers": 40, "card": (97, 99)},
 }
 
 # Paid at the monthly reset, by the tier the player finished the season in.
 SEASON_REWARDS = {
-    "Ruby":      {"packs": {"legendary": 1}, "vouchers": 5, "coins": 500_000},
-    "Legendary": {"vouchers": 10, "card": (84, 87), "coins": 300_000},
-    "Platinum":  {"vouchers": 5, "coins": 200_000},
-    "Gold":      {"vouchers": 5, "coins": 100_000},
-    "Silver":    {"vouchers": 5},
-    "Bronze":    {"coins": 50_000},
+    "Ruby":      {"vouchers": 100, "packs": {"legendary": 1}},
+    # "weights": relative chance per OVR inside the range (missing OVR = 1.0). Not shown to players.
+    "Legendary": {"vouchers": 50, "card": (95, 99), "weights": {98: 0.25, 99: 0.1}},
+    "Platinum":  {"vouchers": 30, "card": (90, 93)},
+    "Gold":      {"vouchers": 20, "card": (87, 90)},
+    "Silver":    {"vouchers": 10, "card": (85, 87)},
+    "Bronze":    {"coins": 200_000},
 }
 
 # Bot strength per tier. ovr = card rating range its XI is built from,
@@ -219,10 +220,13 @@ def _cards_index():
     return by_ovr, rows
 
 
-def _grant_random_card(conn, uid: int, lo: int, hi: int, source: str, idx) -> dict | None:
+def _grant_random_card(conn, uid: int, lo: int, hi: int, source: str, idx, weights: dict | None = None) -> dict | None:
     """Random card with OVR lo..hi (nearest OVR if none exists). A card the user doesn't own
     is preferred; if they own them all it becomes coins (same as duplicates everywhere else)."""
     by_ovr, rows = idx
+    if weights:   # pick the OVR first, using the weights (low OVRs can be rarer)
+        ovrs = list(range(lo, hi + 1))
+        lo = hi = _rng.choices(ovrs, weights=[float(weights.get(o, 1.0)) for o in ovrs])[0]
     pool = [k for o in range(lo, hi + 1) for k in by_ovr.get(o, [])]
     if not pool and by_ovr:
         mid = (lo + hi) / 2
@@ -268,7 +272,7 @@ def _grant_bundle(conn, uid: int, spec: dict, source: str, idx_cache: list) -> t
         if not idx_cache:
             idx_cache.append(_cards_index())
         lo, hi = spec["card"]
-        res = _grant_random_card(conn, uid, lo, hi, source, idx_cache[0])
+        res = _grant_random_card(conn, uid, lo, hi, source, idx_cache[0], spec.get("weights"))
         if res is not None:
             card = idx_cache[0][1][res["key"]]
             text = f"🎴 **{card['playername']}** ({card['ovr']} OVR)"

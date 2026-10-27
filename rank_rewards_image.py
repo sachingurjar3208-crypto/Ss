@@ -118,8 +118,12 @@ def generate_rewards_card(*, tiers: list[dict], stars: int, tier: str, next_name
         # tier name + marker
         d.ellipse([_p(62), _p(cy - 9), _p(80), _p(cy + 9)], fill=tc + (255,))
         d.text((_p(C_TIER), _p(cy - 6)), t["name"].upper(), font=_f(_NAME, 24), fill=tc + (255,), anchor="lm")
+        # star + the stars needed for this tier (drawn shape, not an emoji character)
+        _star(d, C_TIER + 9, cy + 22, 9, (255, 200, 60, 255))
+        d.text((_p(C_TIER + 24), _p(cy + 22)), f"{t['min']} stars", font=_f(_LAB, 20),
+               fill=(200, 208, 226, 255), anchor="lm")
         if is_cur:
-            d.text((_p(C_TIER), _p(cy + 19)), "YOU ARE HERE", font=_f(_LAB, 18), fill=WHITE, anchor="lm")
+            d.text((_p(C_TIER + 120), _p(cy + 22)), "YOU", font=_f(_LAB, 18), fill=color + (255,), anchor="lm")
 
         # tier-up reward (left column) + check if claimed
         if t["tier_up"]:
