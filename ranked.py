@@ -37,9 +37,9 @@ RANKED_OVERS = 2             # every ranked match is exactly this many overs
 BOT_WAIT_SECONDS = 60        # nobody found for this long -> a bot opponent plays
 SEARCH_TIMEOUT = 300         # global search gives up after 5 minutes (only if no bot can be made)
 
-# Bronze players get the season coin reward even if they never played ranked
-# ("whoever debuted"). Set False to pay it only to Bronze players who played at least 1 ranked match.
-BRONZE_PAYS_ALL_DEBUTED = True
+# Seasons are started and ended by the owner (csseasonstart / csseasonend). A season ends by itself
+# after SEASON_DAYS days. Only players with MORE than 0 stars at the end get the season reward.
+SEASON_DAYS = 30
 
 # Matchmaking scope: True = players from ANY server can be matched (the match is shown in both
 # players' channels, see ranked_mirror.py). False = same server only.
@@ -116,16 +116,21 @@ def next_tier(stars: int):
     return None
 
 
-def season_key(now: datetime | None = None) -> str:
+def _calendar_season_name(now: datetime | None = None) -> str:
     now = now or datetime.now(timezone.utc)
     return now.strftime("%Y-%m")
 
 
-def next_reset_ts(now: datetime | None = None) -> int:
-    """Unix time of the next monthly reset (1st of next month, 00:00 UTC)."""
+def _calendar_month_end(now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
     y, m = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
     return int(datetime(y, m, 1, tzinfo=timezone.utc).timestamp())
+
+
+def next_reset_ts(now: datetime | None = None) -> int:
+    """Unix time the current season ends (set when the owner starts it; 0 if no season is running)."""
+    info = season_info()
+    return int(info["end"]) if info["active"] else 0
 
 
 # ── Database ─────────────────────────────────────────────────────────────────
@@ -277,69 +282,158 @@ def _grant_bundle(conn, uid: int, spec: dict, source: str, idx_cache: list) -> t
 
 
 # ── Season rollover ──────────────────────────────────────────────────────────
+# ranked_meta keys: season (name), season_start, season_end (unix), season_active ("1"/"0"), season_no.
+
+def _meta_get(conn, key: str, default=None):
+    r = conn.execute("SELECT value FROM ranked_meta WHERE key = ?", (key,)).fetchone()
+    return r["value"] if r is not None else default
+
+
+def _meta_set(conn, key: str, value) -> None:
+    conn.execute(
+        "INSERT INTO ranked_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, str(value)),
+    )
+
+
+def _ensure_season_meta(conn) -> None:
+    """Old databases (monthly seasons) have no season_end: keep their running season until the end of
+    that calendar month, then it behaves like every other season (owner starts the next one)."""
+    if _meta_get(conn, "season_end") is not None:
+        return
+    name = _meta_get(conn, "season") or _calendar_season_name()
+    _meta_set(conn, "season", name)
+    _meta_set(conn, "season_start", int(time.time()))
+    _meta_set(conn, "season_end", _calendar_month_end())
+    _meta_set(conn, "season_active", "1")
+
+
+def season_info() -> dict:
+    """{"active": bool, "name": str, "start": int, "end": int}"""
+    with economy._tx() as conn:
+        _ensure(conn)
+        _ensure_season_meta(conn)
+        return {
+            "active": _meta_get(conn, "season_active", "1") == "1",
+            "name": _meta_get(conn, "season", ""),
+            "start": int(float(_meta_get(conn, "season_start", 0))),
+            "end": int(float(_meta_get(conn, "season_end", 0))),
+        }
+
+
+def season_active() -> bool:
+    return season_info()["active"]
+
 
 def _settle_season(conn, old_season: str) -> dict:
-    """Pay the season-end rewards and reset every player's stars. Runs inside one transaction."""
+    """Pay the season-end rewards to everyone with MORE than 0 stars, then reset every player.
+    Each reward message is saved in ranked_notices (the cog DMs it; csrank shows it if the DM failed)."""
     idx_cache: list = []
-    stars_of = {r["user_id"]: r for r in conn.execute("SELECT * FROM ranked_players")}
+    rows = conn.execute("SELECT * FROM ranked_players").fetchall()
     paid = 0
-    for r in conn.execute("SELECT user_id FROM users").fetchall():
-        uid = int(r["user_id"])
-        prow = stars_of.get(uid)
-        stars = int(prow["stars"]) if prow else 0
-        played = int(prow["played"]) if prow else 0
-        tier = tier_of(stars)
-        if tier == "Bronze" and not BRONZE_PAYS_ALL_DEBUTED and played == 0:
+    for prow in rows:
+        uid, stars = int(prow["user_id"]), int(prow["stars"])
+        if stars <= 0 or not _user_exists(conn, uid):
             continue
+        tier = tier_of(stars)
         spec = SEASON_REWARDS.get(tier)
         if not spec:
             continue
-        lines, pending = _grant_bundle(conn, uid, spec, f"Ranked season {old_season} ({tier})", idx_cache)
+        lines, pending = _grant_bundle(conn, uid, spec, f"Ranked {old_season} ({tier})", idx_cache)
         text = (
-            f"🏁 **Ranked season {old_season} ended!** You finished {tier_emoji(tier)} **{tier}** "
+            f"🏁 **Ranked {old_season} ended!** You finished {tier_emoji(tier)} **{tier}** "
             f"with **{stars}** ⭐\n🎁 Rewards: " + " · ".join(lines)
             + ("\n⚠️ A card is waiting for you: use `cspending`." if pending else "")
         )
         conn.execute("INSERT INTO ranked_notices (user_id, text, ts) VALUES (?, ?, ?)", (uid, text, time.time()))
+        conn.execute(
+            "INSERT INTO ranked_history (season, user_id, stars, tier) VALUES (?, ?, ?, ?)",
+            (old_season, uid, stars, tier),
+        )
         paid += 1
-    for uid, prow in stars_of.items():
-        if int(prow["stars"]) > 0:
-            conn.execute(
-                "INSERT INTO ranked_history (season, user_id, stars, tier) VALUES (?, ?, ?, ?)",
-                (old_season, uid, int(prow["stars"]), tier_of(int(prow["stars"]))),
-            )
     conn.execute("UPDATE ranked_players SET stars = 0, played = 0, wins = 0, losses = 0, claimed = ''")
     conn.execute("DELETE FROM ranked_notices WHERE ts < ?", (time.time() - 60 * 86400,))
     return {"season": old_season, "paid": paid}
 
 
 def _rollover_locked(conn) -> dict | None:
-    cur = season_key()
-    row = conn.execute("SELECT value FROM ranked_meta WHERE key = 'season'").fetchone()
-    if row is None:   # first run ever: just start this season, nothing to pay
-        conn.execute("INSERT INTO ranked_meta (key, value) VALUES ('season', ?)", (cur,))
+    """Ends the running season if its 30 days are over. Ranked then waits for the owner's csseasonstart."""
+    _ensure_season_meta(conn)
+    if _meta_get(conn, "season_active", "1") != "1":
         return None
-    if row["value"] == cur:
+    if time.time() < float(_meta_get(conn, "season_end", 0)):
         return None
-    summary = _settle_season(conn, row["value"])
-    conn.execute("UPDATE ranked_meta SET value = ? WHERE key = 'season'", (cur,))
-    summary["new_season"] = cur
+    summary = _settle_season(conn, _meta_get(conn, "season", ""))
+    _meta_set(conn, "season_active", "0")
     return summary
 
 
 def rollover_if_needed() -> dict | None:
-    """Call any time (the cog calls it every few minutes). Pays season rewards once the month changes."""
+    """Call any time (the cog calls it every few minutes). Pays season rewards once the season's end passes."""
     conn = economy._conn()
     try:
         _ensure(conn)
-        row = conn.execute("SELECT value FROM ranked_meta WHERE key = 'season'").fetchone()
-        if row is not None and row["value"] == season_key():
+        end = _meta_get(conn, "season_end")
+        active = _meta_get(conn, "season_active", "1") == "1"
+        if end is not None and (not active or time.time() < float(end)):
             return None
     finally:
         conn.close()
     with economy._tx() as conn:
         _ensure(conn)
         return _rollover_locked(conn)
+
+
+def start_season(admin_id, days: int | None = None) -> dict:
+    """Owner: start a new season now; it ends by itself `days` (default 30) days later."""
+    days = int(days or SEASON_DAYS)
+    with economy._tx() as conn:
+        _ensure(conn)
+        _ensure_season_meta(conn)
+        _rollover_locked(conn)
+        if _meta_get(conn, "season_active", "1") == "1":
+            return {"ok": False, "name": _meta_get(conn, "season", ""), "end": int(float(_meta_get(conn, "season_end", 0)))}
+        no = int(_meta_get(conn, "season_no", 0)) + 1
+        name = f"Season {no}"
+        now = int(time.time())
+        conn.execute("UPDATE ranked_players SET stars = 0, played = 0, wins = 0, losses = 0, claimed = ''")
+        _meta_set(conn, "season_no", no)
+        _meta_set(conn, "season", name)
+        _meta_set(conn, "season_start", now)
+        _meta_set(conn, "season_end", now + days * 86400)
+        _meta_set(conn, "season_active", "1")
+        _admin_log(conn, admin_id, 0, "season_start", f"{name}, {days} days")
+        return {"ok": True, "name": name, "start": now, "end": now + days * 86400, "days": days}
+
+
+def end_season_now(admin_id) -> dict | None:
+    """Owner: end the running season right now (rewards paid, stars reset). None if no season is running."""
+    with economy._tx() as conn:
+        _ensure(conn)
+        _ensure_season_meta(conn)
+        if _meta_get(conn, "season_active", "1") != "1":
+            return None
+        summary = _settle_season(conn, _meta_get(conn, "season", ""))
+        _meta_set(conn, "season_active", "0")
+        _admin_log(conn, admin_id, 0, "season_end", f"{summary['season']}, paid {summary['paid']}")
+        return summary
+
+
+def list_notices() -> list[dict]:
+    """Every season-end message still waiting (id, user_id, text), oldest first."""
+    conn = economy._conn()
+    try:
+        _ensure(conn)
+        return [{"id": int(r["id"]), "user_id": int(r["user_id"]), "text": r["text"]}
+                for r in conn.execute("SELECT id, user_id, text FROM ranked_notices ORDER BY id")]
+    finally:
+        conn.close()
+
+
+def delete_notice(notice_id: int) -> None:
+    with economy._tx() as conn:
+        _ensure(conn)
+        conn.execute("DELETE FROM ranked_notices WHERE id = ?", (int(notice_id),))
 
 
 # ── Reading ──────────────────────────────────────────────────────────────────
@@ -415,6 +509,8 @@ def apply_result(winner_id, loser_id) -> dict:
     with economy._tx() as conn:
         _ensure(conn)
         _rollover_locked(conn)
+        if _meta_get(conn, "season_active", "1") != "1":
+            return out        # no season running (it just ended): this match gives no stars
         idx_cache: list = []
         for uid, delta, won in ((w, +1, True), (l, -1, False)):
             if uid <= 0 or not _user_exists(conn, uid):
@@ -679,3 +775,82 @@ def build_bot_team(tier: str, bot_name: str, overs: int = RANKED_OVERS) -> dict 
         "players": [_player_dict(c) for c in xi],
         "captain": None,
     }
+
+
+# ── Admin tools (used by csrankgive / csrankreset / csrankban) ────────────────
+
+def _admin_log(conn, admin_id: int, target_id: int, action: str, detail: str) -> None:
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ranked_admin_log ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, admin_id INTEGER NOT NULL, "
+        "target_id INTEGER NOT NULL, action TEXT NOT NULL, detail TEXT NOT NULL)"
+    )
+    conn.execute(
+        "INSERT INTO ranked_admin_log (ts, admin_id, target_id, action, detail) VALUES (?, ?, ?, ?, ?)",
+        (time.time(), int(admin_id), int(target_id), action, detail[:200]),
+    )
+
+
+def admin_give_stars(admin_id, user_id, delta: int) -> dict:
+    """Add (or, with a negative delta, remove) stars. NO tier rewards are paid, and every tier the
+    player now stands in is marked as claimed, so the next win can't pay it out again."""
+    uid, delta = int(user_id), int(delta)
+    with economy._tx() as conn:
+        _ensure(conn)
+        _rollover_locked(conn)
+        row = _row(conn, uid)
+        old = int(row["stars"])
+        new = max(MIN_STARS, old + delta)
+        claimed = {t for t in (row["claimed"] or "").split(",") if t}
+        for t in TIERS[1:]:
+            if new >= t["min"]:
+                claimed.add(t["name"])
+        conn.execute("UPDATE ranked_players SET stars = ?, claimed = ? WHERE user_id = ?",
+                     (new, ",".join(sorted(claimed)), uid))
+        _admin_log(conn, admin_id, uid, "give", f"{old} -> {new} ({delta:+d})")
+    return {"old": old, "new": new, "tier_old": tier_of(old), "tier_new": tier_of(new)}
+
+
+def admin_reset_player(admin_id, user_id) -> dict:
+    """Stars, wins, losses and played back to 0. Claimed tier rewards are kept (no re-farming)."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        _ensure(conn)
+        _rollover_locked(conn)
+        row = _row(conn, uid)
+        old = {"stars": int(row["stars"]), "wins": int(row["wins"]), "losses": int(row["losses"])}
+        conn.execute("UPDATE ranked_players SET stars = 0, played = 0, wins = 0, losses = 0 WHERE user_id = ?", (uid,))
+        _admin_log(conn, admin_id, uid, "reset", f"was {old['stars']} stars, {old['wins']}W/{old['losses']}L")
+    return old
+
+
+def admin_reset_all(admin_id) -> int:
+    """Everyone's stars / wins / losses / played back to 0 (claimed tier rewards kept). Returns players changed."""
+    with economy._tx() as conn:
+        _ensure(conn)
+        _rollover_locked(conn)
+        n = conn.execute("SELECT COUNT(*) AS n FROM ranked_players").fetchone()["n"]
+        conn.execute("UPDATE ranked_players SET stars = 0, played = 0, wins = 0, losses = 0")
+        _admin_log(conn, admin_id, 0, "reset_all", f"{n} players")
+    return int(n)
+
+
+def admin_ban(admin_id, user_id, days: int, reason: str = "") -> int:
+    """Ranked ban for `days` days. Returns the unix time it ends."""
+    uid = int(user_id)
+    until = time.time() + int(days) * 86400
+    with economy._tx() as conn:
+        _ensure(conn)
+        _row(conn, uid)
+        conn.execute("UPDATE ranked_players SET blacklist_until = ? WHERE user_id = ?", (until, uid))
+        _admin_log(conn, admin_id, uid, "ban", f"{days}d {reason}".strip())
+    return int(until)
+
+
+def admin_unban(admin_id, user_id) -> bool:
+    """Lift a ranked ban (negative stars go back to 0). True if there was something to clear."""
+    had = clear_blacklist(user_id)
+    with economy._tx() as conn:
+        _ensure(conn)
+        _admin_log(conn, admin_id, int(user_id), "unban", "had ban" if had else "no ban")
+    return had

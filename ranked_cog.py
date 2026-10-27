@@ -4,6 +4,13 @@ Commands:
   csmp ranked   join the ranked queue (2 overs, same-tier opponents only)
   csrank        your tier / stars / season record     (csrank @user for someone else)
   csranktop     global top 10 by stars
+  csseason                    current season and when it ends
+  csseasonstart [days]        (owner) start a season now; it ends by itself after 30 days (or `days`)
+  csseasonend                 (owner) end the season now: rewards + DMs to everyone with stars > 0
+  csrankgive @user <n>        (staff) add / remove stars (negative n removes)
+  csrankreset @user | all     (staff / owner) reset stars + record
+  csrankban @user [days]      (staff) ranked ban (default 30 days)
+  csrankunban @user           (staff) lift a ranked ban
 
 The rules and numbers live in ranked.py. The `csmp` command itself is in squad_cog.py:
 it hands "csmp ranked" over to RankedCog.start_ranked().
@@ -12,6 +19,8 @@ it hands "csmp ranked" over to RankedCog.start_ranked().
 from __future__ import annotations
 
 import asyncio
+import io
+import math
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -22,7 +31,9 @@ from discord.ext import commands, tasks
 
 import economy
 import ranked
+import rank_image
 import squad_logic as sl
+from bot_guard import ADMIN_GUILD_ID, OWNER_ID, is_staff
 from security import OwnedView, esc
 from squad_cog import _in_match, _need_debut
 
@@ -39,6 +50,9 @@ class _Entry:
     task: Optional[asyncio.Task] = None
     anim: Optional[asyncio.Task] = None
 
+
+# Season-end DMs already tried this run (a failed one is not retried until the bot restarts).
+_dm_tried: set[int] = set()
 
 # Everyone currently searching, by user id.
 _queue: dict[int, _Entry] = {}
@@ -105,15 +119,34 @@ class RankedCog(commands.Cog, name="Ranked"):
             self._stop_tasks(e)
         _queue.clear()
 
-    # ── monthly reset ─────────────────────────────────────────────────────
-    @tasks.loop(minutes=5)
+    # ── season end (auto after the season's days, or by csseasonend) ───────
+    async def _deliver_season_dms(self) -> tuple[int, int]:
+        """DM every waiting season-end message. A message that was DMed is deleted; one that couldn't be
+        sent (DMs closed) stays and is shown the next time the player uses csrank / csmp ranked."""
+        sent = failed = 0
+        for n in await asyncio.to_thread(ranked.list_notices):
+            if n["id"] in _dm_tried:
+                continue
+            _dm_tried.add(n["id"])
+            try:
+                user = self.bot.get_user(n["user_id"]) or await self.bot.fetch_user(n["user_id"])
+                await user.send(n["text"])
+                await asyncio.to_thread(ranked.delete_notice, n["id"])
+                sent += 1
+            except Exception:
+                failed += 1
+            await asyncio.sleep(1)   # stay well under Discord's DM rate limits
+        return sent, failed
+
+    @tasks.loop(minutes=2)
     async def season_loop(self):
         try:
             res = await asyncio.to_thread(ranked.rollover_if_needed)
             if res:
-                print(f"[ranked] season {res['season']} ended: rewards sent to {res['paid']} players, stars reset")
+                print(f"[ranked] {res['season']} ended: rewards for {res['paid']} players, stars reset")
+            await self._deliver_season_dms()
         except Exception as e:
-            print(f"[ranked] season rollover failed: {type(e).__name__}: {e}")
+            print(f"[ranked] season loop failed: {type(e).__name__}: {e}")
 
     @season_loop.before_loop
     async def _before_season(self):
@@ -150,6 +183,9 @@ class RankedCog(commands.Cog, name="Ranked"):
             await ctx.send("❌ Ranked matches can only be played in a server.")
             return
         if not await _need_debut(ctx):
+            return
+        if not await asyncio.to_thread(ranked.season_active):
+            await ctx.send("⏸️ No ranked season is running right now. Wait for the next season to start.")
             return
         left = await asyncio.to_thread(ranked.blacklist_remaining, me.id)
         if left > 0:
@@ -388,9 +424,9 @@ class RankedCog(commands.Cog, name="Ranked"):
 
     # ── csrank ────────────────────────────────────────────────────────────
     @commands.command(name="csrank")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @commands.cooldown(1, 30, commands.BucketType.user)   # image command: 30 s cooldown
     async def csrank(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        """Your ranked tier and stars: `csrank` or `csrank @user`."""
+        """Your ranked card (image): `csrank` or `csrank @user`."""
         who = member or ctx.author
         if not await asyncio.to_thread(economy.user_exists, who.id):
             await ctx.send("❌ That player hasn't debuted yet." if member else "❌ You must debut first. Use `csdebut`.")
@@ -400,33 +436,26 @@ class RankedCog(commands.Cog, name="Ranked"):
         info = await asyncio.to_thread(ranked.get_player, who.id)
         pos = await asyncio.to_thread(ranked.global_position, who.id)
         tier, stars = info["tier"], info["stars"]
-        t = ranked.TIER_BY_NAME[tier]
         nxt = ranked.next_tier(stars)
-        embed = discord.Embed(
-            title=f"{t['emoji']} {tier}  •  {stars} ⭐",
-            description=f"**{esc(who.display_name)}**",
-            color=discord.Color.from_rgb(212, 175, 55),
+        try:
+            avatar = await who.display_avatar.replace(size=256, format="png").read()
+        except Exception:
+            avatar = None
+        end_ts = await asyncio.to_thread(ranked.next_reset_ts)
+        left_days = max(0, math.ceil((end_ts - time.time()) / 86400)) if end_ts else None
+        png = await asyncio.to_thread(
+            rank_image.generate_rank_card,
+            name=who.display_name, tier=tier, stars=stars,
+            wins=info["wins"], losses=info["losses"], played=info["played"], position=pos,
+            tier_min=ranked.TIER_BY_NAME[tier]["min"],
+            next_name=nxt[0]["name"] if nxt else None,
+            next_min=nxt[0]["min"] if nxt else None,
+            reset_days=left_days, avatar_bytes=avatar,
         )
-        if nxt:
-            nt, need = nxt
-            embed.add_field(name="Next tier", value=f"{nt['emoji']} **{nt['name']}** in **{need}** ⭐", inline=False)
-        else:
-            embed.add_field(name="Top tier", value="You are **Ruby**. Keep collecting stars for the global top!", inline=False)
-        embed.add_field(name="This season",
-                        value=f"{info['wins']}W – {info['losses']}L  ({info['played']} played)", inline=True)
-        if pos:
-            embed.add_field(name="Global place", value=f"#{pos}", inline=True)
+        note = None
         if info.get("blacklist_until", 0) > time.time():
-            embed.add_field(name="🚫 Ranked blacklist",
-                            value=f"Ends <t:{int(info['blacklist_until'])}:R>", inline=False)
-        embed.add_field(
-            name="Tiers",
-            value="\n".join(f"{x['emoji']} {x['name']} — {x['min']} ⭐" for x in ranked.TIERS),
-            inline=False,
-        )
-        embed.set_footer(text="Season resets monthly • Play with `csmp ranked`")
-        embed.description += f"\nSeason resets <t:{ranked.next_reset_ts()}:R>"
-        await ctx.send(embed=embed)
+            note = f"🚫 Ranked blacklist ends <t:{int(info['blacklist_until'])}:R>"
+        await ctx.send(content=note, file=discord.File(io.BytesIO(png), filename="rank.png"))
 
     @commands.command(name="csranktop")
     @commands.cooldown(1, 10, commands.BucketType.user)
@@ -444,8 +473,184 @@ class RankedCog(commands.Cog, name="Ranked"):
             lines.append(f"{medal} {ranked.tier_emoji(p['tier'])} **{name}** — **{p['stars']}** ⭐  ({p['wins']}W/{p['losses']}L)")
         embed = discord.Embed(title="🏆 Global Ranked Top 10", description="\n".join(lines),
                               color=discord.Color.from_rgb(212, 175, 55))
-        embed.set_footer(text=f"Resets {time.strftime('%d %b', time.gmtime(ranked.next_reset_ts()))} (monthly)")
+        end_ts = await asyncio.to_thread(ranked.next_reset_ts)
+        embed.set_footer(text=(f"Season ends {time.strftime('%d %b', time.gmtime(end_ts))}" if end_ts else "No season running"))
         await ctx.send(embed=embed)
+
+    # ── seasons ───────────────────────────────────────────────────────────
+    @commands.command(name="csseason")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def csseason(self, ctx: commands.Context):
+        """Current ranked season and when it ends."""
+        info = await asyncio.to_thread(ranked.season_info)
+        if not info["active"]:
+            await ctx.send("⏸️ No ranked season is running right now.")
+            return
+        await ctx.send(f"🏆 **{info['name']}** is running.\nStarted <t:{info['start']}:D> · ends <t:{info['end']}:f> (<t:{info['end']}:R>)")
+
+    @commands.command(name="csseasonstart")
+    async def csseasonstart(self, ctx: commands.Context, days: int = 0):
+        """Owner: `csseasonstart` starts a season now that ends by itself after 30 days (`csseasonstart 45` = 45 days)."""
+        await self.cog_check_staff(ctx)
+        if ctx.author.id != OWNER_ID:
+            await ctx.send("❌ Only the bot owner can start a season.")
+            return
+        days = days or ranked.SEASON_DAYS
+        if days < 1 or days > 120:
+            await ctx.send("❌ Days must be between 1 and 120.")
+            return
+        r = await asyncio.to_thread(ranked.start_season, ctx.author.id, days)
+        if not r["ok"]:
+            await ctx.send(f"❌ **{r['name']}** is already running (ends <t:{r['end']}:R>). End it first with `csseasonend`.")
+            return
+        await ctx.send(
+            f"✅ **{r['name']}** started! Everyone starts at 0 ⭐.\n"
+            f"Ends automatically <t:{r['end']}:f> (<t:{r['end']}:R>), after **{r['days']}** days."
+        )
+
+    @commands.command(name="csseasonend")
+    async def csseasonend(self, ctx: commands.Context):
+        """Owner: end the season now. Everyone with more than 0 stars gets the reward for their tier by DM."""
+        await self.cog_check_staff(ctx)
+        if ctx.author.id != OWNER_ID:
+            await ctx.send("❌ Only the bot owner can end a season.")
+            return
+        info = await asyncio.to_thread(ranked.season_info)
+        if not info["active"]:
+            await ctx.send("ℹ️ No season is running.")
+            return
+        view = _ConfirmEndSeason(ctx.author.id, self)
+        view.message = await ctx.send(
+            f"⚠️ **End {info['name']} now?** Everyone with more than 0 ⭐ gets their tier reward by DM, "
+            f"then all stars reset to 0. This can't be undone.",
+            view=view,
+        )
+
+
+    # ── staff commands (message commands, main server only) ───────────────
+    async def cog_check_staff(self, ctx: commands.Context) -> bool:
+        if ctx.guild is None or ctx.guild.id != ADMIN_GUILD_ID or not is_staff(ctx.author):
+            raise commands.NotOwner("Only the bot owner or an admin can use this.")
+        return True
+
+    @commands.command(name="csrankgive")
+    async def csrankgive(self, ctx: commands.Context, member: discord.Member, amount: int):
+        """`csrankgive @user 5` adds 5 stars, `csrankgive @user -3` removes 3. No rewards are paid."""
+        await self.cog_check_staff(ctx)
+        if amount == 0 or abs(amount) > 500:
+            await ctx.send("❌ Amount must be between -500 and 500 (not 0). Example: `csrankgive @user 5`")
+            return
+        if member.bot or not await asyncio.to_thread(economy.user_exists, member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        r = await asyncio.to_thread(ranked.admin_give_stars, ctx.author.id, member.id, amount)
+        await ctx.send(
+            f"✅ **{esc(member.display_name)}**: **{r['old']}** → **{r['new']}** ⭐ "
+            f"({ranked.tier_emoji(r['tier_new'])} {r['tier_new']})\n"
+            f"`{amount:+d}` stars by {esc(ctx.author.display_name)}. No tier rewards were paid.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @commands.command(name="csrankreset")
+    async def csrankreset(self, ctx: commands.Context, member: Optional[discord.Member] = None, *, arg: str = ""):
+        """`csrankreset @user` resets one player. `csrankreset all` resets everyone (owner only)."""
+        await self.cog_check_staff(ctx)
+        if member is None:
+            if arg.strip().lower() != "all":
+                await ctx.send("Usage: `csrankreset @user`  or  `csrankreset all` (owner only)")
+                return
+            if ctx.author.id != OWNER_ID:
+                await ctx.send("❌ Only the bot owner can reset everyone.")
+                return
+            view = _ConfirmResetAll(ctx.author.id)
+            view.message = await ctx.send(
+                "⚠️ **Reset ranked for EVERY player?** Stars, wins and losses go to 0. This can't be undone.",
+                view=view,
+            )
+            return
+        if member.bot or not await asyncio.to_thread(economy.user_exists, member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        old = await asyncio.to_thread(ranked.admin_reset_player, ctx.author.id, member.id)
+        await ctx.send(
+            f"✅ **{esc(member.display_name)}** ranked reset: was **{old['stars']}** ⭐, "
+            f"{old['wins']}W/{old['losses']}L → now **0** ⭐, 0W/0L.",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @commands.command(name="csrankban")
+    async def csrankban(self, ctx: commands.Context, member: discord.Member, days: int = 30, *, reason: str = ""):
+        """`csrankban @user [days] [reason]` bans from ranked (default 30 days)."""
+        await self.cog_check_staff(ctx)
+        if member.bot or member.id == OWNER_ID or member.id == ctx.author.id:
+            await ctx.send("❌ Can't ban that user from ranked.")
+            return
+        if days < 1 or days > 365:
+            await ctx.send("❌ Days must be between 1 and 365.")
+            return
+        if not await asyncio.to_thread(economy.user_exists, member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        until = await asyncio.to_thread(ranked.admin_ban, ctx.author.id, member.id, days, reason[:100])
+        await ctx.send(
+            f"🚫 **{esc(member.display_name)}** is banned from ranked until <t:{until}:f> (<t:{until}:R>).",
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+
+    @commands.command(name="csrankunban")
+    async def csrankunban(self, ctx: commands.Context, member: discord.Member):
+        """`csrankunban @user` lifts a ranked ban."""
+        await self.cog_check_staff(ctx)
+        had = await asyncio.to_thread(ranked.admin_unban, ctx.author.id, member.id)
+        if had:
+            await ctx.send(f"✅ **{esc(member.display_name)}** can play ranked again.",
+                           allowed_mentions=discord.AllowedMentions.none())
+        else:
+            await ctx.send(f"ℹ️ **{esc(member.display_name)}** had no ranked ban.",
+                           allowed_mentions=discord.AllowedMentions.none())
+
+
+class _ConfirmEndSeason(OwnedView):
+    def __init__(self, owner_id: int, cog: "RankedCog"):
+        super().__init__(owner_id, timeout=30)
+        self.cog = cog
+
+    @ui.button(label="End season now", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.edit_message(content="⏳ Ending the season and sending rewards...", view=None)
+        self.stop()
+        res = await asyncio.to_thread(ranked.end_season_now, interaction.user.id)
+        if res is None:
+            await interaction.edit_original_response(content="ℹ️ No season is running.")
+            return
+        sent, failed = await self.cog._deliver_season_dms()
+        await interaction.edit_original_response(
+            content=(f"✅ **{res['season']}** ended. Rewards paid to **{res['paid']}** player(s): "
+                     f"**{sent}** DM(s) sent, **{failed}** could not be DMed "
+                     f"(they will see it next time they use `csrank`). Stars are reset; start the next one with `csseasonstart`.")
+        )
+
+    @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled.", view=None)
+
+
+class _ConfirmResetAll(OwnedView):
+    def __init__(self, owner_id: int):
+        super().__init__(owner_id, timeout=30)
+
+    @ui.button(label="Confirm reset", style=discord.ButtonStyle.danger)
+    async def confirm(self, interaction: discord.Interaction, button: ui.Button):
+        n = await asyncio.to_thread(ranked.admin_reset_all, interaction.user.id)
+        self.stop()
+        await interaction.response.edit_message(content=f"✅ Ranked reset for **{n}** player(s).", view=None)
+
+    @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: ui.Button):
+        self.stop()
+        await interaction.response.edit_message(content="Cancelled.", view=None)
+
 
 
 async def setup(bot: commands.Bot):
