@@ -226,6 +226,114 @@ class AutoXiView(ui.View):
         )
 
 
+def _show_embed(card) -> discord.Embed:
+    """The embed body `csshow` displays for one card (pulled out so the
+    picker view below can rebuild it for whichever card is on screen)."""
+    styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
+    desc = (
+        f"OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
+        f"{ROLES.get(card_db.effective_role(card), '?')}"
+        + (f" · {HANDS.get(card['batting_hand'], '')} bat" if card["batting_hand"] else "")
+        + (f" · {card_db.effective_bowling_type(card)}" if card_db.effective_bowling_type(card) else "")
+        + f"\n{card['country_emoji']} {esc(card['country'])}"
+    )
+    if styles:
+        desc += "\n\n**Playstyles**\n" + "\n".join(f"• **{esc(s)}**" for s in styles)
+    desc += f"\n\nBuy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
+    embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
+    return embed
+
+
+class ShowPickerView(OwnedView):
+    """csshow with 2+ name matches (e.g. "Virat Kohli" and "Virat Kohli
+    (HW)"): ◀ ▶ flips between them instead of forcing a longer / exact
+    search string."""
+
+    def __init__(self, viewer_id: int, cards: list):
+        super().__init__(viewer_id, timeout=90)
+        self.cards = cards
+        self.idx = 0
+        self._sync()
+
+    def _sync(self):
+        self.prev_btn.disabled = self.idx <= 0
+        self.next_btn.disabled = self.idx >= len(self.cards) - 1
+
+    def build(self) -> discord.Embed:
+        card = self.cards[self.idx]
+        embed = _show_embed(card)
+        embed.set_footer(text=f"Match {self.idx + 1}/{len(self.cards)} — ◀ ▶ to browse other cards with this name")
+        return embed
+
+    async def _render(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        card = self.cards[self.idx]
+        embed = self.build()
+        url = card_cache.cached_url(card["image_path"])
+        if url:
+            embed.set_image(url=url)
+            await interaction.edit_original_response(embed=embed, attachments=[], view=self)
+            return
+        file = await card_cache.card_file(card["image_path"])
+        if file:
+            embed.set_image(url=f"attachment://{file.filename}")
+            msg = await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
+            card_cache.remember(card["image_path"], msg)
+        else:
+            await interaction.edit_original_response(embed=embed, attachments=[], view=self)
+
+    @ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: ui.Button):
+        self.idx = max(0, self.idx - 1)
+        self._sync()
+        await self._render(interaction)
+
+    @ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: ui.Button):
+        self.idx = min(len(self.cards) - 1, self.idx + 1)
+        self._sync()
+        await self._render(interaction)
+
+
+class ViewPickerView(OwnedView):
+    """csview with 2+ owned matches: same ◀ ▶ browsing as ShowPickerView,
+    but each card's content (image or text fallback) comes from the cog's
+    `_csview_content`, since it needs the caller's personal career stats."""
+
+    def __init__(self, viewer_id: int, cards: list, cog: "SquadCog"):
+        super().__init__(viewer_id, timeout=90)
+        self.cards = cards
+        self.idx = 0
+        self.cog = cog
+        self._sync()
+
+    def _sync(self):
+        self.prev_btn.disabled = self.idx <= 0
+        self.next_btn.disabled = self.idx >= len(self.cards) - 1
+
+    async def _render(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        card = self.cards[self.idx]
+        kind, content = await self.cog._csview_content(interaction.user, card)
+        if kind == "image":
+            file = discord.File(io.BytesIO(content), filename="csview.png")
+            await interaction.edit_original_response(embed=None, attachments=[file], view=self)
+        else:
+            await interaction.edit_original_response(embed=content, attachments=[], view=self)
+
+    @ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def prev_btn(self, interaction: discord.Interaction, button: ui.Button):
+        self.idx = max(0, self.idx - 1)
+        self._sync()
+        await self._render(interaction)
+
+    @ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_btn(self, interaction: discord.Interaction, button: ui.Button):
+        self.idx = min(len(self.cards) - 1, self.idx + 1)
+        self._sync()
+        await self._render(interaction)
+
+
 class SquadCog(commands.Cog, name="Squad"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -461,49 +569,47 @@ class SquadCog(commands.Cog, name="Squad"):
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def csshow(self, ctx: commands.Context, *, player: str):
         """Show a player's card and stats."""
-        card, err = sl.resolve_any(security.clean_input(player))
-        if card is None:
-            await ctx.send(f"❌ {err}")
+        query = security.clean_input(player)
+        found = await asyncio.to_thread(card_db.find_cards, query, 8)
+        if not found:
+            await ctx.send(f"❌ No player found matching `{sl.discord_safe(query)}`.")
             return
-        styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
-        desc = (
-            f"OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
-            f"{ROLES.get(card_db.effective_role(card), '?')}"
-            + (f" · {HANDS.get(card['batting_hand'], '')} bat" if card["batting_hand"] else "")
-            + (f" · {card_db.effective_bowling_type(card)}" if card_db.effective_bowling_type(card) else "")
-            + f"\n{card['country_emoji']} {esc(card['country'])}"
-        )
-        if styles:   # names only: the effects / percentages are never shown to players
-            desc += "\n\n**Playstyles**\n" + "\n".join(f"• **{esc(s)}**" for s in styles)
-        desc += f"\n\nBuy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
-        embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
-        await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
+        # Typing the FULL exact name (e.g. "Virat Kohli (HW)") is still
+        # unambiguous on its own — only show the ◀ ▶ picker when the typed
+        # text doesn't already pin down one specific card.
+        if found[0]["playername_key"] == query.strip().lower():
+            cards = [found[0]]
+        else:
+            cards = found
 
-    # -- player stats card (personal — only your own cards) --------------
-    @commands.command(name="csview")
-    @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csview(self, ctx: commands.Context, *, player: str):
-        """Show a card you own, with YOUR career batting/bowling stats on it."""
+        if len(cards) == 1:
+            embed = _show_embed(cards[0])
+            await card_cache.send_embed(ctx, embed, cards[0]["image_path"])   # cached link = no upload
+            return
+
+        view = ShowPickerView(ctx.author.id, cards)
+        embed = view.build()
+        url = card_cache.cached_url(cards[0]["image_path"])
+        if url:
+            embed.set_image(url=url)
+            view.message = await ctx.send(embed=embed, view=view)
+        else:
+            file = await card_cache.card_file(cards[0]["image_path"])
+            if file:
+                embed.set_image(url=f"attachment://{file.filename}")
+                view.message = await ctx.send(embed=embed, file=file, view=view)
+                card_cache.remember(cards[0]["image_path"], view.message)
+            else:
+                view.message = await ctx.send(embed=embed, view=view)
+
+    async def _csview_content(self, author, card):
+        """Build what `csview` shows for ONE card: ('image', png_bytes) if the
+        drawn card worked, else ('embed', discord.Embed) as the text fallback.
+        Shared by the plain command and ViewPickerView's ◀ ▶ so every card in
+        a multi-match picker renders the same way a single match would."""
         from career_stats import get_career_personal, batting_figures, bowling_figures
 
-        card, err = await asyncio.to_thread(sl.resolve_any, security.clean_input(player))
-        if card is None:
-            await ctx.send(f"❌ {err}")
-            return
-
-        # csview is for cards you currently own only. Selling a card doesn't
-        # erase your stats with it (they're kept in case you buy it back) —
-        # it just means csview won't show them to anyone while you don't
-        # own it.
-        owns_it = await asyncio.to_thread(economy.owns, ctx.author.id, card["playername_key"])
-        if not owns_it:
-            await ctx.send(
-                f"❌ You don't own **{esc(card['playername'])}**, so `csview` can't show it. "
-                f"(Only cards you currently own can be viewed here.)"
-            )
-            return
-
-        career = await asyncio.to_thread(get_career_personal, ctx.author.id, card["playername_key"])
+        career = await asyncio.to_thread(get_career_personal, author.id, card["playername_key"])
         bat = batting_figures(career)
         bowl = bowling_figures(career)
 
@@ -515,7 +621,7 @@ class SquadCog(commands.Cog, name="Squad"):
 
         header = f"OVR {card['ovr']}  BAT {card['bat']}  BOWL {card['bowl']}"
         lines = [header]
-        lines.append(f"Owner: {esc(ctx.author.display_name)}")
+        lines.append(f"Owner: {esc(author.display_name)}")
         lines.append(f"Value: {economy.fmt_coins(sl.sell_value(card))}")
         styles = await asyncio.to_thread(card_db.get_player_narratives, card["playername_key"])
         if styles:   # only cards that have a playstyle/narrative
@@ -527,11 +633,10 @@ class SquadCog(commands.Cog, name="Squad"):
             png = await asyncio.to_thread(
                 generate_view_card,
                 card["playername"], card["ovr"], card["bat"], card["bowl"],
-                ctx.author.display_name, f"{sl.sell_value(card):,} coins",
+                author.display_name, f"{sl.sell_value(card):,} coins",
                 bat, bowl, card["image_path"], styles,
             )
-            await ctx.send(file=discord.File(io.BytesIO(png), filename="csview.png"))
-            return
+            return "image", png
         except Exception as e:
             print(f"[csview] image card failed, using text embed: {e}")
 
@@ -541,7 +646,56 @@ class SquadCog(commands.Cog, name="Squad"):
             color=discord.Color.blurple(),
         )
         embed.set_footer(text="Your personal stats with this card.")
-        await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
+        return "embed", embed
+
+    # -- player stats card (personal — only your own cards) --------------
+    @commands.command(name="csview")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def csview(self, ctx: commands.Context, *, player: str):
+        """Show a card you own, with YOUR career batting/bowling stats on it."""
+        query = security.clean_input(player)
+        found = await asyncio.to_thread(card_db.find_cards, query, 8)
+        if not found:
+            await ctx.send(f"❌ No player found matching `{sl.discord_safe(query)}`.")
+            return
+
+        # csview is for cards you currently own only. Selling a card doesn't
+        # erase your stats with it (they're kept in case you buy it back) —
+        # it just means csview won't show them to anyone while you don't
+        # own it.
+        owned = await asyncio.to_thread(sl.owned_cards, ctx.author.id)
+        owned_keys = {c["playername_key"] for c in owned}
+        owned_matches = [c for c in found if c["playername_key"] in owned_keys]
+        if not owned_matches:
+            await ctx.send(
+                f"❌ You don't own **{esc(found[0]['playername'])}**, so `csview` can't show it. "
+                f"(Only cards you currently own can be viewed here.)"
+            )
+            return
+
+        # Typing the FULL exact name still goes straight to that one card,
+        # same as csshow above — the ◀ ▶ picker is only for a name that
+        # matches more than one card you own (e.g. a normal + a Halloween card).
+        q = query.strip().lower()
+        if owned_matches[0]["playername_key"] == q:
+            cards = [owned_matches[0]]
+        else:
+            cards = owned_matches
+
+        if len(cards) == 1:
+            kind, content = await self._csview_content(ctx.author, cards[0])
+            if kind == "image":
+                await ctx.send(file=discord.File(io.BytesIO(content), filename="csview.png"))
+            else:
+                await card_cache.send_embed(ctx, content, cards[0]["image_path"])   # cached link = no upload
+            return
+
+        view = ViewPickerView(ctx.author.id, cards, self)
+        kind, content = await self._csview_content(ctx.author, cards[0])
+        if kind == "image":
+            view.message = await ctx.send(file=discord.File(io.BytesIO(content), filename="csview.png"), view=view)
+        else:
+            view.message = await ctx.send(embed=content, view=view)
 
     # -- player stats card (universal — premium only) ---------------------
     @commands.command(name="csdata")

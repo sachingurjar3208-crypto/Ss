@@ -529,6 +529,7 @@ VIEW_TIMEOUT = 300  # 5 minutes per action
 # sides have it on, the whole match runs by itself.
 
 AUTOPLAY_DELAY = 3.0   # seconds before the bot "clicks" for the player
+RANKED_BOT_THINK_RANGE = (1.0, 2.0)   # ranked bot opponent's per-ball "thinking" delay (was 3.0-8.0)
 
 
 def autoplay_ids(game) -> set:
@@ -724,7 +725,7 @@ async def _autoplay_act(view, uid: int) -> None:
         # A ranked bot "thinks" for a random, human-like time; real players' autoplay uses the fixed delay.
         _g = getattr(view, "game", None)
         if uid in getattr(_g, "bot_ids", ()):
-            await asyncio.sleep(random.uniform(3.0, 8.0))
+            await asyncio.sleep(random.uniform(*RANKED_BOT_THINK_RANGE))
         else:
             await asyncio.sleep(AUTOPLAY_DELAY)
         view.__dict__["_autoplay_uid"] = uid
