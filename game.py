@@ -576,6 +576,25 @@ class GameState:
     def rotate_strike(self) -> None:
         self.striker, self.non_striker = self.non_striker, self.striker
 
+    def register_maiden(self) -> None:
+        """Count a maiden for the over that has just finished (6 legal balls, 0 runs incl. extras)
+        and queue its banner in `pending_moments`. Safe to call twice for the same over."""
+        legal_balls = getattr(self, "current_over_balls", 0)
+        if not (self.current_bowler and legal_balls == 6 and self.current_over_runs == 0):
+            return
+        marker = (self.innings, self.legal_balls[self.innings - 1])
+        if getattr(self, "_maiden_marker", None) == marker:
+            return
+        self._maiden_marker = marker
+        _bn = _pname(self.current_bowler)
+        self.bowler_maidens[_bn] = self.bowler_maidens.get(_bn, 0) + 1
+        self._ensure_bowl_stats(_bn)
+        self.bowler_stats[_bn]["m"] = self.bowler_maidens[_bn]
+        # Banner for views.py / practice_views.py (see moments.drain_pending_items)
+        self.__dict__.setdefault("pending_moments", []).append(
+            ("maiden", _bn, self.bowler_maidens[_bn], legal_balls)
+        )
+
     def end_over(self) -> None:
         if self._over_ended_flag:
             return
@@ -589,12 +608,7 @@ class GameState:
         # an unconditional rotate_strike() call here again.
         if self.striker is None and self.non_striker is not None:
             self.striker, self.non_striker = self.non_striker, self.striker
-        legal_balls = getattr(self, "current_over_balls", 0)
-        if self.current_bowler and legal_balls == 6 and self.current_over_runs == 0:
-            _bn = _pname(self.current_bowler)
-            self.bowler_maidens[_bn] = self.bowler_maidens.get(_bn, 0) + 1
-            self._ensure_bowl_stats(_bn)
-            self.bowler_stats[_bn]["m"] = self.bowler_maidens[_bn]
+        self.register_maiden()
         self.over_history.append(
             {
                 "runs": self.current_over_runs,
@@ -680,39 +694,18 @@ class GameState:
             return random.choice(list(direction_bias.values()))
 
     def calculate_win_probability(self) -> tuple[float, float]:
-        """Returns (batting_team_prob, bowling_team_prob) using simplified DLS-inspired model."""
-        inn = self.innings - 1
-        current_runs = self.runs[inn]
-        wickets = self.wickets[inn]
-        legal_balls = self.legal_balls[inn]
-        total_balls = self.overs * 6
-
+        """Returns (batting_team_prob, bowling_team_prob). Innings 1 is always 50/50; in a chase it
+        uses the simulation in moments.py (same number as the on-screen win-probability bar)."""
         if self.innings == 1:
-            target = current_runs + 1
-            target_balls = total_balls
-            batting_prob = 0.5
-        else:
-            target = self.runs[0] + 1
-            target_balls = total_balls
-            runs_needed = max(0, target - current_runs)
-            balls_remaining = max(1, total_balls - legal_balls)
-            wickets_in_hand = max(0, 10 - wickets)
-            # Par score resource model (simplified)
-            max_possible = wickets_in_hand * 36 + balls_remaining
-            if max_possible <= 0:
-                batting_prob = 0.0 if runs_needed > 0 else 1.0
-            else:
-                batting_prob = min(0.99, max(0.01, runs_needed / max_possible))
-                if runs_needed == 0:
-                    batting_prob = 1.0
-                elif balls_remaining == 0:
-                    batting_prob = 0.0
-
-        bowling_prob = 1.0 - batting_prob
-        if self.innings == 1:
-            batting_prob = 0.5
-            bowling_prob = 0.5
-        return round(batting_prob, 3), round(bowling_prob, 3)
+            return 0.5, 0.5
+        try:
+            from moments import chase_win_probability
+            p = chase_win_probability(self)
+        except Exception:
+            p = None
+        if p is None:
+            p = 0.5
+        return round(p, 3), round(1.0 - p, 3)
 
     def record_win_prob(self, ball_number: int) -> None:
         bat_p, bowl_p = self.calculate_win_probability()

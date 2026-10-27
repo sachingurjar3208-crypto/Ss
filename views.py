@@ -25,6 +25,7 @@ def _toss_result_file(result: str) -> tuple[discord.File, str]:
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary
+import moments as _moments
 from wagon_wheel import wagon_wheel_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 
@@ -1103,6 +1104,11 @@ async def _send_bowling_prompt(
 
 async def _send_next_bowler_prompt(channel: discord.TextChannel, game: GameState):
     """Prompt the bowling captain to choose the next over's bowler."""
+    for _item in _moments.drain_pending_items(game):   # maiden-over banner (if the over just ended was one)
+        try:
+            await _send_gif_item(channel, _item)
+        except Exception:
+            pass
     xi_embed = build_playing_xi_embed(game.get_bowling_team())
     nb_view  = NextBowlerView(game)
     nb_view._channel = channel
@@ -1198,6 +1204,13 @@ async def _process_delivery(
     speed        = _announced_speed if _announced_speed is not None else random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
 
+    # For the playstyle commentary lines (moments.py): same attributes the engine uses,
+    # plus a few numbers that change once this ball has been applied to the game.
+    _bat_attrs   = player_attributes(striker)
+    _bowl_attrs  = player_attributes(bowler)
+    _prev_delivery       = getattr(game, "last_delivery_internal", None)
+    _bowler_balls_before = game.bowler_ball_count.get(bname, 0)
+
     if shot_button == "Leave":
         # BUG FIX: "Leave" was mapped to the "Defend" internal shot purely
         # for matchup/narrative lookups, but that meant it also went through
@@ -1210,8 +1223,8 @@ async def _process_delivery(
         outcome, is_extra = calculate_outcome(
             delivery_internal, shot_internal,
             bowler.get("bowl", 80), striker.get("bat", 80),
-            bowler_attrs=player_attributes(bowler),
-            batsman_attrs=player_attributes(striker),
+            bowler_attrs=_bowl_attrs,
+            batsman_attrs=_bat_attrs,
             innings=game.innings,
             current_over=current_over,
             rrr=game.rrr(),
@@ -1388,6 +1401,19 @@ async def _process_delivery(
             if ump_gif:
                 gif_urls.append(ump_gif)
 
+    # Memorable moments: playstyle line, milestone / hat-trick / 5-wicket banners, chase pressure.
+    # (Cosmetic only — moments.py never changes the score and never raises.)
+    _mom = _moments.after_ball(
+        game, outcome=outcome, shot_internal=shot_internal, delivery_internal=delivery_internal,
+        delivery_button=delivery_button, prev_delivery=_prev_delivery,
+        striker_name=sname, bowler_name=bname, bat_attrs=_bat_attrs, bowl_attrs=_bowl_attrs,
+        striker_runs_before=striker_runs_before, bowler_wkts_before=bowler_wickets_before,
+        over_index=current_over, bowler_balls_before=_bowler_balls_before,
+    )
+    if _mom["style"]:
+        commentary = f"{commentary}\n{_mom['style']}"
+    gif_urls += _mom["items"]
+
     # Batting milestone GIFs (50, 100, 150, …)
     if outcome in ("1", "2", "3", "4", "6"):
         runs_after = game.batsman_stats.get(sname, {}).get("runs", 0)
@@ -1403,6 +1429,10 @@ async def _process_delivery(
                 if gif:
                     gif_urls.append(gif)
                 break
+
+    # Last-overs chase tension ("12 needed off 6 balls 😰") goes at the very end of the commentary
+    if _mom["pressure"]:
+        commentary = f"{commentary}\n{_mom['pressure']}"
 
     # ── Acknowledge the shot button (remove it from the message) ─────────
     # BUG FIX #4: always ack the interaction immediately to avoid
@@ -1466,6 +1496,7 @@ async def _process_delivery(
         if innings_over:
             if outcome == "W":
                 game.timeline.append(_timeline_emoji("W"))
+            gif_urls += _moments.last_over_items(game)   # maiden in the innings' final over
             if game.innings == 1:
                 await _do_innings_break(channel, game, commentary, embed, gif_urls, interaction)
             else:
@@ -1612,6 +1643,10 @@ UMPIRE_BANNER = True   # False = go back to the GIF links saved in the umpire_me
 
 async def _send_gif_item(channel, item: str) -> None:
     """gif_urls holds plain URLs, or "umpire:<event>" for the generated umpire banner."""
+    if item.startswith("moment:"):   # milestone / hat-trick / maiden / 5-wicket banner
+        from moments import send_moment_item
+        await send_moment_item(channel, item)
+        return
     if item.startswith("umpire:"):
         try:
             from umpire_gif import umpire_file
@@ -2468,6 +2503,7 @@ class DRSView(ui.View):
                 self.game.wickets[inn] = max(0, self.game.wickets[inn] - 1)
                 if self.game.dismissed:
                     self.game.dismissed.pop()
+                _moments.undo_wicket(self.game)   # a not-out ball breaks any hat-trick run
                 bowler_key = _pname(self.game.current_bowler) if self.game.current_bowler else None
                 if bowler_key and bowler_key in self.game.bowler_stats:
                     _bs = self.game.bowler_stats[bowler_key]

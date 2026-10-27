@@ -280,6 +280,14 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
             value=f"**{bat_team_name}** need **{needed}** off **{balls_left}** balls",
             inline=False,
         )
+        # Live win-probability bar (cosmetic — never lets a problem here break the scoreboard)
+        try:
+            from moments import win_bar_field
+            _wb = win_bar_field(game)
+            if _wb:
+                embed.add_field(name=_wb[0], value=_wb[1], inline=False)
+        except Exception as _e:
+            print(f"[win bar] skipped ({type(_e).__name__}: {_e})")
 
     if getattr(game, "toss_note", None):
         embed.set_footer(text=game.toss_note)

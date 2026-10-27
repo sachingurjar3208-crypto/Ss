@@ -14,6 +14,7 @@ from discord import ui
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary
+import moments as _moments
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 from data import (
     TIMELINE_EMOJIS,
@@ -232,11 +233,17 @@ async def _practice_process_delivery_inner(
     speed        = random.uniform(*speed_range)
     current_over = game.current_legal_balls // 6
 
+    # For the playstyle commentary lines (moments.py)
+    _bat_attrs   = player_attributes(striker)
+    _bowl_attrs  = player_attributes(bowler)
+    _prev_delivery       = getattr(game, "last_delivery_internal", None)
+    _bowler_balls_before = game.bowler_ball_count.get(bname, 0)
+
     outcome, is_extra = calculate_outcome(
         delivery_internal, shot_internal,
         bowler.get("bowl", 80), striker.get("bat", 80),
-        bowler_attrs  = player_attributes(bowler),
-        batsman_attrs = player_attributes(striker),
+        bowler_attrs  = _bowl_attrs,
+        batsman_attrs = _bat_attrs,
         innings       = game.innings,
         current_over  = current_over,
         rrr           = game.rrr(),
@@ -340,6 +347,18 @@ async def _practice_process_delivery_inner(
         if ump_gif:
             gif_urls.append(ump_gif)
 
+    # Memorable moments: playstyle line, milestone / hat-trick / 5-wicket banners, chase pressure
+    _mom = _moments.after_ball(
+        game, outcome=outcome, shot_internal=shot_internal, delivery_internal=delivery_internal,
+        delivery_button=delivery_button, prev_delivery=_prev_delivery,
+        striker_name=sname, bowler_name=bname, bat_attrs=_bat_attrs, bowl_attrs=_bowl_attrs,
+        striker_runs_before=striker_runs_before, bowler_wkts_before=bowler_wickets_before,
+        over_index=current_over, bowler_balls_before=_bowler_balls_before,
+    )
+    if _mom["style"]:
+        commentary = f"{commentary}\n{_mom['style']}"
+    gif_urls += _mom["items"]
+
     if outcome in ("1", "2", "3", "4", "6"):
         runs_after = game.batsman_stats.get(sname, {}).get("runs", 0)
         for milestone in (50, 100, 150, 200, 250, 300):
@@ -352,6 +371,9 @@ async def _practice_process_delivery_inner(
                 if gif:
                     gif_urls.append(gif)
                 break
+
+    if _mom["pressure"]:
+        commentary = f"{commentary}\n{_mom['pressure']}"
 
     # Ack the interaction
     try:
@@ -366,8 +388,7 @@ async def _practice_process_delivery_inner(
     # ── Wicket (not last) ─────────────────────────────────────────────────
     if outcome == "W" and not innings_over:
         await channel.send(content=commentary, embed=embed)
-        for url in gif_urls:
-            await channel.send(url)
+        await _send_gifs(channel, gif_urls)
         game.timeline.append(_timeline_emoji("W"))
         await _practice_handle_wicket(channel, game)
         return
@@ -376,9 +397,9 @@ async def _practice_process_delivery_inner(
     if innings_over:
         if outcome == "W":
             game.timeline.append(_timeline_emoji("W"))
+        gif_urls += _moments.last_over_items(game)   # maiden in the innings' final over
         await channel.send(content=commentary, embed=embed)
-        for url in gif_urls:
-            await channel.send(url)
+        await _send_gifs(channel, gif_urls)
         if game.innings == 1:
             await _practice_start_second_innings(channel, game)
         else:
@@ -396,29 +417,38 @@ async def _practice_process_delivery_inner(
         game.timeline.append("|")
         game.end_over()
         await channel.send(content=commentary, embed=embed)
-        for url in gif_urls:
-            await channel.send(url)
+        await _send_gifs(channel, gif_urls)
         await _practice_next_over(channel, game)
         return
 
     # ── Extras — re-bowl ─────────────────────────────────────────────────
     if is_extra:
         await channel.send(content=commentary, embed=embed)
-        for url in gif_urls:
-            await channel.send(url)
+        await _send_gifs(channel, gif_urls)
         await _practice_send_bowling(channel, game)
         return
 
     # ── Normal continue ───────────────────────────────────────────────────
     await channel.send(content=commentary, embed=embed)
-    for url in gif_urls:
-        await channel.send(url)
+    await _send_gifs(channel, gif_urls)
     await _practice_send_bowling(channel, game)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Flow helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
+async def _send_gifs(channel: discord.TextChannel, gif_urls: list[str]):
+    """Post GIF links; "moment:..." items are the generated milestone banners."""
+    for url in gif_urls:
+        try:
+            if url.startswith("moment:"):
+                await _moments.send_moment_item(channel, url)
+            else:
+                await channel.send(url)
+        except Exception:
+            pass
+
 
 async def _practice_send_bowling(channel: discord.TextChannel, game: GameState):
     """Send the bowling UI — bot bowls if it's the bot's turn, else show buttons."""
@@ -532,6 +562,7 @@ async def _practice_next_over(channel: discord.TextChannel, game: GameState):
     """Auto-select or prompt next bowler depending on whose turn it is."""
     if channel.id not in active_practice or active_practice.get(channel.id) is not game:
         return
+    await _send_gifs(channel, _moments.drain_pending_items(game))   # maiden-over banner
     human_is_bowling = (game.bowling_user_id == game.challenger.id)
 
     if human_is_bowling:

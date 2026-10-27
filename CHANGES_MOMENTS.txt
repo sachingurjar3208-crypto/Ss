@@ -1,0 +1,37 @@
+MEMORABLE MOMENTS UPDATE
+========================
+NEW files (copy into the bot folder):
+  moments.py       milestone items, pressure lines, win-probability, playstyle lines
+  moment_gif.py    the generated banner GIF (same look as umpire_gif.py, with the player's name)
+CHANGED files:
+  views.py, practice_views.py, game.py, embeds.py
+
+1) Milestone banners (player name on the banner)
+   50 / 100 (also 150 / 200), hat-trick, maiden over, 5-wicket haul.
+   - Hat-trick = same bowler, 3 wickets on his own 3 consecutive legal balls (wides/no-balls don't break it).
+   - Banners for a wicket (hat-trick, 5-fer) wait for the DRS decision, like the other OUT GIFs.
+     If DRS overturns the OUT, the hat-trick run is reset.
+   - Maiden banner comes just before the "choose your next bowler" prompt.
+   - Your /addgif GIFs still work and are posted as before, on top of the banner.
+   - Also fixed: a maiden in the LAST over of an innings was never counted in the stats (end_over() is
+     not called there). It is now counted and gets its banner.
+
+2) Pressure lines + win-probability bar (chase only)
+   - Last 3 overs (10+ over match) / 2 overs (5-9 overs) / 1 over (shorter): "12 needed off 6 balls 😰".
+     Emoji changes with how the chase is going. Last ball: "Last ball! 4 needed to win".
+   - Scoreboard shows a "Win probability" bar (▰▰▰▱▱, plain characters, no emoji) in the 2nd innings.
+     It is a small simulation that is calibrated on the target (a fresh chase starts near 50/50) and
+     then follows runs / wickets / balls left. Cached, ~40 ms per new state.
+   - GameState.calculate_win_probability() used to be inverted (more runs needed = higher win chance).
+     It now uses the same simulation.
+
+3) Playstyle commentary (English). A line appears only when the playstyle's effect really showed up:
+   Batters (on a four/six):  Chase Master (2nd innings), Breakthrough (six in a chase), Aggressive,
+                             Cover Drive Specialist (drive four), Mr360 (360 shots)
+   Bowlers (on a wicket):    Swing King / Swing Master (swing ball), Yorker King (yorker), Lethal Pace,
+                             Googly Master, Mystery, Early Breaker, Spell Finisher, Mind Games
+   Same player + playstyle can't repeat its line within one over. "Balanced" and the two "Low ..."
+   playstyles intentionally get no line. Edit the wording in moments.py (_BAT_LINES / _BOWL_LINES).
+
+Nothing here changes match results: moments.py only reads the match state, and every call is wrapped
+so a problem in it is just skipped.
