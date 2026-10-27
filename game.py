@@ -913,6 +913,7 @@ class GameState:
         self.current_ball_free_hit = False
 
     async def build_team_list(self, user_id: int, instances) -> list[MatchPlayer]:
+        import player_buffs
         from engine import (
             apply_lor_bonus,
             apply_memories_boost,
@@ -931,6 +932,7 @@ class GameState:
         )
 
         team = []
+        buffs = player_buffs.load_map()   # hidden per-player buff/nerf %, never shown to players
         for inst in instances:
             if isinstance(inst, MatchPlayer):
                 team.append(inst)
@@ -964,6 +966,9 @@ class GameState:
                     ovr, bat, bowl = apply_memories_boost(ovr, bat, bowl)
                 if is_potm_event(inst):
                     ovr, bat, bowl = apply_potm_boost(ovr, bat, bowl)
+                buff_pct = buffs.get(player_buffs.norm_key(name))
+                if buff_pct:
+                    bat, bowl = player_buffs.apply(role, bat, bowl, buff_pct)
                 memories_type = get_memories_player_type(inst)
                 fielder_grade = getattr(inst.ball, "fielder_grade", 1) or 1
                 narrative_attrs = get_narrative_attributes(inst.ball)

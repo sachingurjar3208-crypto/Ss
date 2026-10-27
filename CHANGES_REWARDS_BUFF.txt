@@ -1,0 +1,26 @@
+CHANGES: csrankrewards + hidden player buff/nerf
+
+NEW  csrankrewards (everyone)
+  Image listing every tier Bronze -> Ruby with:
+  - tier-up reward (✅ once you have claimed it this season)
+  - season-end reward for the tier you finish in
+  - your current tier, stars, stars still needed for the next tier
+  - season name and time left (plus a Discord timestamp line above the image)
+  csrank's image is unchanged.
+  Files: rank_rewards_image.py (new), ranked.py (reward_summary), ranked_cog.py.
+
+NEW  hidden buff / nerf (staff only, never shown to players)
+  csbuff <player> <+/-percent>   e.g.  csbuff Virat Kohli +10   /   csbuff Virat Kohli -15
+  csbuffoff <player>             remove it
+  csbufflist                     list all active buffs
+  Applied by role to the match stats only:
+    Batter / WK     -> batting
+    Bowler          -> bowling
+    All-rounder     -> batting AND bowling
+  Card display, csrank, embeds and all messages are unchanged. Staff replies go to the
+  command author's DM, and the command message is deleted when the bot has permission.
+  Files: player_buffs.py (new), game.py (build_team_list), ranked_cog.py.
+  The % is stored per player name, so every owned copy of that player is affected.
+  Range: -90% to +100%. Stats never go below 0.
+
+help_image.py: csrankrewards added to the help list.

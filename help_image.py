@@ -49,6 +49,7 @@ SECTIONS = [
         ("`csmp ranked`", "Rank-up mode queue (2 overs, same-tier opponents)"),
         ("`csrank`", "Your tier, stars and season record"),
         ("`csranktop`", "Global top 10 by stars"),
+        ("`csrankrewards`", "Ranked rewards for every tier + your progress"),
     ]),
     ("SQUAD", (90, 156, 248), [
         ("`cssquad` `csshow <player>`", "View your squad, or one card"),

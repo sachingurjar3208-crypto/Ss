@@ -854,3 +854,61 @@ def admin_unban(admin_id, user_id) -> bool:
         _ensure(conn)
         _admin_log(conn, admin_id, int(user_id), "unban", "had ban" if had else "no ban")
     return had
+
+
+# ── Rewards overview (csrankrewards) ─────────────────────────────────────────
+
+def _bundle_parts(spec: dict) -> list[str]:
+    """Short text for one reward bundle, e.g. ["5 Vouchers", "100,000 Coins"]."""
+    parts: list[str] = []
+    if spec.get("vouchers"):
+        parts.append(f"{int(spec['vouchers'])} Vouchers")
+    if spec.get("coins"):
+        parts.append(f"{int(spec['coins']):,} Coins")
+    for pack, qty in (spec.get("packs") or {}).items():
+        parts.append(f"{int(qty)}x {sl.PACKS.get(pack, {}).get('label', pack)}")
+    if spec.get("card"):
+        lo, hi = spec["card"]
+        parts.append(f"{lo} OVR Card" if lo == hi else f"{lo}-{hi} OVR Card")
+    return parts
+
+
+def reward_summary(user_id) -> dict:
+    """Everything csrankrewards needs for one player: every tier with its tier-up reward (and whether
+    this player already claimed it this season), its season-end reward, the player's stars / tier,
+    the next tier with the stars still needed, and when the season ends."""
+    uid = int(user_id)
+    info = get_player(uid)
+    season = season_info()
+    conn = economy._conn()
+    try:
+        _ensure(conn)
+        r = conn.execute("SELECT claimed FROM ranked_players WHERE user_id = ?", (uid,)).fetchone()
+    finally:
+        conn.close()
+    claimed = {t for t in ((r["claimed"] if r else "") or "").split(",") if t}
+    tiers = []
+    for t in TIERS:
+        name = t["name"]
+        up = TIER_UP_REWARDS.get(name)
+        sea = SEASON_REWARDS.get(name)
+        tiers.append({
+            "name": name,
+            "emoji": t["emoji"],
+            "min": t["min"],
+            "tier_up": _bundle_parts(up) if up else [],
+            "claimed": name in claimed,
+            "season": _bundle_parts(sea) if sea else [],
+        })
+    nxt = next_tier(info["stars"])
+    return {
+        "tiers": tiers,
+        "stars": info["stars"],
+        "tier": info["tier"],
+        "next_name": nxt[0]["name"] if nxt else None,
+        "next_min": nxt[0]["min"] if nxt else None,
+        "next_needed": nxt[1] if nxt else None,
+        "season_active": season["active"],
+        "season_name": season["name"],
+        "season_end": season["end"],
+    }

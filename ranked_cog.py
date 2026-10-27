@@ -3,6 +3,7 @@
 Commands:
   csmp ranked   join the ranked queue (2 overs, same-tier opponents only)
   csrank        your tier / stars / season record     (csrank @user for someone else)
+  csrankrewards  every tier's tier-up + season-end reward, your progress, season end time
   csranktop     global top 10 by stars
   csseason                    current season and when it ends
   csseasonstart [days]        (owner) start a season now; it ends by itself after 30 days (or `days`)
@@ -29,9 +30,12 @@ import discord
 from discord import ui
 from discord.ext import commands, tasks
 
+import card_db
 import economy
+import player_buffs
 import ranked
 import rank_image
+import rank_rewards_image
 import squad_logic as sl
 from bot_guard import ADMIN_GUILD_ID, OWNER_ID, is_staff
 from security import OwnedView, esc
@@ -457,6 +461,21 @@ class RankedCog(commands.Cog, name="Ranked"):
             note = f"🚫 Ranked blacklist ends <t:{int(info['blacklist_until'])}:R>"
         await ctx.send(content=note, file=discord.File(io.BytesIO(png), filename="rank.png"))
 
+    @commands.command(name="csrankrewards")
+    @commands.cooldown(1, 20, commands.BucketType.user)
+    async def csrankrewards(self, ctx: commands.Context):
+        """Rewards for every tier (Bronze -> Ruby), what you already claimed, and when the season ends."""
+        if not await asyncio.to_thread(economy.user_exists, ctx.author.id):
+            await ctx.send("❌ You must debut first. Use `csdebut`.")
+            return
+        info = await asyncio.to_thread(ranked.reward_summary, ctx.author.id)
+        png = await asyncio.to_thread(rank_rewards_image.generate_rewards_card, **info)
+        note = None
+        if info["season_active"] and info["season_end"]:
+            end = int(info["season_end"])
+            note = f"⏳ Season ends <t:{end}:F> (<t:{end}:R>)"
+        await ctx.send(content=note, file=discord.File(io.BytesIO(png), filename="rank_rewards.png"))
+
     @commands.command(name="csranktop")
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def csranktop(self, ctx: commands.Context):
@@ -550,6 +569,80 @@ class RankedCog(commands.Cog, name="Ranked"):
             f"`{amount:+d}` stars by {esc(ctx.author.display_name)}. No tier rewards were paid.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    # ── hidden buff / nerf (staff). Replies go to the admin's DM; nothing is shown to players ──
+    async def _admin_reply(self, ctx: commands.Context, text: str) -> None:
+        try:
+            await ctx.message.delete()          # keep the channel clean
+        except Exception:
+            pass
+        try:
+            await ctx.author.send(text)
+        except Exception:
+            await ctx.send("✅ Done. (I couldn't DM you the details, so turn on DMs from this server.)",
+                           allowed_mentions=discord.AllowedMentions.none())
+
+    async def _find_card_name(self, query: str) -> str | None:
+        card = await asyncio.to_thread(card_db.get_card, query)
+        if card is not None:
+            return card["playername"]
+        hits = await asyncio.to_thread(card_db.find_cards, query, 2)
+        return hits[0]["playername"] if len(hits) == 1 else None
+
+    @commands.command(name="csbuff")
+    async def csbuff(self, ctx: commands.Context, *, arg: str = ""):
+        """`csbuff <player> <+/-percent>` e.g. `csbuff Virat Kohli +10`. Hidden from players.
+        Batter/WK -> batting, Bowler -> bowling, All-rounder -> both."""
+        await self.cog_check_staff(ctx)
+        parts = arg.strip().rsplit(None, 1)
+        usage = "Usage: `csbuff <player> <+/-percent>`  e.g. `csbuff Virat Kohli +10` or `csbuff Virat Kohli -15`"
+        if len(parts) != 2:
+            await self._admin_reply(ctx, usage)
+            return
+        query, raw = parts
+        try:
+            pct = float(raw.replace("%", "").replace("+", ""))
+        except ValueError:
+            await self._admin_reply(ctx, usage)
+            return
+        name = await self._find_card_name(query)
+        if name is None:
+            await self._admin_reply(ctx, f"❌ No single card matches **{query}**.")
+            return
+        try:
+            await asyncio.to_thread(player_buffs.set_buff, ctx.author.id, name, pct)
+        except ValueError as e:
+            await self._admin_reply(ctx, f"❌ {e}")
+            return
+        if pct == 0:
+            await self._admin_reply(ctx, f"✅ Buff for **{name}** cleared.")
+        else:
+            await self._admin_reply(ctx, f"✅ **{name}**: `{pct:+g}%` saved. Hidden from players.")
+
+    @commands.command(name="csbuffoff")
+    async def csbuffoff(self, ctx: commands.Context, *, player: str = ""):
+        """`csbuffoff <player>` removes a hidden buff/nerf."""
+        await self.cog_check_staff(ctx)
+        if not player.strip():
+            await self._admin_reply(ctx, "Usage: `csbuffoff <player>`")
+            return
+        name = await self._find_card_name(player.strip())
+        if name is None:
+            await self._admin_reply(ctx, f"❌ No single card matches **{player.strip()}**.")
+            return
+        had = await asyncio.to_thread(player_buffs.clear_buff, ctx.author.id, name)
+        await self._admin_reply(ctx, f"✅ Buff for **{name}** removed." if had else f"ℹ️ **{name}** had no buff.")
+
+    @commands.command(name="csbufflist")
+    async def csbufflist(self, ctx: commands.Context):
+        """Lists every hidden buff/nerf (sent to your DM)."""
+        await self.cog_check_staff(ctx)
+        rows = await asyncio.to_thread(player_buffs.list_buffs)
+        if not rows:
+            await self._admin_reply(ctx, "No hidden buffs/nerfs are set.")
+            return
+        body = "\n".join(f"`{pct:+g}%`  {key}" for key, pct in rows)
+        await self._admin_reply(ctx, f"**Hidden buffs / nerfs ({len(rows)})**\n{body}"[:1900])
 
     @commands.command(name="csrankreset")
     async def csrankreset(self, ctx: commands.Context, member: Optional[discord.Member] = None, *, arg: str = ""):
