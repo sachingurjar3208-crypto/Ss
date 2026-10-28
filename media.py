@@ -1,3 +1,4 @@
+import re
 import sqlite3
 import os
 
@@ -135,15 +136,16 @@ def get_milestone_gif(player_name: str, milestone: str) -> str | None:
     """
     conn = _conn()
     c = conn.cursor()
-    # 1. Individual
-    c.execute(
-        "SELECT gif_url FROM milestone_media WHERE universal=0 AND LOWER(player_name)=LOWER(?) AND milestone=?",
-        (player_name, milestone),
-    )
-    row = c.fetchone()
-    if row:
-        conn.close()
-        return row["gif_url"]
+    # 1. Individual (exact card name first, then the base name for event cards)
+    for nm in _name_candidates(player_name):
+        c.execute(
+            "SELECT gif_url FROM milestone_media WHERE universal=0 AND LOWER(player_name)=LOWER(?) AND milestone=?",
+            (nm, milestone),
+        )
+        row = c.fetchone()
+        if row:
+            conn.close()
+            return row["gif_url"]
     # 2. Universal
     c.execute(
         "SELECT gif_url FROM milestone_media WHERE universal=1 AND milestone=?",
@@ -273,16 +275,41 @@ def set_player_media(player_name: str, category: str, event_type: str, gif_url: 
     conn.close()
 
 
+def base_player_name(name: str) -> str:
+    """"Virat Kohli (S1)" -> "Virat Kohli". Event cards carry a "(tag)" suffix in their
+    name, but GIFs are saved under the normal card's name, so lookups fall back to this."""
+    n = (name or "").strip()
+    while True:
+        m = re.match(r"^(.*\S)\s*\([^()]*\)\s*$", n)
+        if not m:
+            return n
+        n = m.group(1).strip()
+
+
+def _name_candidates(name: str) -> list[str]:
+    """Exact card name first (an event card can have its own GIF), then the base name."""
+    out = [(name or "").strip()]
+    b = base_player_name(name)
+    if b and b.lower() != out[0].lower():
+        out.append(b)
+    return out
+
+
 def get_player_media(player_name: str, event_type: str) -> str | None:
     conn = _conn()
-    c = conn.cursor()
-    c.execute(
-        "SELECT gif_url FROM player_media WHERE LOWER(player_name)=LOWER(?) AND event_type=?",
-        (player_name, event_type),
-    )
-    row = c.fetchone()
-    conn.close()
-    return row["gif_url"] if row else None
+    try:
+        c = conn.cursor()
+        for nm in _name_candidates(player_name):
+            c.execute(
+                "SELECT gif_url FROM player_media WHERE LOWER(player_name)=LOWER(?) AND event_type=?",
+                (nm, event_type),
+            )
+            row = c.fetchone()
+            if row:
+                return row["gif_url"]
+        return None
+    finally:
+        conn.close()
 
 
 def list_player_media(player_name: str) -> list[dict]:

@@ -1519,9 +1519,11 @@ async def _process_delivery(
         # `not is_extra` which could mask bugs — kept here as explicit safety.
         over_ended = (not is_extra) and (game.current_over_balls >= 6)
         if over_ended:
-            # Rotate strike at end of over ONLY if runs were even (odd already rotated)
-            if outcome not in ("1", "3"):
-                game.rotate_strike()
+            # Change of ends: strike ALWAYS swaps once at the end of an over, on top of
+            # any odd-run crossing already done for the last ball. So a single on ball 6
+            # (cross + change of ends) leaves the SAME batsman on strike for the new over,
+            # and an even-run last ball hands strike to the other batsman.
+            game.rotate_strike()
             game.timeline.append("|")
             game.end_over()
             await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel)

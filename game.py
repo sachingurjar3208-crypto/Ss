@@ -600,12 +600,9 @@ class GameState:
             return
         self._over_ended_flag = True
         # NOTE: strike rotation for the change of ends is the CALLER's
-        # responsibility (it depends on whether the last ball scored odd or
-        # even runs — see views.py call sites). end_over() used to also
-        # rotate strike unconditionally here, which double-rotated (and so
-        # cancelled out) whenever the last ball of the over was even runs,
-        # leaving the wrong batsman on strike for the new over. Do not add
-        # an unconditional rotate_strike() call here again.
+        # responsibility (views.py / practice_views.py call rotate_strike()
+        # once right before end_over(), ALWAYS — odd-run crossing on the last
+        # ball is separate and already done). Do not rotate here too.
         if self.striker is None and self.non_striker is not None:
             self.striker, self.non_striker = self.non_striker, self.striker
         self.register_maiden()

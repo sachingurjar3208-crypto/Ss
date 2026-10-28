@@ -112,19 +112,35 @@ def list_gifs(key: str | None = None, player: str | None = None, universal_only:
         return c.execute(sql, args).fetchall()
 
 
+def _name_candidates(name: str) -> list[str]:
+    """"Virat Kohli (S1)" -> ["virat kohli (s1)", "virat kohli"]: an event card's own gifs
+    first, then the gifs saved for the normal card."""
+    n = (name or "").strip()
+    out = [n.lower()]
+    while True:
+        m = re.match(r"^(.*\S)\s*\([^()]*\)\s*$", n)
+        if not m:
+            break
+        n = m.group(1).strip()
+        if n.lower() not in out:
+            out.append(n.lower())
+    return out
+
+
 def pick_gif(key: str, player_name: str | None) -> str | None:
-    """Random gif: the player's own first, else a universal one, else None.
-    Never raises — a GIF problem must not break a match."""
+    """Random gif: the player's own first (event card's own, then the normal card's),
+    else a universal one, else None. Never raises — a GIF problem must not break a match."""
     try:
         with _conn() as c:
             if player_name:
-                row = c.execute(
-                    "SELECT url FROM commentary_gifs WHERE key = ? AND player_key = ? "
-                    "ORDER BY RANDOM() LIMIT 1",
-                    (key, player_name.strip().lower()),
-                ).fetchone()
-                if row:
-                    return row["url"]
+                for pk in _name_candidates(player_name):
+                    row = c.execute(
+                        "SELECT url FROM commentary_gifs WHERE key = ? AND player_key = ? "
+                        "ORDER BY RANDOM() LIMIT 1",
+                        (key, pk),
+                    ).fetchone()
+                    if row:
+                        return row["url"]
             row = c.execute(
                 "SELECT url FROM commentary_gifs WHERE key = ? AND player_key = '' "
                 "ORDER BY RANDOM() LIMIT 1",

@@ -412,8 +412,8 @@ async def _practice_process_delivery_inner(
     # ── Over ended ────────────────────────────────────────────────────────
     over_ended = (not is_extra) and (game.current_over_balls >= 6)
     if over_ended:
-        if outcome not in ("1", "3"):
-            game.rotate_strike()
+        # Change of ends: always swap once, on top of any odd-run crossing on the last ball
+        game.rotate_strike()
         game.timeline.append("|")
         game.end_over()
         await channel.send(content=commentary, embed=embed)
