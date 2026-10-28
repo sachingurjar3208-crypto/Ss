@@ -173,11 +173,13 @@ def _closest_cards(cards: list, lo: int, hi: int) -> list:
 def _pack_cards(spec: dict) -> list:
     """Cards a pack may give. Normal packs: every obtainable card. Event packs
     (spec["event"]): only the obtainable cards that belong to that event."""
-    cards = list(card_db.list_obtainable_cards())
     ev = (spec.get("event") or "").strip().lower()
     if ev:
-        cards = [c for c in cards if str(card_db._rget(c, "event_key") or "").strip().lower() == ev]
-    return cards
+        # Event pack: also uses cards marked obtainable=OFF (event-only cards that must not drop
+        # anywhere else). A disabled event is still excluded (list_enabled_cards).
+        return [c for c in card_db.list_enabled_cards()
+                if str(card_db._rget(c, "event_key") or "").strip().lower() == ev]
+    return list(card_db.list_obtainable_cards())
 
 
 def pack_available(pack_type: str) -> bool:
