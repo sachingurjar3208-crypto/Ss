@@ -21,6 +21,7 @@ NARRATIVES: dict[str, str] = {
     "Lethal Pace": "Express pace bowler: +25% wickets and -8% 1s-4s off pace deliveries, but concedes +15% sixes.",
     "Aggressive": "Attacking batter: +25% fours/sixes, -10% dot balls.",
     "Balanced": "Steady all-round approach: no bonus, no penalty.",
+    "Anchor": "Rock-solid batter: -35% chance of getting out.",
     "Low Batting Quality": (
         "Weak batter: can't hit sixes or fours, mostly 1-2-3 runs; "
         "four/six chances are very low."

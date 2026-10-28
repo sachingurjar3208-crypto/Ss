@@ -176,7 +176,7 @@ ATTR_EFFECTS = {
     "Finisher":         {"death_bat_mult":  1.20},  # +20% scoring in death overs
     "Aggressive":       {"boundary_mult":   1.25,   # +25% 4s/6s overall
                          "dot_reduce":      0.90},  # -10% dot balls
-    "Anchor":           {"wkt_reduce":      0.70},  # -30% wicket chance
+    "Anchor":           {"wkt_reduce":      0.65},  # -35% wicket chance
     "Opener":           {"pp_bat_mult":     1.15},  # +15% scoring in powerplay
     "Power Hitter":     {"boundary_mult":   1.25,   # +25% 4s/6s
                          "six_mult":        1.25,   # extra six boost
