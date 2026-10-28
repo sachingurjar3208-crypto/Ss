@@ -1031,13 +1031,9 @@ class SquadCog(commands.Cog, name="Squad"):
     @commands.command(name="cshelp")
     @premium_cooldown(120)
     async def cshelp(self, ctx: commands.Context):
-        """List the commands (image menu)."""
-        import asyncio
-        import help_image
-        buf = await asyncio.to_thread(help_image.build_help_image)
-        embed = discord.Embed(color=discord.Color.orange())
-        embed.set_image(url=f"attachment://{help_image.FILENAME}")
-        await ctx.send(embed=embed, file=discord.File(buf, filename=help_image.FILENAME))
+        """List the commands (text menu with a topic selector)."""
+        import help_menu
+        await help_menu.send_help(ctx)
 
     # ── Owner-only tools ─────────────────────────────────────────────────
     @commands.command(name="csban")

@@ -5,6 +5,8 @@
     admin coin remove @user <coins>
     admin pack give @user gold silver debut bronze   (1 of each; add a number after a pack for more)
     admin pack reset @user [pack ...]                (no pack = remove ALL packs)
+    admin pack off <pack>      (pack stays in cspack but the buy button turns grey)
+    admin pack on <pack>       (pack can be bought again)
     admin player reset @user all      (cards only)
     admin reset all @user             (coins -> 0, all cards removed AND debut reset)
     admin user top [20-50] [coins|cards]   (owner / admin role only)
@@ -75,6 +77,7 @@ class AdminCog(commands.Cog):
             "`admin coin remove @user <coins>`\n"
             "`admin pack give @user <pack> [qty] <pack> [qty] ...`\n"
             "`admin pack reset @user [<pack> [qty] ...]`\n"
+            "`admin pack off <pack>` / `admin pack on <pack>`\n"
             "`admin player reset @user all`\n"
             "`admin reset all @user`\n"
             "`admin user top [20-50] [coins|cards]`\n"
@@ -226,7 +229,9 @@ class AdminCog(commands.Cog):
         await ctx.send(
             "`admin pack give @user gold silver debut bronze`  (1 of each, add a number after a pack for more, e.g. `gold 3`)\n"
             "`admin pack reset @user`  (remove ALL their packs)\n"
-            "`admin pack reset @user gold silver 2`  (all gold, and 2 silver)"
+            "`admin pack reset @user gold silver 2`  (all gold, and 2 silver)\n"
+            "`admin pack off <pack>`  (still shown in cspack, buy button greyed)\n"
+            "`admin pack on <pack>`  (buyable again)"
         )
 
     @pack.command(name="give")
@@ -279,6 +284,51 @@ class AdminCog(commands.Cog):
         label = lambda k: sl.PACKS[k]["label"] if k in sl.PACKS else k
         text = ", ".join(f"{n}× `{label(k)}`" for k, n in removed.items())
         await ctx.send(f"✅ Removed from {esc(member.display_name)}: {text}.")
+
+    def _shop_pack_key(self, tok: str | None):
+        """(key, error) for a pack that is sold in the shop."""
+        key = (tok or "").strip().lower()
+        sold = [k for k, v in sl.PACKS.items() if v.get("shop") is not False]
+        if key not in sold:
+            return None, "Pick one of: " + ", ".join(f"`{k}`" for k in sold) + "."
+        return key, None
+
+    @pack.command(name="off")
+    @admin_only()
+    async def pack_off(self, ctx: commands.Context, packname: str | None = None):
+        """admin pack off <pack>: the pack stays in cspack, but its buy button is grey."""
+        if packname is None:
+            off = sorted(economy.packs_off())
+            now = ", ".join(f"`{k}`" for k in off) if off else "none"
+            await ctx.send(f"Usage: `admin pack off <pack>`\nCurrently off: {now}")
+            return
+        key, err = self._shop_pack_key(packname)
+        if err:
+            await ctx.send(f"❌ {err}")
+            return
+        label = sl.PACKS[key]["label"]
+        if economy.set_pack_off(key, True):
+            await ctx.send(f"🔒 **{label}** is OFF. It still shows in `cspack`, but nobody can buy it "
+                           f"(buy button is grey). Turn it back on with `admin pack on {key}`.")
+        else:
+            await ctx.send(f"ℹ️ **{label}** was already off.")
+
+    @pack.command(name="on")
+    @admin_only()
+    async def pack_on(self, ctx: commands.Context, packname: str | None = None):
+        """admin pack on <pack>: the pack can be bought again."""
+        if packname is None:
+            await ctx.send("Usage: `admin pack on <pack>`")
+            return
+        key, err = self._shop_pack_key(packname)
+        if err:
+            await ctx.send(f"❌ {err}")
+            return
+        label = sl.PACKS[key]["label"]
+        if economy.set_pack_off(key, False):
+            await ctx.send(f"✅ **{label}** is ON again. Players can buy it.")
+        else:
+            await ctx.send(f"ℹ️ **{label}** was already on.")
 
     # -- players ---------------------------------------------------------
     @admin.group(name="player", invoke_without_command=True)

@@ -1,0 +1,27 @@
+SAB FIXES - EK ZIP ME
+
+Sab 8 .py file same naam se repo me replace/upload karo, phir: git pull + systemctl restart ssbot
+(koi nayi library nahi chahiye. help_menu.py aur rank_top_image.py NAYI files hain.)
+
+1) HALLOWEEN PACK FIX                        -> squad_logic.py
+   Halloween pack ab event ke SAARE cards use karta hai, obtainable OFF wale bhi.
+   (Pehle OFF cards pool me aate hi nahi the, isliye sirf 85/86 nikal rahe the.)
+   Normal packs me OFF cards ab bhi nahi aate. /eventdisable halloween kaam karta rahega.
+
+2) ADMIN PACK OFF / ON                       -> admin_cog.py, economy.py, economy_cog.py
+   admin pack off <pack>   pack cspack me dikhega, par buy (Confirm) button grey
+   admin pack on <pack>    pack wapas kharid sakte hain
+   admin pack off          (bina naam) abhi kaun se packs off hain
+   Off pack ko pehle se khula Confirm button bhi nahi kharid sakta (database me bhi check hai).
+   Pehle kharide hue packs csopen se khul jaate hain. Setting restart ke baad bhi rehti hai.
+
+3) CSHELP TEXT MENU                          -> help_menu.py (NAYI), squad_cog.py
+   Image ki jagah text help, cscd jaisa. Pehle page par sab commands, niche topic select menu
+   (Start, Rewards, Squad, Economy, Packs, Match, Ranked, Events, Other, Premium).
+   Packs page live bana hai (prices, OVR, off packs). cspurse galti theek: asli command csbal.
+
+4) CSRANKTOP IMAGE                           -> rank_top_image.py (NAYI), ranked_cog.py
+   Text ki jagah leaderboard image. Rank 1 gold champion card (crown), 2 aur 3 silver/bronze,
+   4 se 10 rows. Discord avatar aur naam aate hain. Cooldown 20 sec.
+
+NOTE: help_image.py ab use nahi hota (chaho to delete kar sakte ho).

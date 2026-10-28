@@ -1001,9 +1001,44 @@ def get_packs(user_id) -> dict[str, int]:
         conn.close()
 
 
+# -- Packs switched OFF by an admin (`admin pack off <pack>`): still listed in cspack, can't be bought --
+def _ensure_pack_off(conn) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS pack_off (pack_type TEXT PRIMARY KEY, since REAL NOT NULL)")
+
+
+def packs_off() -> set[str]:
+    """Pack keys that are currently switched off for buying."""
+    conn = _conn()
+    try:
+        _ensure_pack_off(conn)
+        return {r["pack_type"] for r in conn.execute("SELECT pack_type FROM pack_off")}
+    finally:
+        conn.close()
+
+
+def is_pack_off(pack_type: str) -> bool:
+    return str(pack_type).strip().lower() in packs_off()
+
+
+def set_pack_off(pack_type: str, off: bool) -> bool:
+    """Switch a pack off (True) or back on (False). Returns True if something changed."""
+    key = str(pack_type).strip().lower()
+    with _tx() as conn:
+        _ensure_pack_off(conn)
+        if off:
+            cur = conn.execute("INSERT OR IGNORE INTO pack_off (pack_type, since) VALUES (?, ?)",
+                               (key, time.time()))
+        else:
+            cur = conn.execute("DELETE FROM pack_off WHERE pack_type = ?", (key,))
+        return cur.rowcount > 0
+
+
 def buy_pack(user_id, pack_type: str, price: int) -> str | None:
     uid = _uid(user_id)
     with _tx() as conn:
+        _ensure_pack_off(conn)
+        if conn.execute("SELECT 1 FROM pack_off WHERE pack_type = ?", (str(pack_type).lower(),)).fetchone():
+            return "This pack is turned off right now."
         row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
         if row is None:
             return "You haven't debuted yet."

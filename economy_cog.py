@@ -145,11 +145,16 @@ _pending_confirm: set[int] = set()
 # ── A reusable "are you sure?" button pair ───────────────────────────────────
 
 class ConfirmView(OwnedView):
-    def __init__(self, user_id: int, action: Callable[[], Awaitable[str]], timeout: float = CONFIRM_TIMEOUT):
+    def __init__(self, user_id: int, action: Callable[[], Awaitable[str]], timeout: float = CONFIRM_TIMEOUT,
+                 locked: bool = False):
         super().__init__(user_id, timeout=timeout)
         self.user_id = user_id
         self.action = action
         self.used = False
+        if locked:
+            # Pack turned off by an admin: the buy (Confirm) button stays visible but grey and dead.
+            self.confirm.disabled = True
+            self.confirm.style = discord.ButtonStyle.secondary
 
     @ui.button(label="Confirm", style=discord.ButtonStyle.success, emoji="✅")
     async def confirm(self, interaction: discord.Interaction, button: ui.Button):
@@ -195,6 +200,8 @@ def _buy_action(channel, uid: int, key: str) -> Callable[[], Awaitable[str]]:
     async def do_buy() -> str:
         if not sl.pack_available(key):
             return "❌ That pack isn't on sale right now."
+        if economy.is_pack_off(key):
+            return "🔒 This pack is turned off right now."
         err = economy.buy_pack(uid, key, spec["price"])
         if err:
             return f"❌ {err}"
@@ -208,10 +215,13 @@ def _buy_action(channel, uid: int, key: str) -> Callable[[], Awaitable[str]]:
 
 def _shop_embed(uid: int) -> discord.Embed:
     owned = economy.get_packs(uid)
+    off = economy.packs_off()
     lines = []
     for key, spec in _shop_packs():
         lo, hi = spec["range"]
         extra = " · event players only" if spec.get("event") else ""
+        if key in off:
+            extra += " · 🔒 not available right now"
         have = f" · you own **{owned[key]}**" if owned.get(key) else ""
         lines.append(
             f"{spec['emoji']} **{spec['label']}**\n"
@@ -226,11 +236,12 @@ def _shop_embed(uid: int) -> discord.Embed:
 class PackShopSelect(ui.Select):
     def __init__(self):
         options = []
+        off = economy.packs_off()
         for key, spec in _shop_packs():
             lo, hi = spec["range"]
             options.append(discord.SelectOption(
                 label=spec["label"], value=key,
-                description=f"{spec['price']:,} coins · {lo}-{hi} OVR",
+                description=(("🔒 Off · " if key in off else "") + f"{spec['price']:,} coins · {lo}-{hi} OVR")[:100],
                 emoji=discord.PartialEmoji.from_str(spec["emoji"]) if spec.get("emoji") else None,
             ))
         super().__init__(placeholder="Select a pack", min_values=1, max_values=1, options=options[:25])
@@ -260,12 +271,13 @@ class PackShopView(OwnedView):
         self.stop()
         _pending_confirm.add(uid)
         try:
-            confirm = ConfirmView(uid, _buy_action(interaction.channel, uid, key))
+            off = economy.is_pack_off(key)
+            confirm = ConfirmView(uid, _buy_action(interaction.channel, uid, key), locked=off)
             confirm.message = interaction.message
-            await interaction.response.edit_message(
-                content=f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?",
-                embed=None, view=confirm,
-            )
+            text = f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?"
+            if off:
+                text += "\n🔒 This pack isn't available right now."
+            await interaction.response.edit_message(content=text, embed=None, view=confirm)
         except Exception:
             _pending_confirm.discard(uid)
             raise
@@ -987,10 +999,12 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         _pending_confirm.add(uid)
         try:
-            view = ConfirmView(uid, _buy_action(ctx.channel, uid, key))
-            view.message = await ctx.send(
-                f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?", view=view
-            )
+            off = economy.is_pack_off(key)
+            view = ConfirmView(uid, _buy_action(ctx.channel, uid, key), locked=off)
+            text = f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?"
+            if off:
+                text += "\n🔒 This pack isn't available right now."
+            view.message = await ctx.send(text, view=view)
         except Exception:
             _pending_confirm.discard(uid)
             raise

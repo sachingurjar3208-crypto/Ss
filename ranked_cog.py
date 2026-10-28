@@ -36,6 +36,7 @@ import player_buffs
 import ranked
 import rank_image
 import rank_rewards_image
+import rank_top_image
 import squad_logic as sl
 from bot_guard import ADMIN_GUILD_ID, OWNER_ID, is_staff
 from security import OwnedView, esc
@@ -476,25 +477,49 @@ class RankedCog(commands.Cog, name="Ranked"):
             note = f"⏳ Season ends <t:{end}:F> (<t:{end}:R>)"
         await ctx.send(content=note, file=discord.File(io.BytesIO(png), filename="rank_rewards.png"))
 
+    @staticmethod
+    def _top_name(text: str) -> str:
+        """Keep only letters the leaderboard font can draw (Latin). Emoji / other scripts would show as boxes."""
+        out = "".join(ch for ch in (text or "") if 32 <= ord(ch) < 0x250).strip()
+        return out[:24]
+
     @commands.command(name="csranktop")
-    @commands.cooldown(1, 10, commands.BucketType.user)
+    @commands.cooldown(1, 20, commands.BucketType.user)   # image command
     async def csranktop(self, ctx: commands.Context):
-        """Global top 10 by stars this season."""
+        """Global top 10 by stars this season (image)."""
         top = await asyncio.to_thread(ranked.top_players, 10)
         if not top:
             await ctx.send("No one has any stars yet this season. Be the first: `csmp ranked`")
             return
-        lines = []
-        for i, p in enumerate(top, 1):
-            m = ctx.guild.get_member(p["user_id"]) if ctx.guild else None
-            name = esc(m.display_name) if m else f"<@{p['user_id']}>"
-            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, f"`{i}.`")
-            lines.append(f"{medal} {ranked.tier_emoji(p['tier'])} **{name}** — **{p['stars']}** ⭐  ({p['wins']}W/{p['losses']}L)")
-        embed = discord.Embed(title="🏆 Global Ranked Top 10", description="\n".join(lines),
-                              color=discord.Color.from_rgb(212, 175, 55))
-        end_ts = await asyncio.to_thread(ranked.next_reset_ts)
-        embed.set_footer(text=(f"Season ends {time.strftime('%d %b', time.gmtime(end_ts))}" if end_ts else "No season running"))
-        await ctx.send(embed=embed)
+
+        async def one(p: dict) -> dict:
+            uid = p["user_id"]
+            user = ctx.guild.get_member(uid) if ctx.guild else None
+            if user is None:
+                user = self.bot.get_user(uid)
+            if user is None:
+                try:
+                    user = await asyncio.wait_for(self.bot.fetch_user(uid), timeout=4)
+                except Exception:
+                    user = None
+            name = self._top_name(getattr(user, "display_name", None) or getattr(user, "name", "")) if user else ""
+            if not name and user is not None:
+                name = self._top_name(getattr(user, "name", ""))
+            avatar = None
+            if user is not None:
+                try:
+                    avatar = await asyncio.wait_for(user.display_avatar.replace(size=128, format="png").read(), timeout=5)
+                except Exception:
+                    avatar = None
+            return {"name": name or f"Player {str(uid)[-4:]}", "tier": p["tier"], "stars": p["stars"],
+                    "wins": p["wins"], "losses": p["losses"], "avatar": avatar}
+
+        async with ctx.typing():
+            players = await asyncio.gather(*(one(p) for p in top))
+            end_ts = await asyncio.to_thread(ranked.next_reset_ts)
+            season = f"Season ends {time.strftime('%d %b', time.gmtime(end_ts))}" if end_ts else "No season running"
+            png = await asyncio.to_thread(rank_top_image.generate_rank_top, list(players), season)
+        await ctx.send(file=discord.File(io.BytesIO(png), filename=rank_top_image.FILENAME))
 
     # ── seasons ───────────────────────────────────────────────────────────
     @commands.command(name="csseason")
