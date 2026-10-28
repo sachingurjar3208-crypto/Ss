@@ -309,10 +309,7 @@ async def _practice_process_delivery_inner(
         game.add_legal_ball()
         game.add_runs(int(outcome))
         game.timeline.append(_timeline_emoji(outcome))
-        if outcome == "4" and sname in game.batsman_stats:
-            game.batsman_stats[sname]["fours"] = game.batsman_stats[sname].get("fours", 0) + 1
-        elif outcome == "6" and sname in game.batsman_stats:
-            game.batsman_stats[sname]["sixes"] = game.batsman_stats[sname].get("sixes", 0) + 1
+        # 4s/6s are already counted in game.add_runs(); counting them again here doubled them.
         if outcome in ("1", "3"):
             game.rotate_strike()
 

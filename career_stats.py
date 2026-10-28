@@ -312,7 +312,7 @@ def batting_figures(c: dict) -> list[tuple[str, str]]:
 def bowling_figures(c: dict) -> list[tuple[str, str]]:
     overs = c["balls_bowled"] / 6
     avg = f"{c['runs_conceded'] / c['wickets']:.1f}" if c["wickets"] else "-"
-    econ = f"{c['runs_conceded'] / overs:.1f}" if overs else "0.0"
+    econ = f"{c['runs_conceded'] / overs:.1f}" if overs else "-"
     sr = f"{c['balls_bowled'] / c['wickets']:.1f}" if c["wickets"] else "-"
     bbf = f"{c['best_w']}/{c['best_r']}" if c["best_w"] else "-"
     return [

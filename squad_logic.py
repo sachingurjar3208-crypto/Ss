@@ -130,6 +130,17 @@ def _loss_profit_weights(lo: int, hi: int, price: int, relative: dict | None = N
 _BRONZE_PRICE, _SILVER_PRICE, _GOLD_PRICE, _LEGEND_PRICE = 1_500, 60_000, 690_000, 4_000_000
 _HALLOWEEN_PRICE = 250_000
 
+# Halloween Pack: relative chance of each OVR (these are weights, not a 100% split: a card's
+# chance = its number / the sum of all numbers). 79 was not given, so it sits between 78 and 80.
+HALLOWEEN_OVR_WEIGHTS: dict[int, float] = {
+    75: 80, 76: 78, 77: 76, 78: 74, 79: 57,
+    80: 40, 81: 35, 82: 33, 83: 20, 84: 17, 85: 15,
+    86: 10, 87: 8, 88: 7,
+    89: 1, 90: 1, 91: 1, 92: 1,
+    93: 0.8, 94: 0.8, 95: 0.8,
+    96: 0.4, 97: 0.3, 98: 0.2, 99: 0.1,
+}
+
 PACKS = {
     "bronze": {"label": "Bronze Pack", "emoji": emojis.BRONZE_PACK, "price": _BRONZE_PRICE, "cards": 1,
                "range": (60, 76),
@@ -152,10 +163,12 @@ PACKS = {
     # It disappears from the shop (and can't be opened) while no obtainable card of that event
     # exists, e.g. after /eventdisable halloween. Packs already bought are never lost.
     "halloween": {"label": "Halloween Pack", "emoji": emojis.HALLOWEEN_PACK, "price": _HALLOWEEN_PRICE, "cards": 1,
-                  "range": (60, 99), "event": "halloween",     # every Halloween card can drop; high OVRs are rare
-                  "weights": _loss_profit_weights(60, 99, _HALLOWEEN_PRICE,
-                                                  {84: 6, 85: 5, 86: 4, 87: 3, 88: 2.5, 89: 2, 90: 1.5, 91: 1.2,
-                                                   92: 1, 93: .8, 94: .6, 95: .5, 96: .3, 97: .2, 98: .1, 99: .05})},
+                  "range": (75, 99), "event": "halloween",
+                  # The OVR is rolled from the FULL table below even if the event has only a few
+                  # cards. If no Halloween card has the rolled OVR, the nearest OVR that exists is
+                  # given (see keep_odds in roll_pack), so 90+ cards stay rare.
+                  "keep_odds": True,
+                  "weights": HALLOWEEN_OVR_WEIGHTS},
 }
 
 
@@ -207,6 +220,13 @@ def roll_pack(pack_type: str) -> list:
         for c in cards:
             if lo <= c["ovr"] <= hi:
                 by_ovr.setdefault(int(c["ovr"]), []).append(c)
+        if by_ovr and spec.get("keep_odds"):
+            # Roll the OVR from the whole table first, so the odds hold even when the event has
+            # few cards. No card with that OVR -> the nearest OVR that exists (lower on a tie).
+            ovr = _rng.choices(list(weights), weights=list(weights.values()), k=1)[0]
+            if ovr not in by_ovr:
+                ovr = min(by_ovr, key=lambda o: (abs(o - ovr), o))
+            return [_rng.choice(by_ovr[ovr])]
         # only ovr values that have at least one player can be rolled
         usable = [o for o in weights if o in by_ovr]
         if usable:
