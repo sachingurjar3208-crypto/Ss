@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import io
 import time
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -25,8 +26,8 @@ from discord.ext import commands
 import card_db
 import economy
 import emojis
+import pack_anim
 import pack_gif
-import pack_shop_image
 import quest
 import security
 import squad_logic as sl
@@ -171,6 +172,118 @@ class ConfirmView(OwnedView):
     async def on_timeout(self) -> None:
         _pending_confirm.discard(self.user_id)
         await super().on_timeout()
+
+
+# ── cspack: pack shop with a "Select a pack" menu ────────────────────────────
+# `cspack` shows every pack on sale (emoji, price, OVR range, how many you own) and a
+# drop-down. Picking a pack asks Confirm / Cancel, the same safe buy flow as before.
+# `cspack bronze` (typing the name) still works as a shortcut.
+
+SHOP_TIMEOUT = 60.0
+
+
+def _shop_packs() -> list[tuple[str, dict]]:
+    """Packs that can be bought right now (event packs only while their event has cards)."""
+    return [(k, v) for k, v in sl.PACKS.items() if v.get("shop") is not False and sl.pack_available(k)]
+
+
+def _buy_action(channel, uid: int, key: str) -> Callable[[], Awaitable[str]]:
+    """The coroutine ConfirmView runs when ✅ is pressed. Money is only taken in here,
+    inside economy.buy_pack's single database transaction."""
+    spec = sl.PACKS[key]
+
+    async def do_buy() -> str:
+        if not sl.pack_available(key):
+            return "❌ That pack isn't on sale right now."
+        err = economy.buy_pack(uid, key, spec["price"])
+        if err:
+            return f"❌ {err}"
+        await quest.track_and_notify(channel, uid, {"packs_bought": 1})
+        return (
+            f"✅ Bought 1× {spec['emoji']} {spec['label']} for {economy.fmt_coins(spec['price'])}. "
+            f"Open it with `csopen {key}`."
+        )
+    return do_buy
+
+
+def _shop_embed(uid: int) -> discord.Embed:
+    owned = economy.get_packs(uid)
+    lines = []
+    for key, spec in _shop_packs():
+        lo, hi = spec["range"]
+        extra = " · event players only" if spec.get("event") else ""
+        have = f" · you own **{owned[key]}**" if owned.get(key) else ""
+        lines.append(
+            f"{spec['emoji']} **{spec['label']}**\n"
+            f"{economy.fmt_coins(spec['price'])} · 1 player · {lo}-{hi} OVR{extra}{have}"
+        )
+    embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines) or "No packs on sale right now.",
+                          color=discord.Color.gold())
+    embed.set_footer(text="Pick a pack below to buy it, then open it with csopen <type>. Duplicates turn into coins.")
+    return embed
+
+
+class PackShopSelect(ui.Select):
+    def __init__(self):
+        options = []
+        for key, spec in _shop_packs():
+            lo, hi = spec["range"]
+            options.append(discord.SelectOption(
+                label=spec["label"], value=key,
+                description=f"{spec['price']:,} coins · {lo}-{hi} OVR",
+                emoji=discord.PartialEmoji.from_str(spec["emoji"]) if spec.get("emoji") else None,
+            ))
+        super().__init__(placeholder="Select a pack", min_values=1, max_values=1, options=options[:25])
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.view.picked(interaction, self.values[0])
+
+
+class PackShopView(OwnedView):
+    def __init__(self, user_id: int):
+        super().__init__(user_id, timeout=SHOP_TIMEOUT)
+        self.user_id = user_id
+        self.used = False
+        self.add_item(PackShopSelect())
+
+    async def picked(self, interaction: discord.Interaction, key: str):
+        spec = sl.PACKS.get(key)
+        if spec is None or spec.get("shop") is False or not sl.pack_available(key):
+            await interaction.response.send_message("❌ That pack isn't on sale right now.", ephemeral=True)
+            return
+        uid = self.user_id
+        if self.used or uid in _pending_confirm:
+            await interaction.response.send_message(
+                "❌ You already have a confirmation waiting — finish that first.", ephemeral=True)
+            return
+        self.used = True
+        self.stop()
+        _pending_confirm.add(uid)
+        try:
+            confirm = ConfirmView(uid, _buy_action(interaction.channel, uid, key))
+            confirm.message = interaction.message
+            await interaction.response.edit_message(
+                content=f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?",
+                embed=None, view=confirm,
+            )
+        except Exception:
+            _pending_confirm.discard(uid)
+            raise
+
+
+# ── csopen: pack animation, then the REAL card ───────────────────────────────
+
+async def _pack_intro(key: str):
+    """(discord.File, seconds to wait) for the opening animation of this pack:
+    an animation added with `/pack animation add` if there is one, else the built-in
+    pack intro (pack_gif.py, with NO card in it). (None, 0) = no animation at all."""
+    path = await asyncio.to_thread(pack_anim.pick, key)
+    if path is not None:
+        try:
+            return discord.File(str(path), filename=f"pack_open{path.suffix.lower()}"), pack_anim.ANIM_SECONDS
+        except OSError as e:
+            print(f"[csopen] could not read animation {path}: {e}")
+    return await pack_gif.intro_file(key)
 
 
 # ── csbuy / cssell: card image + two emoji buttons ───────────────────────────
@@ -851,27 +964,19 @@ class EconomyCog(commands.Cog, name="Economy"):
     @economy_cooldown()
     @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     async def cspack(self, ctx: commands.Context, pack: Optional[str] = None):
-        """See packs, or buy one: `cspack bronze`."""
+        """See the pack shop (pick a pack from the menu), or buy one directly: `cspack bronze`."""
         if not await _need_debut(ctx):
             return
         if pack is None:
-            lines = []
-            for key, spec in sl.PACKS.items():
-                if spec.get("shop") is False:
-                    continue
-                lines.append(f"{spec['emoji']} **{spec['label']}** — {economy.fmt_coins(spec['price'])} · 1 player ({spec['range'][0]}-{spec['range'][1]} OVR)\n`cspack {key}`")
-            embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines), color=discord.Color.gold())
-            embed.set_footer(text="Buy with cspack <type>, then open with csopen <type>. Duplicates turn into coins.")
-            shop_file = await pack_shop_image.pack_shop_file(ctx.author.id)
-            if shop_file:
-                embed.set_image(url=f"attachment://{shop_file.filename}")
-                await ctx.send(embed=embed, file=shop_file)
-            else:
-                await ctx.send(embed=embed)
+            if not _shop_packs():
+                await ctx.send("No packs are on sale right now.")
+                return
+            view = PackShopView(ctx.author.id)
+            view.message = await ctx.send(embed=_shop_embed(ctx.author.id), view=view)
             return
         key = security.clean_input(pack, 12).lower()
-        if key not in sl.PACKS or sl.PACKS[key].get("shop") is False:
-            await ctx.send("❌ Pick " + ", ".join(f"`{k}`" for k, v in sl.PACKS.items() if v.get("shop") is not False) + ".")
+        if key not in sl.PACKS or sl.PACKS[key].get("shop") is False or not sl.pack_available(key):
+            await ctx.send("❌ Pick " + ", ".join(f"`{k}`" for k, _ in _shop_packs()) + ".")
             return
         spec = sl.PACKS[key]
         uid = ctx.author.id
@@ -880,19 +985,9 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send("❌ You already have a confirmation waiting — finish that first.")
             return
 
-        async def do_buy() -> str:
-            err = economy.buy_pack(uid, key, spec["price"])
-            if err:
-                return f"❌ {err}"
-            await quest.track_and_notify(ctx.channel, uid, {"packs_bought": 1})
-            return (
-                f"✅ Bought 1× {spec['emoji']} {spec['label']} for {economy.fmt_coins(spec['price'])}. "
-                f"Open it with `csopen {key}`."
-            )
-
         _pending_confirm.add(uid)
         try:
-            view = ConfirmView(uid, do_buy)
+            view = ConfirmView(uid, _buy_action(ctx.channel, uid, key))
             view.message = await ctx.send(
                 f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?", view=view
             )
@@ -905,7 +1000,7 @@ class EconomyCog(commands.Cog, name="Economy"):
     @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     @exclusive
     async def csopen(self, ctx: commands.Context, pack: Optional[str] = None):
-        """Open one of your packs: `csopen bronze`."""
+        """Open one of your packs: `csopen bronze`. A short animation plays, then your real card appears."""
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
@@ -929,10 +1024,16 @@ class EconomyCog(commands.Cog, name="Economy"):
         if key == "debut" and (ctx.guild is None or ctx.guild.id != DEBUT_PACK_GUILD_ID):
             await ctx.send("🔒 The `debut pack` can only be opened in the main server.")
             return
+        spec = sl.PACKS[key]
         rolled = sl.roll_pack(key)
         if not rolled:
-            await ctx.send("⚠️ There are no player cards in the game yet, so packs can't open. Ask the owner to add cards.")
+            if spec.get("event"):
+                await ctx.send(f"⚠️ The {spec['label']} has no player cards right now (its event is switched off). "
+                               "Your pack is kept — open it when the event is back.")
+            else:
+                await ctx.send("⚠️ There are no player cards in the game yet, so packs can't open. Ask the owner to add cards.")
             return
+        # The pack is used up and the card handed over in ONE database transaction (as before).
         result = economy.open_pack(
             ctx.author.id, key,
             [c["playername_key"] for c in rolled],
@@ -945,7 +1046,6 @@ class EconomyCog(commands.Cog, name="Economy"):
         lines = [_card_line(by_key[k], "  🆕") for k in result["new"]]
         lines += [_card_line(by_key[k], "  ⚠️ squad full") for k in result.get("pending", [])]
         lines += [_card_line(by_key[k], "  ♻️ duplicate") for k in result["dupes"]]
-        spec = sl.PACKS[key]
         if key == "debut":
             embed = discord.Embed(description="`Debut Pack` opened!\n\n" + "\n".join(lines), color=discord.Color.gold())
         else:
@@ -953,20 +1053,46 @@ class EconomyCog(commands.Cog, name="Economy"):
         if result["refund"]:
             embed.set_footer(text=f"Duplicates gave you back {result['refund']:,} coins")
 
-        pulled = rolled[0]
-        role_label = ROLES.get(card_db.effective_role(pulled), "Player")
-        gif_file = await pack_gif.pack_file(
-            key,
-            name=pulled["playername"],
-            ovr=pulled["ovr"],
-            role=role_label,
-            stats=(pulled["bat"], pulled["bowl"], pulled["ovr"], pulled["ovr"], pulled["ovr"], pulled["ovr"]),
-        )
-        if gif_file:
-            embed.set_image(url=f"attachment://{gif_file.filename}")
-            await ctx.send(embed=embed, file=gif_file)
-        else:
-            await ctx.send(embed=embed)
+        # The REAL card image (the same one csview / csbuy show) is prepared BEFORE the animation
+        # starts, so it can appear the moment the animation ends.
+        path = rolled[0]["image_path"]
+        has_img = bool(path) and Path(path).exists()
+        card_url = card_cache.cached_url(path) if has_img else None
+        card_file = None if (card_url or not has_img) else await card_cache.card_file(path)
+        if card_url:
+            embed.set_image(url=card_url)
+        elif card_file is not None:
+            embed.set_image(url=f"attachment://{card_file.filename}")
+
+        # 1) the opening animation (nothing about the card is shown yet)
+        msg = None
+        intro, wait = await _pack_intro(key)
+        if intro is not None:
+            intro_embed = discord.Embed(title=f"{spec['emoji']} Opening {spec['label']}…", color=discord.Color.gold())
+            intro_embed.set_image(url=f"attachment://{intro.filename}")
+            try:
+                msg = await ctx.send(embed=intro_embed, file=intro)
+                await asyncio.sleep(wait)
+            except discord.HTTPException as e:
+                print(f"[csopen] animation step failed: {e}")
+
+        # 2) the real card replaces the animation in the same message
+        shown = None
+        if msg is not None:
+            try:
+                shown = await msg.edit(embed=embed, attachments=[card_file] if card_file is not None else [])
+            except discord.HTTPException as e:       # e.g. the message was deleted meanwhile
+                print(f"[csopen] reveal edit failed: {e}")
+                if card_file is not None:            # a discord.File can only be sent once
+                    card_file = await card_cache.card_file(path)
+        if shown is None:
+            if card_file is not None:
+                shown = await ctx.send(embed=embed, file=card_file)
+            else:
+                shown = await ctx.send(embed=embed)
+        if card_file is not None:
+            card_cache.remember(path, shown)
+
         if result.get("pending"):
             await send_next_pending(ctx, ctx.author.id)
         await quest.track_and_notify(ctx, ctx.author.id, {"packs_opened": 1})

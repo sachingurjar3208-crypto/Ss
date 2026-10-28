@@ -26,6 +26,13 @@ MONTHLY      = "<:Monthlypack:1558138440208486440>"
 WEEKLY       = "<:Weeklypack:1558138384675905536>"
 VOUCHER      = "<:Voucher:1558696772975464458>"       # Draft currency
 
+# Pack emojis (Developer Portal -> Emojis). Used in cspack, csopen, csinv etc.
+BRONZE_PACK    = "<:Bronzepack:1564835637490884659>"
+SILVER_PACK    = "<:Silverpack:1564835559841599560>"
+GOLD_PACK      = "<:Goldpack:1564835565323423764>"
+LEGENDARY_PACK = "<:Legpack:1564835557396189345>"
+HALLOWEEN_PACK = "<:Halloweenpack:1564836597046837258>"
+
 # Player roles (Developer Portal names)
 WICKETKEEPER = "<:Wicketkepper:1558757467045888100>"   # portal name is spelled "Wicketkepper"
 OFFSPIN      = "<:Offspin:1558778042925449297>"

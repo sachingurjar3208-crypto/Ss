@@ -23,6 +23,8 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _LABEL, _NAME = os.path.join(_DIR, "label.ttf"), os.path.join(_DIR, "name_font.ttf")
 W, H, FPS, DUR = 700, 1000, 15, 2.6
+INTRO_DUR = 2.2          # pack-only intro (no card): seconds
+INTRO_WAIT = INTRO_DUR + 0.4   # how long csopen waits before showing the real card
 CX, CY = 350, 540
 
 # rim, face, ring, inner, gem, gem-light, gem-shadow — same numbers as card_style2.MEDAL_COLORS
@@ -37,9 +39,12 @@ PACK_COLORS = {
     # so this is a new palette matching the 🔥 "Legendary Pack" emoji.
     "legendary": ((70, 10, 8), (232, 64, 28), (120, 20, 12), (196, 48, 20),
                   (255, 176, 64), (255, 220, 140), (168, 36, 14)),
+    # Halloween: pumpkin orange with a deep purple rim.
+    "halloween": ((44, 14, 62), (255, 128, 30), (104, 34, 128), (204, 84, 18),
+                  (255, 190, 80), (255, 226, 150), (160, 60, 12)),
 }
 LABELS = {"bronze": "BRONZE PACK", "silver": "SILVER PACK", "gold": "GOLD PACK",
-          "legendary": "LEGENDARY PACK"}
+          "legendary": "LEGENDARY PACK", "halloween": "HALLOWEEN PACK"}
 GOLD_TRIM = (232, 214, 140)
 CREAM = (238, 228, 165)
 
@@ -229,7 +234,7 @@ def _card_frame(pack, w, h, name, ovr, role, stats, shine_t):
     return Image.alpha_composite(card, Image.composite(sh, Image.new("RGBA", (w, h), (0, 0, 0, 0)), mask))
 
 
-def _frame(t: float, pack: str, name: str, ovr: int, role: str, stats: tuple) -> Image.Image:
+def _frame(t: float, pack: str, name: str, ovr: int, role: str, stats: tuple, with_card: bool = True) -> Image.Image:
     colors = PACK_COLORS[pack]
     base = _background(pack).copy()
 
@@ -295,7 +300,7 @@ def _frame(t: float, pack: str, name: str, ovr: int, role: str, stats: tuple) ->
         base = Image.alpha_composite(base.convert("RGBA"), layer).convert("RGB")
 
     rise_p = pr(t, CARD_START, CARD_DUR)
-    if rise_p > 0:
+    if with_card and rise_p > 0:
         sc = L(.55, 1.06, eo(rise_p / .7)) if rise_p < .7 else L(1.06, 1.0, eio((rise_p - .7) / .3))
         alpha = min(1.0, rise_p * 3)
         y_off = L(60, 0, eo(rise_p))
@@ -317,11 +322,14 @@ def _frame(t: float, pack: str, name: str, ovr: int, role: str, stats: tuple) ->
 
 
 def make_pack_gif(pack: str = "bronze", name: str = "PLAYER NAME", ovr: int = 74,
-                   role: str = "ALL-ROUNDER", stats: tuple = (71, 68, 75, 70, 66, 73)) -> bytes:
+                   role: str = "ALL-ROUNDER", stats: tuple = (71, 68, 75, 70, 66, 73),
+                   with_card: bool = True) -> bytes:
+    """with_card=False: only the pack shaking and bursting open (NO card is drawn, so nothing
+    fake is shown). csopen uses this and then shows the player's REAL card image."""
     pack = pack if pack in PACK_COLORS else "bronze"
     stats = tuple(stats)
-    n = int(DUR * FPS)
-    frames = [_frame(i / FPS, pack, name, ovr, role, stats) for i in range(n)]
+    n = int((DUR if with_card else INTRO_DUR) * FPS)
+    frames = [_frame(i / FPS, pack, name, ovr, role, stats, with_card) for i in range(n)]
     key = [frames[i] for i in (0, n // 3, n // 2, int(n * .7), n - 1)]
     sheet = Image.new("RGB", (W, H * len(key)))
     for i, im in enumerate(key):
@@ -330,8 +338,9 @@ def make_pack_gif(pack: str = "bronze", name: str = "PLAYER NAME", ovr: int = 74
     pal = sheet.quantize(colors=255, method=q.MEDIANCUT if q else Image.MEDIANCUT)
     pics = [f.quantize(palette=pal) for f in frames]
     buf = io.BytesIO()
+    extra = {"loop": 0} if with_card else {}          # the intro plays once and stops on its last frame
     pics[0].save(buf, format="GIF", save_all=True, append_images=pics[1:],
-                 duration=int(1000 / FPS), loop=0, disposal=1)
+                 duration=int(1000 / FPS), disposal=1, **extra)
     return buf.getvalue()
 
 
@@ -345,3 +354,16 @@ async def pack_file(pack: str = "bronze", name: str = "PLAYER NAME", ovr: int = 
     except Exception as e:
         print(f"[pack_gif] skipped ({type(e).__name__}: {e})")
         return None
+
+
+async def intro_file(pack: str):
+    """(discord.File, seconds_to_wait) for the built-in pack-opening intro with NO card in it.
+    Used by csopen when no animation was added with `/pack animation add`.
+    Returns (None, 0) if anything goes wrong (the real card is then shown straight away)."""
+    try:
+        import discord
+        data = await asyncio.to_thread(make_pack_gif, pack, "", 0, "", (0, 0, 0, 0, 0, 0), False)
+        return discord.File(io.BytesIO(data), filename=f"pack_{pack}.gif"), INTRO_WAIT
+    except Exception as e:
+        print(f"[pack_gif] intro skipped ({type(e).__name__}: {e})")
+        return None, 0.0

@@ -1,0 +1,39 @@
+PACK UPDATE - shop menu, Halloween pack, opening animation, REAL card
+=====================================================================
+NEW files:      pack_anim.py, pack_cog.py
+CHANGED files:  economy_cog.py, squad_logic.py, pack_gif.py, emojis.py, main.py
+Sab 7 files same naam se repo me replace/upload karo, phir: git pull + systemctl restart ssbot
+(koi nayi library nahi chahiye). Naya cog `pack_cog` main.py me add ho gaya hai.
+
+1) cspack  (shop)
+   - Ab embed me har pack (emoji, naam, price, OVR range, kitne tumhare paas) + niche "Select a pack" dropdown.
+   - Pack chuno -> Confirm / Cancel -> buy. Paisa sirf Confirm par kata (pehle jaisa safe flow).
+   - `cspack bronze` (naam likh kar) abhi bhi chalta hai.
+   - Pack emojis emojis.py me: BRONZE_PACK, SILVER_PACK, GOLD_PACK, LEGENDARY_PACK, HALLOWEEN_PACK.
+
+2) Halloween pack  (squad_logic.PACKS["halloween"])
+   - Sirf un cards me se deta hai jinka event "halloween" hai (/eventmaker wala).
+   - Price 250,000, OVR 60-99 (bade OVR bahut rare). Badalna ho: squad_logic.py me _HALLOWEEN_PRICE
+     aur "halloween" wali line.
+   - Event band (/eventdisable halloween) ya Halloween ka koi obtainable card na ho -> pack shop se hat jata hai,
+     csopen bhi nahi khulta aur kharida hua pack kharab nahi hota (wapas event aane par khul jayega).
+   - `admin pack give @user halloween` bhi kaam karta hai.
+
+3) csopen  (animation -> asli card)
+   - Pehle animation chalta hai, phir usi message me ASLI card ki poori image aa jati hai
+     (wahi image jo csview / csbuy dikhate hain). Nakli card hata diya.
+   - Animation ka time: pack_anim.py me ANIM_SECONDS = 5.
+   - Agar us pack ki koi animation add nahi hai -> built-in pack intro chalta hai (pack khulta hai, ~2.2 sec,
+     usme koi card nahi hota), phir asli card.
+   - Pack aur card ek hi database transaction me milte hain (pehle jaisa). Animation ke dauran koi dusra
+     economy command nahi chal sakta.
+
+4) /pack animation add  /  /pack animation remove   (sirf tumhare server me, owner/admin)
+   /pack animation add     url:<GIF link>   pathname:<pack>
+   /pack animation remove  pathname:<name>
+   - pathname = kis pack ki animation: bronze, silver, gold, legendary, halloween, debut
+   - Ek pack ki kai animation: gold_2, gold_fire ... (random ek chalti hai)
+   - Same pathname dobara add karo to purani REPLACE ho jati hai (nayi aane ke baad hi purani delete hoti hai).
+   - Link ek baar download hoke `pack_animations/` folder me save hota hai, link mar jaye tab bhi chalta hai.
+   - Sirf GIF / animated WEBP, max 8 MB. Still image (PNG/JPG) reject hoti hai.
+   - Add karne par preview aata hai, remove karne par agar pack me koi animation na bache to bata deta hai.

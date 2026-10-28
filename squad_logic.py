@@ -128,24 +128,34 @@ def _loss_profit_weights(lo: int, hi: int, price: int, relative: dict | None = N
 
 
 _BRONZE_PRICE, _SILVER_PRICE, _GOLD_PRICE, _LEGEND_PRICE = 1_500, 60_000, 690_000, 4_000_000
+_HALLOWEEN_PRICE = 250_000
 
 PACKS = {
-    "bronze": {"label": "Bronze Pack", "emoji": "🟤", "price": _BRONZE_PRICE, "cards": 1,
+    "bronze": {"label": "Bronze Pack", "emoji": emojis.BRONZE_PACK, "price": _BRONZE_PRICE, "cards": 1,
                "range": (60, 76),
                "weights": _loss_profit_weights(60, 76, _BRONZE_PRICE)},
-    "silver": {"label": "Silver Pack", "emoji": "⚪", "price": _SILVER_PRICE, "cards": 1,
+    "silver": {"label": "Silver Pack", "emoji": emojis.SILVER_PACK, "price": _SILVER_PRICE, "cards": 1,
                "range": (77, 83),
                "weights": _loss_profit_weights(77, 83, _SILVER_PRICE)},
-    "gold":   {"label": "Gold Pack",   "emoji": "🟡", "price": _GOLD_PRICE, "cards": 1,
+    "gold":   {"label": "Gold Pack",   "emoji": emojis.GOLD_PACK, "price": _GOLD_PRICE, "cards": 1,
                "range": (84, 88),
                "weights": _loss_profit_weights(84, 88, _GOLD_PRICE)},
     # Free one-time pack given at csdebut. Not sold in the shop; opens only in the main server.
     "debut":  {"label": "Debut Pack",  "emoji": "",   "price": 0, "cards": 1,
                "range": (82, 85), "shop": False},
-    "legendary": {"label": "Legendary Pack", "emoji": "🔥", "price": _LEGEND_PRICE, "cards": 1,
+    "legendary": {"label": "Legendary Pack", "emoji": emojis.LEGENDARY_PACK, "price": _LEGEND_PRICE, "cards": 1,
                   "range": (90, 95),
                   "weights": _loss_profit_weights(90, 95, _LEGEND_PRICE,
                                                   {90: 60, 91: 50, 92: 45, 93: 30, 94: 20, 95: 5})},
+    # Halloween Pack: gives ONLY cards of the event named in "event" (made with /eventmaker).
+    # Price / OVR range / rarity below are the ONLY things to change if you want to tune it.
+    # It disappears from the shop (and can't be opened) while no obtainable card of that event
+    # exists, e.g. after /eventdisable halloween. Packs already bought are never lost.
+    "halloween": {"label": "Halloween Pack", "emoji": emojis.HALLOWEEN_PACK, "price": _HALLOWEEN_PRICE, "cards": 1,
+                  "range": (60, 99), "event": "halloween",     # every Halloween card can drop; high OVRs are rare
+                  "weights": _loss_profit_weights(60, 99, _HALLOWEEN_PRICE,
+                                                  {84: 6, 85: 5, 86: 4, 87: 3, 88: 2.5, 89: 2, 90: 1.5, 91: 1.2,
+                                                   92: 1, 93: .8, 94: .6, 95: .5, 96: .3, 97: .2, 98: .1, 99: .05})},
 }
 
 
@@ -160,11 +170,32 @@ def _closest_cards(cards: list, lo: int, hi: int) -> list:
     return [c for c in cards if abs(c["ovr"] - mid) == best]
 
 
+def _pack_cards(spec: dict) -> list:
+    """Cards a pack may give. Normal packs: every obtainable card. Event packs
+    (spec["event"]): only the obtainable cards that belong to that event."""
+    cards = list(card_db.list_obtainable_cards())
+    ev = (spec.get("event") or "").strip().lower()
+    if ev:
+        cards = [c for c in cards if str(card_db._rget(c, "event_key") or "").strip().lower() == ev]
+    return cards
+
+
+def pack_available(pack_type: str) -> bool:
+    """False for an event pack whose event has no obtainable card right now
+    (event disabled / not made yet). Normal packs are always available."""
+    spec = PACKS.get(pack_type)
+    if spec is None:
+        return False
+    if not spec.get("event"):
+        return True
+    return bool(_pack_cards(spec))
+
+
 def roll_pack(pack_type: str) -> list:
     """Pick the single card for one pack. Returns a list with 1 card row
     (empty list only if the game has no cards at all)."""
     spec = PACKS[pack_type]
-    cards = list(card_db.list_obtainable_cards())   # not obtainable=False, not a disabled event
+    cards = _pack_cards(spec)                       # not obtainable=False, not a disabled event
     if not cards:
         return []
     lo, hi = spec["range"]
