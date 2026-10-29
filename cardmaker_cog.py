@@ -1950,9 +1950,32 @@ class CardMakerCog(commands.Cog):
 
         deleted = delete_card(cardname)
         if deleted is None:
+            # Fallback: the autocomplete value is cut at 100 chars, so a very long
+            # (glitched / URL) name never matches exactly. Match by prefix, by
+            # "contains", or by the foreground link instead.
+            q = cardname.strip().lower()
+            matches = []
+            for c in list_all_cards():
+                n = (c["playername"] or "").lower()
+                fl = (c["foreground_link"] or "").lower()
+                if q and (n.startswith(q) or q in n or q in fl):
+                    matches.append(c["playername"])
+            if len(matches) == 1:
+                deleted = delete_card(matches[0])
+            elif len(matches) > 1:
+                shown = "\n".join(f"• {m[:80]}" for m in matches[:10])
+                await interaction.followup.send(
+                    f"⚠️ {len(matches)} cards match **{cardname[:100]}**. Type more of the name:\n{shown}"[:1900]
+                )
+                return
+
+        if deleted is None:
             names = list_playernames()
-            hint = ", ".join(names) if names else "(no cards yet)"
-            await interaction.followup.send(f"❌ No card found for **{cardname}**.\nExisting cards: {hint}")
+            hint = ", ".join(n[:40] for n in names) if names else "(no cards yet)"
+            msg = f"❌ No card found for **{cardname[:100]}**.\nExisting cards: {hint}"
+            if len(msg) > 1900:
+                msg = msg[:1900] + " ..."
+            await interaction.followup.send(msg)
             return
 
         # Best-effort cleanup of the generated image file �� the DB row is
