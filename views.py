@@ -26,7 +26,7 @@ from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary
 import moments as _moments
-from wagon_wheel_gif import wagon_wheel_gif
+from wagon_wheel import wagon_wheel_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 
 
@@ -1018,11 +1018,13 @@ async def _send_commentary_with_gifs(
     gif_urls: list[str],
     interaction: discord.Interaction | None = None,
     wheel: bytes | None = None,
+    background: bool = True,
 ):
     """
     Show ball commentary + scoreboard embed.
     If `interaction` is given, edit the batting-prompt message in-place (keeps
     the channel clean).  Otherwise send a fresh message.
+    `background=True` posts the GIFs/banners without making the caller wait for them.
     """
     if interaction is not None:
         try:
@@ -1034,15 +1036,33 @@ async def _send_commentary_with_gifs(
 
     if wheel:   # wagon wheel for a four / six
         try:
-            await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.gif"))
+            await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
         except Exception:
             pass
 
-    for url in gif_urls:
+    if not gif_urls:
+        return
+    if background:
+        # PERF: GIF / banner uploads used to be awaited one by one, so the next delivery
+        # prompt waited for all of them. Now they go out in the background (still in order,
+        # one after another) and the match moves on straight after the commentary.
+        _t = asyncio.create_task(_send_gif_items(channel, list(gif_urls)))
+        _BG_GIF_TASKS.add(_t)                      # keep a reference so it isn't garbage-collected
+        _t.add_done_callback(_BG_GIF_TASKS.discard)
+    else:
+        await _send_gif_items(channel, gif_urls)
+
+
+_BG_GIF_TASKS: set = set()
+
+
+async def _send_gif_items(channel, items: list[str]) -> None:
+    """Post GIF items one after another. Cosmetic only: a failure is skipped, never raised."""
+    for url in items:
         try:
             await _send_gif_item(channel, url)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[gif] send skipped ({type(e).__name__}: {e})")
 
 
 async def _post_delivery_prompt(interaction, channel, game, *, content, view, allowed_ids=None):
@@ -1290,7 +1310,7 @@ async def _process_delivery(
         try:
             _dir = game._choose_direction(delivery_internal, shot_internal, 6 if outcome == "6" else 4)
             wheel = await asyncio.to_thread(
-                wagon_wheel_gif, _dir, outcome, None, sname, shot_internal, "R",
+                wagon_wheel_png, _dir, outcome, None, sname, shot_internal, "R",
             )
         except Exception:
             wheel = None
@@ -1601,7 +1621,8 @@ async def _handle_wicket_fall(channel, game: GameState):
 async def _do_innings_break(channel, game: GameState, commentary, embed, gif_urls=None, interaction=None):
     """End of innings via overs exhausted: save stats, send commentary, start break."""
     save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id)
-    await _send_commentary_with_gifs(channel, commentary, embed, gif_urls or [], interaction)
+    # background=False: the innings-break messages follow right after, keep the order
+    await _send_commentary_with_gifs(channel, commentary, embed, gif_urls or [], interaction, background=False)
     await _start_second_innings(channel, game)
 
 

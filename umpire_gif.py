@@ -4,7 +4,7 @@
     file      = await umpire_file("six")        # discord.File (cached after the first render)
     await warm()                                # pre-render all five in the background
 
-960x270, 2.6 s, 20 fps. Fonts: label.ttf and name_font.ttf from the same folder.
+Drawn at 960x270, sent as 800x225 @12 fps (~250 KB), 2.6 s. Fonts: label.ttf and name_font.ttf from the same folder.
 """
 from __future__ import annotations
 
@@ -19,6 +19,13 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 _DIR = os.path.dirname(os.path.abspath(__file__))
 _LABEL, _NAME = os.path.join(_DIR, "label.ttf"), os.path.join(_DIR, "name_font.ttf")
 W, H, S, FPS, DUR = 960, 270, 2, 20, 2.6
+
+# Output encoding (PERF): the banner is drawn at 960x270 / 2x supersampled, but sent as a
+# smaller, lower-fps, no-dither GIF so each one is ~200-300 KB instead of ~1.5-2 MB.
+# Uploading 1.5 MB on every 4/6/W/wide/no-ball was slowing the match on a small VPS.
+OUT_W, OUT_H = 800, 225
+OUT_FPS = 12
+OUT_COLORS = 160
 CX, CY = 480, 139
 GOLD = (255, 211, 107)
 WHITE, DARK, SKIN = (244, 241, 251), (22, 27, 61), (242, 185, 142)
@@ -240,20 +247,31 @@ def _frame(t: float, ev: dict) -> Image.Image:
     return base.reduce(S)
 
 
+def encode_banner_gif(frames: list, colors: int = OUT_COLORS) -> bytes:
+    """Small GIF from banner frames (rendered at OUT_FPS). Shared with moment_gif.py.
+    One shared palette (no flicker), NO dithering (dither noise is what bloated the file),
+    resized to OUT_W x OUT_H."""
+    size = (OUT_W, OUT_H)
+    frames = [f if f.size == size else f.resize(size, Image.LANCZOS) for f in frames]
+    n = len(frames)
+    key = [frames[min(n - 1, int(i * OUT_FPS / FPS))] for i in (14, 20, 28, 40)]
+    sheet = Image.new("RGB", (OUT_W, OUT_H * len(key)))
+    for i, im in enumerate(key):
+        sheet.paste(im, (0, i * OUT_H))
+    q = getattr(Image, "Quantize", None)
+    pal = sheet.quantize(colors=colors, method=q.MEDIANCUT if q else Image.MEDIANCUT)
+    dn = getattr(getattr(Image, "Dither", None), "NONE", 0)
+    pics = [f.quantize(palette=pal, dither=dn) for f in frames]
+    buf = io.BytesIO()
+    pics[0].save(buf, format="GIF", save_all=True, append_images=pics[1:],
+                 duration=int(1000 / OUT_FPS), loop=0, disposal=1)
+    return buf.getvalue()
+
+
 def make_umpire_gif(event: str) -> bytes:
     ev = EVENTS[event]
-    n = int(DUR * FPS)
-    frames = [_frame(i / FPS, ev) for i in range(n)]
-    key = [frames[i] for i in (14, 20, 28, 40)]       # one shared palette -> no flicker
-    sheet = Image.new("RGB", (W, H * len(key)))
-    for i, im in enumerate(key):
-        sheet.paste(im, (0, i * H))
-    q = getattr(Image, "Quantize", None)
-    pal = sheet.quantize(colors=255, method=q.MEDIANCUT if q else Image.MEDIANCUT)
-    pics = [f.quantize(palette=pal) for f in frames]
-    buf = io.BytesIO()
-    pics[0].save(buf, format="GIF", save_all=True, append_images=pics[1:], duration=int(1000 / FPS), loop=0, disposal=1)
-    return buf.getvalue()
+    n = int(DUR * OUT_FPS)
+    return encode_banner_gif([_frame(i / OUT_FPS, ev) for i in range(n)])
 
 
 _cache: dict[str, bytes] = {}

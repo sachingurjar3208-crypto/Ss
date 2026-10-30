@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw
 
 # Re-use the umpire banner's drawing helpers so both banners match.
 from umpire_gif import (
-    CX, CY, DUR, FPS, GOLD, H, S, W,
+    CX, CY, DUR, FPS, GOLD, H, S, W, OUT_FPS, encode_banner_gif,
     _LABEL, _NAME, _background, _flash_mask, _font, _star, _with_alpha, _word_sprite,
     eio, eo, ei, pr, L,
 )
@@ -182,18 +182,8 @@ def _frame(t: float, ev: dict, name: str, detail: str) -> Image.Image:
 def make_moment_gif(kind: str, name: str, detail: str = "") -> bytes:
     ev = EVENTS[kind]
     name, detail = _clean(name, 40) or "PLAYER", _clean(detail, 60)
-    n = int(DUR * FPS)
-    frames = [_frame(i / FPS, ev, name, detail) for i in range(n)]
-    key = [frames[i] for i in (14, 20, 28, 40)]       # one shared palette -> no flicker
-    sheet = Image.new("RGB", (W, H * len(key)))
-    for i, im in enumerate(key):
-        sheet.paste(im, (0, i * H))
-    q = getattr(Image, "Quantize", None)
-    pal = sheet.quantize(colors=255, method=q.MEDIANCUT if q else Image.MEDIANCUT)
-    pics = [f.quantize(palette=pal) for f in frames]
-    buf = io.BytesIO()
-    pics[0].save(buf, format="GIF", save_all=True, append_images=pics[1:], duration=int(1000 / FPS), loop=0, disposal=1)
-    return buf.getvalue()
+    n = int(DUR * OUT_FPS)
+    return encode_banner_gif([_frame(i / OUT_FPS, ev, name, detail) for i in range(n)], colors=96)   # name text = more detail -> fewer colours keeps it < 300 KB
 
 
 # Small LRU so a repeated banner (same player, same text) isn't re-rendered.
