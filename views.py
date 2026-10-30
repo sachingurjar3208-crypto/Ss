@@ -26,7 +26,7 @@ from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary
 import moments as _moments
-from wagon_wheel import wagon_wheel_png
+from wagon_wheel_gif import wagon_wheel_gif
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 
 
@@ -1034,7 +1034,7 @@ async def _send_commentary_with_gifs(
 
     if wheel:   # wagon wheel for a four / six
         try:
-            await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
+            await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.gif"))
         except Exception:
             pass
 
@@ -1276,7 +1276,7 @@ async def _process_delivery(
         try:
             _dir = game._choose_direction(delivery_internal, shot_internal, 6 if outcome == "6" else 4)
             wheel = await asyncio.to_thread(
-                wagon_wheel_png, _dir, outcome, None, sname, shot_internal, "R",
+                wagon_wheel_gif, _dir, outcome, None, sname, shot_internal, "R",
             )
         except Exception:
             wheel = None
