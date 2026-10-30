@@ -1196,6 +1196,20 @@ async def _process_delivery(
             pass
         return
 
+    # FIX (ranked "match ruk jata hai"): Discord gives only 3 seconds to answer a button
+    # click. Everything below (esp. the wagon-wheel GIF for a 4/6, ~5s of CPU on a small
+    # VPS) used to run BEFORE the ack, so the token expired, the late ack raised
+    # discord.NotFound (not caught), and the function died AFTER the ball was already
+    # counted -> no commentary, no next prompt, view already stopped = stuck match.
+    # So: acknowledge FIRST, and never let a failed ack stop the ball.
+    try:
+        await interaction.response.edit_message(view=None)
+    except Exception as _ack_err:
+        # NotFound/HTTPException (expired token), InteractionResponded, or RuntimeError
+        # (autoplay's stand-in interaction). The ack is cosmetic - carry on; the result
+        # is posted as a normal channel message if edit_original_response can't be used.
+        print(f"[match recovery] shot ack skipped ({type(_ack_err).__name__}: {_ack_err})")
+
     bname = _pname(bowler)
     sname = _pname(striker)
 
@@ -1431,16 +1445,7 @@ async def _process_delivery(
     if _mom["pressure"]:
         commentary = f"{commentary}\n{_mom['pressure']}"
 
-    # ── Acknowledge the shot button (remove it from the message) ─────────
-    # BUG FIX #4: always ack the interaction immediately to avoid
-    # "This interaction failed" errors. We edit in-place to remove the view.
-    try:
-        await interaction.response.edit_message(view=None)
-    except (discord.InteractionResponded, RuntimeError):
-        # RuntimeError: autoplay's stand-in interaction has no message to
-        # edit. This ack is cosmetic, so skip it and let the ball finish.
-        pass
-
+    # (The shot-button ack now happens at the top of this function - see FIX above.)
     channel      = _ch(interaction, game)
     embed        = build_scoreboard_embed(game)
     innings_over = game.is_innings_over()
