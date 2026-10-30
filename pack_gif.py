@@ -24,7 +24,7 @@ _DIR = os.path.dirname(os.path.abspath(__file__))
 _LABEL, _NAME = os.path.join(_DIR, "label.ttf"), os.path.join(_DIR, "name_font.ttf")
 W, H, FPS, DUR = 700, 1000, 15, 2.6
 INTRO_DUR = 2.2          # pack-only intro (no card): seconds
-INTRO_WAIT = INTRO_DUR + 0.4   # how long csopen waits before showing the real card
+INTRO_WAIT = INTRO_DUR + 0.4   # how long rcopen waits before showing the real card
 CX, CY = 350, 540
 
 # rim, face, ring, inner, gem, gem-light, gem-shadow — same numbers as card_style2.MEDAL_COLORS
@@ -325,7 +325,7 @@ def make_pack_gif(pack: str = "bronze", name: str = "PLAYER NAME", ovr: int = 74
                    role: str = "ALL-ROUNDER", stats: tuple = (71, 68, 75, 70, 66, 73),
                    with_card: bool = True) -> bytes:
     """with_card=False: only the pack shaking and bursting open (NO card is drawn, so nothing
-    fake is shown). csopen uses this and then shows the player's REAL card image."""
+    fake is shown). rcopen uses this and then shows the player's REAL card image."""
     pack = pack if pack in PACK_COLORS else "bronze"
     stats = tuple(stats)
     n = int((DUR if with_card else INTRO_DUR) * FPS)
@@ -358,7 +358,7 @@ async def pack_file(pack: str = "bronze", name: str = "PLAYER NAME", ovr: int = 
 
 async def intro_file(pack: str):
     """(discord.File, seconds_to_wait) for the built-in pack-opening intro with NO card in it.
-    Used by csopen when no animation was added with `/pack animation add`.
+    Used by rcopen when no animation was added with `/pack animation add`.
     Returns (None, 0) if anything goes wrong (the real card is then shown straight away)."""
     try:
         import discord

@@ -1,4 +1,4 @@
-"""Welcome image for csdebut: CricketStar backdrop, WELCOME + player name, team and purse panel,
+"""Welcome image for rcdebut: Rush Cricket backdrop, WELCOME + player name, team and purse panel,
 and the next commands. Pure Pillow, no Discord code.
 
     buf = build_debut_image("Sachin", "Sachin XI", "50,000")   # -> BytesIO (JPEG) or None
@@ -113,7 +113,7 @@ def build_debut_image(display_name: str, team_name: str, purse_text: str) -> io.
 
         # next steps
         d.text((mid, 770), "GET STARTED", font=_font(30, "label.ttf"), fill=SOFT, anchor="mm")
-        steps = ["csstarterpack", "csxi", "csteamname"]
+        steps = ["rcstarterpack", "rcxi", "rcteamname"]
         f = _font(46, "label.ttf")
         gap, pad = 26, 30
         widths = [int(d.textlength(s, font=f)) + 2 * pad for s in steps]

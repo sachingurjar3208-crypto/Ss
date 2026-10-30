@@ -1,7 +1,7 @@
 """Bot-wide protection so nobody can spam, exploit or break the bot.
 
 What is covered
-1. BANS            banned users (csban) can't run any command.
+1. BANS            banned users (rcban) can't run any command.
 2. RATE LIMITS     one global check for every command: too many commands in a
                    short time -> "slow down"; keep doing it and you're muted
                    for a few minutes. This also protects the empty-prefix
@@ -38,8 +38,8 @@ import economy
 # @here or role mentions.
 SAFE_MENTIONS = discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=False)
 
-# Roles that get FULL admin access (every owner/admin command: csban, csunban,
-# csgivecoins, csgivecard, /cardmaker, /stadium ... and the `admin` commands).
+# Roles that get FULL admin access (every owner/admin command: rcban, rcunban,
+# rcgivecoins, rcgivecard, /cardmaker, /stadium ... and the `admin` commands).
 FULL_ADMIN_ROLE_IDS = {1556644558929010769}
 
 
@@ -79,13 +79,13 @@ class RateLimited(commands.CheckFailure):
 
 
 class WrongMatchChannel(commands.CheckFailure):
-    """csmp (casual or `csmp ranked`) used inside one of LOCKED_CHANNEL_IDS.
+    """rcmp (casual or `rcmp ranked`) used inside one of LOCKED_CHANNEL_IDS.
     Every other channel, in every server: no restriction at all."""
     pass
 
 
 # ── Match channel restriction (two specific channels, locked) ────────────────
-# csmp (and "csmp ranked") is blocked inside these exact channel IDs, in
+# rcmp (and "rcmp ranked") is blocked inside these exact channel IDs, in
 # whichever server they belong to. Every other channel is unaffected.
 LOCKED_CHANNEL_IDS = {1556662732017766450, 1556644440280535243}
 
@@ -187,7 +187,7 @@ async def global_check(ctx: commands.Context) -> bool:
 
 
 def match_channel_check():
-    """Command check for csmp: a match (casual or `csmp ranked`) is blocked
+    """Command check for rcmp: a match (casual or `rcmp ranked`) is blocked
     in LOCKED_CHANNEL_IDS. Every other channel: always allowed."""
     async def predicate(ctx: commands.Context) -> bool:
         if is_locked_channel(ctx.channel):

@@ -174,7 +174,7 @@ async def fetch_image(url: str) -> tuple[bytes, str]:
     import aiohttp
     url = normalize_url(url)
     timeout = aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)
-    async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "Mozilla/5.0 (CricStar bot)"}) as session:
+    async with aiohttp.ClientSession(timeout=timeout, headers={"User-Agent": "Mozilla/5.0 (Rush Cricket bot)"}) as session:
         for _ in range(MAX_REDIRECTS + 1):
             await _check_host(url)
             try:

@@ -32,7 +32,7 @@ class AnnounceCog(commands.Cog):
         if not message.strip() or message.strip().lower() == "test":
             return await ctx.send("Usage: `announce <message>`  or  `announce test <message>`")
 
-        # `economy.list_users()` = every player who used csdebut (users table in economy.db)
+        # `economy.list_users()` = every player who used rcdebut (users table in economy.db)
         ids = [int(u["user_id"]) for u in economy.list_users()
                if not security.is_banned(u["user_id"])]
 

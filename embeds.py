@@ -1,5 +1,5 @@
 """
-CricStar embeds — clean text style.
+Rush Cricket embeds — clean text style.
 
 Design rules (no copied scoreboard look):
 - No box-drawing separators (no long line or box-drawing characters).
@@ -16,7 +16,7 @@ _LOGO_PATH = os.path.join(os.path.dirname(__file__), "cricstar_logo.png")
 
 
 def logo_file() -> discord.File:
-    """Return a fresh discord.File for the CricStar logo attachment."""
+    """Return a fresh discord.File for the Rush Cricket logo attachment."""
     return discord.File(_LOGO_PATH, filename="cricstar_logo.png")
 
 

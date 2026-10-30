@@ -1,4 +1,4 @@
-"""Fast card images for csview / csbuy / cssell.
+"""Fast card images for rcview / rcbuy / rcsell.
 
 WHY IT WAS SLOW: every command re-uploaded the full-size card PNG
 (1037x1517, several MB) to Discord, reading it from disk each time.

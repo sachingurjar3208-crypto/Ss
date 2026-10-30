@@ -320,7 +320,7 @@ def save_game_innings_stats(game, batting_user_id=None, bowling_user_id=None, is
     """Persist per-card stats for the innings that just ended.
 
     batting_user_id/bowling_user_id identify who was batting/bowling this
-    innings, so the personal (per-user) card stats used by `csview` get
+    innings, so the personal (per-user) card stats used by `rcview` get
     credited to the right person, not just the shared all-owners totals.
     """
     try:
@@ -522,9 +522,9 @@ VIEW_TIMEOUT = 300  # 5 minutes per action
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Autoplay (premium) — `csautoplay`
+# Autoplay (premium) — `rcautoplay`
 # ─────────────────────────────────────────────────────────────────────────────
-# A premium player can type `csautoplay` during a match and the bot then makes
+# A premium player can type `rcautoplay` during a match and the bot then makes
 # THEIR choices (bowler, batter, delivery, shot, toss, openers ...) on their
 # behalf. If only one side has it on, only that side is automatic; if both
 # sides have it on, the whole match runs by itself.
@@ -591,7 +591,7 @@ def _first_select(view):
 
 def _acting_skill(view):
     """0..1 skill if the player being auto-played is a ranked BOT, else None
-    (None = normal csautoplay behaviour for real premium players)."""
+    (None = normal rcautoplay behaviour for real premium players)."""
     uid = view.__dict__.get("_autoplay_uid")
     game = getattr(view, "game", None)
     if uid is None or game is None or uid not in getattr(game, "bot_ids", ()):
@@ -714,7 +714,7 @@ async def _autoplay_boot(view) -> None:
 
 
 def autoplay_kick(game) -> None:
-    """Right after `csautoplay` is switched on: handle the prompt that is
+    """Right after `rcautoplay` is switched on: handle the prompt that is
     already on screen."""
     view = game.__dict__.get("_live_view")
     if view is not None and not view.is_finished():
@@ -788,7 +788,7 @@ class _TimeoutMixin:
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Premium `csautoplay`: if the player who must act has it on, the bot
+        # Premium `rcautoplay`: if the player who must act has it on, the bot
         # makes the choice for them.
         # (self.game etc. are set by the subclass AFTER this runs, so look at
         # the view on the next event-loop tick, not right now.)
@@ -799,7 +799,7 @@ class _TimeoutMixin:
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Block every button/select on this view once the match is no
-        longer registered in active_games. Without this, `cscancel` only
+        longer registered in active_games. Without this, `rccancel` only
         removed the game from that dict — the views already on-screen kept
         calling straight into `self.game` and the match carried on as if
         nothing happened."""
@@ -822,7 +822,7 @@ class _TimeoutMixin:
                 return False
         except ImportError:
             pass
-        # Stale-prompt guard: after `csresume` a NEW prompt is sent and becomes
+        # Stale-prompt guard: after `rcresume` a NEW prompt is sent and becomes
         # the game's live view. Buttons on any older message must do nothing.
         if game is not None:
             live = game.__dict__.get("_live_view")
@@ -917,7 +917,7 @@ class _TimeoutMixin:
         try:
             await ch.send(
                 "**Match abandoned — a player went AFK.**\n"
-                "No response was received in time. Use `csmp @user <overs>` to start a fresh match."
+                "No response was received in time. Use `rcmp @user <overs>` to start a fresh match."
                 + penalty_msg
             )
         except Exception:
@@ -970,7 +970,7 @@ def _drs_overturn_chance(delivery_internal: str, shot_internal: str) -> float:
 
 
 async def _send_match_summary(channel, game) -> None:
-    """Last message of a finished match: the Cricket Star SUMMARY card (never breaks the match end)."""
+    """Last message of a finished match: the Rush Cricket SUMMARY card (never breaks the match end)."""
     try:
         from match_summary import build_summary_file
         data, filename = await asyncio.to_thread(build_summary_file, game)
@@ -1153,7 +1153,7 @@ async def _process_delivery(
     guide_entry_exists: bool = False,
     is_free_hit: bool = False,
 ):
-    # BUG FIX: `cscancel` only removed the game from active_games — it never
+    # BUG FIX: `rccancel` only removed the game from active_games — it never
     # stopped the match itself, because this function (and every other
     # button callback) kept acting on `game` directly regardless of whether
     # it was still registered. That let players keep playing balls on a

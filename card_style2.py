@@ -7,7 +7,7 @@ How it works
 The design is drawn in a 1288 x 1800 "design space" (same as the reference
 image) at 2x supersampling. Only the card area (CROP) is rendered, then it is
 shrunk to 1037 x 1517 so it lines up with the classic cards everywhere
-(squad, csview, draft ...).
+(squad, rcview, draft ...).
 
 The static parts (shield mask, gradient background, texture, dark fades, gold
 border) are built ONCE and cached. Each card only draws its own layers:

@@ -21,7 +21,7 @@
     /eventmaker     make an event (name + emoji id). Cards of an event show its emoji first in every XI
     /eventdisable   switch an event off: nobody can get any card of it any more (/eventenable switches it on)
     /eventlist      list all events
-    /csrarity       (everyone) paged list of all cards: name, OVR, BAT, BOWL, price
+    /rcrarity       (everyone) paged list of all cards: name, OVR, BAT, BOWL, price
     /rename card    rename a card's player name (frees the old name for a new card)
     /rename event   rename an event (cards of that event move to the new name automatically)
 
@@ -207,7 +207,7 @@ async def _regenerate_and_send(interaction: discord.Interaction, playername: str
     with open(out_path, "wb") as f:
         f.write(buf.getvalue())
     set_card_image_path(playername, str(out_path))
-    await card_cache.warm(str(out_path))   # so csview/csbuy/cssell are instant
+    await card_cache.warm(str(out_path))   # so rcview/rcbuy/rcsell are instant
     buf.seek(0)
     file = discord.File(buf, filename=f"{card['displayname']}.png")
     extras = ""
@@ -271,7 +271,7 @@ async def _check_emoji(interaction: discord.Interaction, emoji_id: str):
     return None, False
 
 
-# ── /csrarity: paged player list (20 per page, one line per card) ─────────
+# ── /rcrarity: paged player list (20 per page, one line per card) ─────────
 RARITY_PER_PAGE = 20
 
 
@@ -371,7 +371,7 @@ class RarityListView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
-            await interaction.response.send_message("This list isn't yours. Run `/csrarity` yourself.", ephemeral=True)
+            await interaction.response.send_message("This list isn't yours. Run `/rcrarity` yourself.", ephemeral=True)
             return False
         return True
 
@@ -992,12 +992,12 @@ class CardMakerCog(commands.Cog):
                 f"✅ Event renamed: `{eventname}` → {event_emoji_str(ev)} **{ev['eventname']}** · {n} card(s) moved with it."
             )
 
-    # ── /csrarity ────────────────────────────────────────────────────
+    # ── /rcrarity ────────────────────────────────────────────────────
     @app_commands.command(
-        name="csrarity",
+        name="rcrarity",
         description="All cards by OVR: name, BAT, BOWL, price (only visible to you)",
     )
-    async def csrarity(self, interaction: discord.Interaction):
+    async def rcrarity(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
 
         cards = list_all_cards()
@@ -1017,7 +1017,7 @@ class CardMakerCog(commands.Cog):
         description="Move a background's artwork onto another pathname, then retire the first one",
     )
     @app_commands.describe(
-        keep="Pathname that survives (e.g. csbase) — every card ends up using this name",
+        keep="Pathname that survives (e.g. rcbase) — every card ends up using this name",
         replace_with="Pathname whose artwork takes over `keep`'s slot, then gets deleted (e.g. tester)",
         style="Card design for every card on this background (default: leave each card as it is)",
     )
@@ -1153,7 +1153,7 @@ class CardMakerCog(commands.Cog):
         description="Move a panel's artwork onto another pathname, then retire the first one",
     )
     @app_commands.describe(
-        keep="Pathname that survives (e.g. csbase) — every card ends up using this name",
+        keep="Pathname that survives (e.g. rcbase) — every card ends up using this name",
         replace_with="Pathname whose artwork takes over `keep`'s slot, then gets deleted (e.g. tester)",
     )
     @app_commands.autocomplete(keep=panel_autocomplete, replace_with=panel_autocomplete)

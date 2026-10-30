@@ -1,4 +1,4 @@
-"""`cs about` — bot speed, uptime and usage statistics.
+"""`rc about` — bot speed, uptime and usage statistics.
 
 Also counts every successful command (per user) in economy.db so the
 "how many users used the bot" numbers work. Counting starts from the day this
@@ -88,11 +88,11 @@ class StatsCog(commands.Cog, name="Stats"):
         except Exception as e:
             print(f"[stats] couldn't record command use: {type(e).__name__}: {e}")
 
-    @commands.group(name="cs", invoke_without_command=True)
-    async def cs(self, ctx: commands.Context):
-        await ctx.send("Usage: `cs about`")
+    @commands.group(name="rc", invoke_without_command=True)
+    async def rc(self, ctx: commands.Context):
+        await ctx.send("Usage: `rc about`")
 
-    @cs.command(name="about", aliases=["info", "stats", "ping"])
+    @rc.command(name="about", aliases=["info", "stats", "ping"])
     @commands.cooldown(1, 10, commands.BucketType.user)
     async def about(self, ctx: commands.Context):
         """Bot latency, uptime and usage statistics."""

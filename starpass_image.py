@@ -1,4 +1,4 @@
-"""Star Pass image for `csstarpass` (pure Pillow, no Discord code).
+"""Star Pass image for `rcstarpass` (pure Pillow, no Discord code).
 
     build_starpass_image(board, page) -> PNG BytesIO
 

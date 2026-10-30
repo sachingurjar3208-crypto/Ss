@@ -3,9 +3,9 @@
   /cooldown reset user:<member> starterpack:True/False weeklypack:True/False dailypack:True/False
 
 True  = reset that cooldown for the user, False (default) = leave it alone.
-  starterpack -> the user can use csstarterpack again
-  weeklypack  -> csweekly is available again right away
-  dailypack   -> csdaily is available again right away (their streak is kept)
+  starterpack -> the user can use rcstarterpack again
+  weeklypack  -> rcweekly is available again right away
+  dailypack   -> rcdaily is available again right away (their streak is kept)
 
 Only the bot owner can run it, it exists only in the main server
 (bot_guard.ADMIN_GUILD_ID) and is hidden from normal members.
@@ -42,9 +42,9 @@ class CooldownCog(commands.Cog):
     @cooldown.command(name="reset", description="Reset a user's starter pack / weekly / daily cooldown")
     @app_commands.describe(
         user="Whose cooldown to reset",
-        starterpack="True = they can claim csstarterpack again",
-        weeklypack="True = csweekly is available again right now",
-        dailypack="True = csdaily is available again right now (streak is kept)",
+        starterpack="True = they can claim rcstarterpack again",
+        weeklypack="True = rcweekly is available again right now",
+        dailypack="True = rcdaily is available again right now (streak is kept)",
     )
     @app_commands.check(_owner_check)
     async def reset(
@@ -73,11 +73,11 @@ class CooldownCog(commands.Cog):
 
         lines = []
         if done["starter"]:
-            lines.append("🎁 Starter pack: **reset** (they can use `csstarterpack` again)")
+            lines.append("🎁 Starter pack: **reset** (they can use `rcstarterpack` again)")
         if done["weekly"]:
-            lines.append("📅 Weekly pack: **reset** (`csweekly` is ready)")
+            lines.append("📅 Weekly pack: **reset** (`rcweekly` is ready)")
         if done["daily"]:
-            lines.append("☀️ Daily pack: **reset** (`csdaily` is ready, streak kept)")
+            lines.append("☀️ Daily pack: **reset** (`rcdaily` is ready, streak kept)")
         await interaction.response.send_message(
             f"✅ Cooldown reset for **{name}**\n" + "\n".join(lines), ephemeral=True
         )

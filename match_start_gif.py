@@ -1,7 +1,7 @@
 """MATCH STARTING banner GIF — made on the fly for any two team names (PIL only).
 
     gif_bytes = make_match_start_gif("Mumbai Indians", "Chennai Super Kings")
-    file      = await match_start_file("mike_01's XI", "Cricket Star")   # discord.File
+    file      = await match_start_file("mike_01's XI", "Rush Cricket")   # discord.File
 
 960x270 (32:9), ~3.2 s, 20 fps, about 1-2 MB. Rendering takes a second or two, so
 the async helper runs it in a thread and remembers the last results.

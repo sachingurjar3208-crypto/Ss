@@ -1,4 +1,4 @@
-"""Leaderboard image for `csranktop` (1200 wide PNG, drawn at 2x then scaled down for smooth edges).
+"""Leaderboard image for `rcranktop` (1200 wide PNG, drawn at 2x then scaled down for smooth edges).
 
 generate_rank_top(players, season_text) -> PNG bytes
 
@@ -248,7 +248,7 @@ def _row(img, d, p, rank, rect, top_stars):
     _star(d, rx + 30, cy, 14, GOLD)
 
 
-def generate_rank_top(players: list[dict], season_text: str = "", footer: str = "csrank for your own card   |   csmp ranked to climb") -> bytes:
+def generate_rank_top(players: list[dict], season_text: str = "", footer: str = "rcrank for your own card   |   rcmp ranked to climb") -> bytes:
     n = len(players)
     hero_h, pod_h, row_h, gap = 262, 150, 68, 10
     y = 150

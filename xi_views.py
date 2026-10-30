@@ -1,5 +1,5 @@
 """
-Interactive Discord UI for /cs setxi and /cs myxi.
+Interactive Discord UI for /rc setxi and /rc myxi.
 """
 import discord
 from database import (

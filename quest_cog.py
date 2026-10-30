@@ -1,6 +1,6 @@
 """Daily quests.
 
-    csquest      today's 5 quests with your progress (aliases: csquests, quests)
+    rcquest      today's 5 quests with your progress (aliases: rcquests, quests)
 
 Finishing ALL of the day's quests pays 1 voucher automatically. Rules, quest list and
 settings are in quest.py. The image is drawn by quest_image.py.
@@ -56,9 +56,9 @@ class QuestCog(commands.Cog, name="Quest"):
         except Exception as e:
             print(f"[quest] could not create quest tables: {e}")
 
-    @commands.command(name="csquest", aliases=["csquests", "quests"])
+    @commands.command(name="rcquest", aliases=["rcquests", "quests"])
     @premium_cooldown(5 * 60)           # normal users: 5 min, Premium: none
-    async def csquest(self, ctx: commands.Context):
+    async def rcquest(self, ctx: commands.Context):
         """Show today's quests and your progress."""
         if not await _need_debut(ctx):
             return

@@ -1,11 +1,11 @@
 """Draft (voucher) system.
 
 Players
-    csdraft                      open the Draft screen (Pool A / B / C, 1 Draft / 10 Drafts)
-    csdraft halloween            open a running EVENT draft by name (same as cshalloweendraft).
+    rcdraft                      open the Draft screen (Pool A / B / C, 1 Draft / 10 Drafts)
+    rcdraft halloween            open a running EVENT draft by name (same as rchalloweendraft).
                                  While an event runs, a dropdown under the image switches drafts.
-    cshalloweendraft             the Halloween Draft
-    csbal                        (in economy_cog) shows coins + vouchers
+    rchalloweendraft             the Halloween Draft
+    rcbal                        (in economy_cog) shows coins + vouchers
 
 Draft events (like the Star Pass seasons, see draft_event.py)  - slash commands, admins only
     /draftmaker   start an event draft: name, duration, theme, background image, Pool A chance,
@@ -20,9 +20,9 @@ Owner / admin  (text commands, main server only)
     /pool add <A|B> <player> <chance>   put a card in Pool A or B with its chance (slash command)
     /pool remove <player>               take a card out of its pool
     /pool list <A|B>                    see a pool with the real % of each card
-    csvoucher check @user        see someone's vouchers + draft counter   (also: voucher check)
-    csvoucher give @user <n>     give vouchers
-    csvoucher remove @user <n>   take vouchers (stops at 0)
+    rcvoucher check @user        see someone's vouchers + draft counter   (also: voucher check)
+    rcvoucher give @user <n>     give vouchers
+    rcvoucher remove @user <n>   take vouchers (stops at 0)
     /pool animation pool:A pathname:<name> url:<link> [event:<name>]
                                         add a Pool A animation (plays on a Pool A pull);
                                         with `event` it plays ONLY in that event's draft
@@ -525,7 +525,7 @@ _open_cd = commands.CooldownMapping.from_cooldown(1, 2 * 60, commands.BucketType
 
 
 def _check_cooldown(ctx: commands.Context) -> None:
-    """Normal users: 2 min between csdraft, Premium: none (checked AFTER the event name is valid,
+    """Normal users: 2 min between rcdraft, Premium: none (checked AFTER the event name is valid,
     so a typo in the name doesn't use the cooldown up)."""
     if _is_premium(ctx.author):
         return
@@ -550,7 +550,7 @@ class DraftCog(commands.Cog, name="Draft"):
             await asyncio.to_thread(pool_anim.ensure_table)
         except Exception as e:
             print(f"[draft] could not create voucher tables: {e}")
-        # warm the pool cache so the first csdraft is fast and typos show in the console
+        # warm the pool cache so the first rcdraft is fast and typos show in the console
         try:
             await asyncio.to_thread(get_pools, True)
         except Exception as e:
@@ -568,7 +568,7 @@ class DraftCog(commands.Cog, name="Draft"):
         if key != MAIN:
             event = next((a for a in actives if a["event_key"] == key), None)
             if event is None:
-                running = ", ".join(f"`csdraft {a['event_key']}`" for a in actives) or "no event right now"
+                running = ", ".join(f"`rcdraft {a['event_key']}`" for a in actives) or "no event right now"
                 await ctx.send(f"There is no running draft called **{esc(name)}**. Running now: {running}")
                 return
         _check_cooldown(ctx)
@@ -576,29 +576,29 @@ class DraftCog(commands.Cog, name="Draft"):
         embed, file, view.page = await _render_screen(ctx.author.id, view.pool, 0, event)
         view.message = await ctx.send(embed=embed, file=file, view=view)
 
-    @commands.command(name="csdraft")
+    @commands.command(name="rcdraft")
     @economy_gate(0)                    # blocked while another economy command is pending
-    async def csdraft(self, ctx: commands.Context, *, event_name: str | None = None):
-        """Open the Draft screen (or an event draft: csdraft halloween)."""
+    async def rcdraft(self, ctx: commands.Context, *, event_name: str | None = None):
+        """Open the Draft screen (or an event draft: rcdraft halloween)."""
         await self._open_draft(ctx, event_name)
 
-    @commands.command(name="cshalloweendraft", aliases=["halloweendraft", "cshdraft"])
+    @commands.command(name="rchalloweendraft", aliases=["halloweendraft", "rchdraft"])
     @economy_gate(0)
-    async def cshalloweendraft(self, ctx: commands.Context):
+    async def rchalloweendraft(self, ctx: commands.Context):
         """Open the Halloween Draft."""
         await self._open_draft(ctx, "halloween")
 
     # -- owner / admin: vouchers -----------------------------------------
-    @commands.group(name="csvoucher", aliases=["voucher"], invoke_without_command=True)
+    @commands.group(name="rcvoucher", aliases=["voucher"], invoke_without_command=True)
     @security.owner_or_admin_role()
-    async def csvoucher(self, ctx: commands.Context):
+    async def rcvoucher(self, ctx: commands.Context):
         await ctx.send(
-            "`csvoucher check @user`\n"
-            "`csvoucher give @user <number>`\n"
-            "`csvoucher remove @user <number>`"
+            "`rcvoucher check @user`\n"
+            "`rcvoucher give @user <number>`\n"
+            "`rcvoucher remove @user <number>`"
         )
 
-    @csvoucher.command(name="check")
+    @rcvoucher.command(name="check")
     @security.owner_or_admin_role()
     async def voucher_check(self, ctx: commands.Context, member: discord.Member):
         if not _admin_guild_only(ctx):
@@ -618,7 +618,7 @@ class DraftCog(commands.Cog, name="Draft"):
             text += f"\n{esc(ev['name'])}: Pool A guaranteed in **{max(1, ev['pity_every'] - n)}** draft(s)."
         await ctx.send(text)
 
-    @csvoucher.command(name="give")
+    @rcvoucher.command(name="give")
     @security.owner_or_admin_role()
     async def voucher_give(self, ctx: commands.Context, member: discord.Member, amount: int):
         if not _admin_guild_only(ctx):
@@ -632,7 +632,7 @@ class DraftCog(commands.Cog, name="Draft"):
             return
         await ctx.send(f"✅ Gave **{amount:,}** {emojis.VOUCHER} to {esc(member.display_name)}. They now have **{new:,}**.")
 
-    @csvoucher.command(name="remove")
+    @rcvoucher.command(name="remove")
     @security.owner_or_admin_role()
     async def voucher_remove(self, ctx: commands.Context, member: discord.Member, amount: int):
         if not _admin_guild_only(ctx):
@@ -747,7 +747,7 @@ class DraftCog(commands.Cog, name="Draft"):
     # -- Draft events: /draftmaker /draftbg /draftend /draftreopen -------------
     @app_commands.command(name="draftmaker", description="Start an event draft (Halloween Draft ...) next to the normal draft")
     @app_commands.describe(
-        event_name="Name of the event, e.g. Halloween Draft (players open it with csdraft halloween)",
+        event_name="Name of the event, e.g. Halloween Draft (players open it with rcdraft halloween)",
         duration="How long the event runs",
         theme="Colors of the draft image (used when you don't upload a background)",
         background="Your own background image (PNG/JPG, best 1920x1080, 16:9)",
@@ -803,7 +803,7 @@ class DraftCog(commands.Cog, name="Draft"):
         embed.add_field(name="Background", value="Custom image" if has_bg else "Theme colors")
         embed.add_field(name="Pool A chance / guarantee", value=f"{ev['odds_a']:g}% / every {ev['pity_every']}")
         embed.add_field(name="Pool C", value=f"{ev['c_min']}-{ev['c_max']} OVR")
-        embed.add_field(name="Players open it with", value=f"`csdraft {key}`", inline=False)
+        embed.add_field(name="Players open it with", value=f"`rcdraft {key}`", inline=False)
         notes = []
         if n_cards == 0:
             notes.append(f"Pool A / B are empty: add cards with /pool add (event: {key}).")
@@ -874,7 +874,7 @@ class DraftCog(commands.Cog, name="Draft"):
             return
         drop_cache(res["event_key"])
         await interaction.response.send_message(
-            f"{res['name']} is back for {days} day(s). Players open it with `csdraft {res['event_key']}`.", ephemeral=True)
+            f"{res['name']} is back for {days} day(s). Players open it with `rcdraft {res['event_key']}`.", ephemeral=True)
 
     # -- Pool A animation (shown when someone pulls a Pool A player) -------
     @pool.command(name="animation", description="Add a Pool animation: plays when someone pulls a Pool A player")

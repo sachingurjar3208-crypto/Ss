@@ -1,4 +1,4 @@
-"""One look for every Playing XI shown as text (csxi, match XI, bot XI ...).
+"""One look for every Playing XI shown as text (rcxi, match XI, bot XI ...).
 
 One row per player:
 

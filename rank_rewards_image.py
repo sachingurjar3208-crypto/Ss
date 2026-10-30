@@ -1,4 +1,4 @@
-"""Rewards overview image for `csrankrewards` (1200x860 PNG, drawn at 2x then scaled down).
+"""Rewards overview image for `rcrankrewards` (1200x860 PNG, drawn at 2x then scaled down).
 
 Lists every tier (Bronze -> Ruby) with its one-time tier-up reward (✅ once already claimed this
 season), its season-end reward, and below: the player's tier, stars, stars to the next tier and when

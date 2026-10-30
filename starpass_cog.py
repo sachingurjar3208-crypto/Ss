@@ -1,11 +1,11 @@
 """Star Pass.
 
-    csstarpass              the Star Pass image with page arrows and a Collect button
+    rcstarpass              the Star Pass image with page arrows and a Collect button
                             (alias: starpass). 2 minute cooldown; Premium members and
                             members with the Star Pass role have none.
-    csstarpass halloween    open one event pass by name (same as cshalloween). When more than
+    rcstarpass halloween    open one event pass by name (same as rchalloween). When more than
                             one pass is running, a dropdown under the image switches between them.
-    cshalloween             the Halloween Pass
+    rchalloween             the Halloween Pass
 
 Admin slash commands (visible to admins only, exist only in the main server):
     /starpassmaker          start a season: duration 10D / 15D / 30D and the number of levels.
@@ -50,7 +50,7 @@ def _color(season: dict | None) -> int:
 
 
 def _open_hint(season: dict) -> str:
-    return "csstarpass" if season["pass_key"] == starpass.DEFAULT_PASS else f"csstarpass {season['pass_key']}"
+    return "rcstarpass" if season["pass_key"] == starpass.DEFAULT_PASS else f"rcstarpass {season['pass_key']}"
 NO_PASS_TITLE = "No Star Pass is running"
 NO_PASS_TEXT = (
     "There is no Star Pass running right now.\n"
@@ -58,7 +58,7 @@ NO_PASS_TEXT = (
     "Your daily quests will start earning Star Pass credits again as soon as it begins."
 )
 
-_cooldowns = commands.CooldownMapping.from_cooldown(1, starpass.CSSTARPASS_COOLDOWN, commands.BucketType.user)
+_cooldowns = commands.CooldownMapping.from_cooldown(1, starpass.RCSTARPASS_COOLDOWN, commands.BucketType.user)
 
 
 def _has_star_role(member) -> bool:
@@ -72,7 +72,7 @@ def _pass_premium(member, season: dict | None = None) -> bool:
 
 
 def _no_cooldown(member) -> bool:
-    """No csstarpass cooldown for bot Premium members and for the Star Pass role."""
+    """No rcstarpass cooldown for bot Premium members and for the Star Pass role."""
     return _is_premium(member) or _has_star_role(member)
 
 
@@ -117,7 +117,7 @@ async def _render(member, page: int | None, pass_key: str):
     if board["ready"]:
         embed.set_footer(text=f"{board['ready']} reward(s) ready to collect")
     else:
-        embed.set_footer(text="Finish daily quests to earn Star Pass credits  |  csquest")
+        embed.set_footer(text="Finish daily quests to earn Star Pass credits  |  rcquest")
     return embed, discord.File(buf, filename=starpass_image.FILENAME), board, page
 
 
@@ -241,14 +241,14 @@ async def _summary_embed(user, result: dict, season: dict | None = None) -> disc
     for tkey, is_new in result.get("themes", []):
         import summary_theme
         lines.append(f"Summary theme: {summary_theme.label(tkey)}" +
-                     (f" (turn on with cssb use {tkey})" if is_new else " (already owned)"))
+                     (f" (turn on with rcsb use {tkey})" if is_new else " (already owned)"))
     keys = result["new"] + result["pending"] + result["dupes"]
     cards = await asyncio.to_thread(card_db.get_cards, keys) if keys else {}
     name = lambda k: esc(cards[k]["playername"]) if k in cards else esc(k)
     for k in result["new"]:
         lines.append(f"Player card: {name(k)} (added to your squad)")
     for k in result["pending"]:
-        lines.append(f"Player card: {name(k)} (your squad is full, decide with cspending)")
+        lines.append(f"Player card: {name(k)} (your squad is full, decide with rcpending)")
     for k in result["dupes"]:
         lines.append(f"Player card: {name(k)} (already owned)")
     if result["refund"]:
@@ -321,7 +321,7 @@ class StarPassCog(commands.Cog, name="StarPass"):
         except Exception as e:
             print(f"[starpass] could not create tables: {e}")
 
-    # ── csstarpass ───────────────────────────────────────────────────────────
+    # ── rcstarpass ───────────────────────────────────────────────────────────
     async def _open_pass(self, ctx: commands.Context, name: str | None):
         if not await _need_debut(ctx):
             return
@@ -351,13 +351,13 @@ class StarPassCog(commands.Cog, name="StarPass"):
         view = StarPassView(self.bot, uid, page, board, key, actives)
         view.message = await ctx.send(embed=embed, file=file, view=view)
 
-    @commands.command(name="csstarpass", aliases=["starpass"])
-    async def csstarpass(self, ctx: commands.Context, *, pass_name: str | None = None):
-        """Show the Star Pass (or an event pass: csstarpass halloween)."""
+    @commands.command(name="rcstarpass", aliases=["starpass"])
+    async def rcstarpass(self, ctx: commands.Context, *, pass_name: str | None = None):
+        """Show the Star Pass (or an event pass: rcstarpass halloween)."""
         await self._open_pass(ctx, pass_name)
 
-    @commands.command(name="cshalloween", aliases=["halloween"])
-    async def cshalloween(self, ctx: commands.Context):
+    @commands.command(name="rchalloween", aliases=["halloween"])
+    async def rchalloween(self, ctx: commands.Context):
         """Show the Halloween Pass."""
         await self._open_pass(ctx, "halloween")
 

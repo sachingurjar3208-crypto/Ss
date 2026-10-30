@@ -4,14 +4,14 @@ Two separate tables are kept:
 
   • card_career           — ALL-TIME, ALL-OWNERS totals for a card (every
     innings ever played with that card, no matter who owned it at the
-    time). This is the "universal" view, shown by `csdata` and gated to
+    time). This is the "universal" view, shown by `rcdata` and gated to
     premium members only.
 
   • card_career_personal  — totals for ONE user with ONE card
-    (user_id, player_key). This is what `csview` shows: only the stats
+    (user_id, player_key). This is what `rcview` shows: only the stats
     *this* user racked up with the card. Selling the card does NOT clear
     this row — the numbers stay in the table so they're exactly where
-    they were if the user buys the card back later. `csview` itself just
+    they were if the user buys the card back later. `rcview` itself just
     refuses to show them (for anyone, including the seller) while the
     user doesn't currently own the card.
 
@@ -151,10 +151,10 @@ def save_innings(
 ) -> None:
     """Add this innings' batting and bowling figures to each card's career.
 
-    Updates the global all-owners `card_career` table (for `csdata`), and —
+    Updates the global all-owners `card_career` table (for `rcdata`), and —
     when the caller tells us who was batting/bowling this innings — also
     updates each of those users' personal `card_career_personal` row for
-    the cards they used (for `csview`). One innings always has exactly one
+    the cards they used (for `rcview`). One innings always has exactly one
     side batting and one side bowling, so batting_user_id owns every key in
     bat_rows and bowling_user_id owns every key in bowl_rows below.
 
@@ -265,7 +265,7 @@ def save_innings(
 
 def get_career(player_key: str) -> dict:
     """ALL-TIME, ALL-OWNERS totals for one card (all zeros if it has never
-    played). This is the "universal" view — used by `csdata`, premium only."""
+    played). This is the "universal" view — used by `rcdata`, premium only."""
     with economy._tx() as conn:
         _ensure_table(conn)
         row = conn.execute(
@@ -278,9 +278,9 @@ def get_career(player_key: str) -> dict:
 
 def get_career_personal(user_id, player_key: str) -> dict:
     """Totals for ONE user with ONE card (all zeros if that user has never
-    played an innings with it). This is what `csview` shows. The row is not
+    played an innings with it). This is what `rcview` shows. The row is not
     cleared when the card is sold, so it's unchanged if the user buys the
-    same card back later — `csview` just won't show it meanwhile."""
+    same card back later — `rcview` just won't show it meanwhile."""
     with economy._tx() as conn:
         _ensure_table(conn)
         row = conn.execute(

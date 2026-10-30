@@ -54,7 +54,7 @@ WHAT CHANGED
                     Field prompt: formation dropdown + Customise + Confirm.
                     Editor: 11 zone buttons laid out like the ground, Add/Remove
                     mode, Reset, Confirm (only when all 11 are placed).
-  squad_cog.py      csfield shows the new field layout.
+  squad_cog.py      rcfield shows the new field layout.
 
 RULES
   - Every field must place exactly 11 players.
@@ -139,11 +139,11 @@ DRAFT EVENTS (Halloween Draft ...) - same idea as the Star Pass seasons
   draft_event.py   NEW. Event drafts: own timer, theme, background image, Pool A / B cards,
                    Pool A chance, guarantee counter and Pool C OVR range. Runs NEXT TO the normal
                    draft (key "main"). Vouchers are shared.
-  draft_cog.py     csdraft halloween / cshalloweendraft open an event draft. While an event runs a
+  draft_cog.py     rcdraft halloween / rchalloweendraft open an event draft. While an event runs a
                    "Switch draft" dropdown appears under the image. Admin slash commands:
                    /draftmaker  /draftbg  /draftend  /draftreopen.
                    /pool add | remove | list got an optional `event` option (empty = normal draft).
-                   csvoucher check also shows the event counters.
+                   rcvoucher check also shows the event counters.
   draft_image.py   Themes (default, halloween, diwali, christmas), custom 1280x720 background,
                    event title + "ENDS IN" timer. The normal draft looks exactly as before.
   economy.py       4 new tables (created automatically), draft_spin(event_id=...) checks that the
@@ -151,4 +151,4 @@ DRAFT EVENTS (Halloween Draft ...) - same idea as the Star Pass seasons
                    per event run. Full user reset also clears event counters.
   How to start     /draftmaker event_name:Halloween Draft duration:7D theme:Halloween background:<image>
                    /pool add pool:A player:<card> chance:30 event:halloween
-                   players: csdraft halloween
+                   players: rcdraft halloween

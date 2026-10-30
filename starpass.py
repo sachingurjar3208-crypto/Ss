@@ -50,7 +50,7 @@ EARLY_LAST_LEVEL = 15
 LEVELS_PER_PAGE = 6
 MAX_LEVELS = 500
 DURATIONS = {"10D": 10, "15D": 15, "30D": 30}
-CSSTARPASS_COOLDOWN = 2 * 60         # normal users; Premium / Star Pass role: none
+RCSTARPASS_COOLDOWN = 2 * 60         # normal users; Premium / Star Pass role: none
 DAY = 86_400
 
 # ── Several passes at once ───────────────────────────────────────────────────
@@ -552,7 +552,7 @@ def _state(level: int, row: str, unlocked: int, premium: bool, claimed: set) -> 
 
 
 def get_board(user_id: int, premium: bool, pass_key: str = DEFAULT_PASS) -> dict | None:
-    """Everything csstarpass needs for one user, or None when that pass is not running."""
+    """Everything rcstarpass needs for one user, or None when that pass is not running."""
     uid = int(user_id)
     with economy._tx() as conn:
         season = _active(conn, pass_key)

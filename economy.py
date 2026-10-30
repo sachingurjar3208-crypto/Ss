@@ -573,7 +573,7 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
                 "vouchers": vouchers}
 
 
-# ── csclaim: a free random card every hour ──────────────────────────────────
+# ── rcclaim: a free random card every hour ──────────────────────────────────
 # Cooldown: 60 min for normal users, 35 min for Premium (the cog picks which).
 CLAIM_COOLDOWN = 60 * 60
 CLAIM_COOLDOWN_PREMIUM = 35 * 60
@@ -621,7 +621,7 @@ def _claim_pool(by_ovr: dict[int, list[str]], ovr: int | None) -> list[str]:
 
 def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
                dupe_values: dict[str, int] | None = None) -> dict:
-    """csclaim: one random card, once per `cooldown` seconds, all in one transaction.
+    """rcclaim: one random card, once per `cooldown` seconds, all in one transaction.
 
     `by_ovr` maps OVR -> player keys. A card the user already has is skipped when
     an unowned one exists at the rolled OVR; otherwise it turns into coins
@@ -650,20 +650,20 @@ def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
         dupe, refund, pending = False, 0, False
         if fresh:
             key = _rng.choice(fresh)
-            pending = _grant(conn, uid, key, "csclaim") == "pending"
+            pending = _grant(conn, uid, key, "rcclaim") == "pending"
         else:
             key, dupe = _rng.choice(pool), True
             refund = int((dupe_values or {}).get(key, 0))
             if refund:
-                balance = _apply_coins(conn, uid, refund, "Duplicate refund (csclaim)")
+                balance = _apply_coins(conn, uid, refund, "Duplicate refund (rcclaim)")
         conn.execute("UPDATE users SET last_claim = ? WHERE user_id = ?", (now, uid))
         return {"ok": True, "card": key, "dupe": dupe, "refund": refund, "pending": pending, "balance": balance}
 
 
-# ── cscd: read-only snapshot of every claim cooldown ─────────────────────────
+# ── rccd: read-only snapshot of every claim cooldown ─────────────────────────
 
 def reward_cooldowns(user_id, premium: bool = False) -> dict | None:
-    """For `cscd`: seconds left on daily / weekly / monthly / csclaim, without
+    """For `rccd`: seconds left on daily / weekly / monthly / rcclaim, without
     touching anything (pure read, no transaction). None if the user hasn't
     debuted. `monthly_locked` is the extra wait before the monthly reward
     unlocks at all (1 month after debut) and is separate from `monthly`."""
@@ -1001,7 +1001,7 @@ def get_packs(user_id) -> dict[str, int]:
         conn.close()
 
 
-# -- Packs switched OFF by an admin (`admin pack off <pack>`): still listed in cspack, can't be bought --
+# -- Packs switched OFF by an admin (`admin pack off <pack>`): still listed in rcpack, can't be bought --
 def _ensure_pack_off(conn) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS pack_off (pack_type TEXT PRIMARY KEY, since REAL NOT NULL)")
 
@@ -1311,7 +1311,7 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
             need = held + count - SQUAD_MAX
             return (
                 f"Your squad limit is {SQUAD_MAX}. You have {held} card(s) and this opens {count} pack(s). "
-                f"You need to sell at least {need} card(s) first (`cssell`)."
+                f"You need to sell at least {need} card(s) first (`rcsell`)."
             )
         row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
         have = int(row["amount"]) if row else 0
@@ -1410,9 +1410,9 @@ def reset_cooldowns(user_id, starter: bool = False, weekly: bool = False, daily:
     """Owner tool (/cooldown reset). Clears the chosen cooldowns for one user.
     None if the user hasn't debuted. Otherwise {"starter", "weekly", "daily"} -> True if reset.
 
-    - starter: lets the user claim csstarterpack again.
-    - weekly:  csweekly is available right now.
-    - daily:   csdaily is available right now. The streak is KEPT: the 24h cooldown is
+    - starter: lets the user claim rcstarterpack again.
+    - weekly:  rcweekly is available right now.
+    - daily:   rcdaily is available right now. The streak is KEPT: the 24h cooldown is
                ended but the claim still falls inside the 48h streak window.
     """
     uid = _uid(user_id)
@@ -1539,7 +1539,7 @@ def reset_all_cards(user_id) -> int:
 def reset_everything(user_id) -> dict:
     """(Admin) Full wipe of a user's economy and collection: coins set to 0,
     every card and pack removed, XI / captain / impact subs / pending cards cleared.
-    The debut is undone too (the user row is deleted), so the user can type csdebut
+    The debut is undone too (the user row is deleted), so the user can type rcdebut
     again and gets a fresh team, the starting purse and a new debut pack. Ban state
     lives in its own table and is kept. Returns {"cards": n, "coins": old_purse}."""
     uid = _uid(user_id)
@@ -1563,7 +1563,7 @@ def reset_everything(user_id) -> dict:
                 "INSERT INTO ledger (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, 0, ?)",
                 (uid, -old, "Admin full reset", time.time()),
             )
-        conn.execute("DELETE FROM users WHERE user_id = ?", (uid,))   # un-debut: csdebut works again
+        conn.execute("DELETE FROM users WHERE user_id = ?", (uid,))   # un-debut: rcdebut works again
         return {"cards": int(n), "coins": old}
 
 
@@ -1634,7 +1634,7 @@ def add_impact_sub(user_id, player_key: str) -> str | None:
         if any(r["player_key"] == player_key for r in existing):
             return "That player is already on your Impact subs list."
         if len(existing) >= IMPACT_SUBS_MAX:
-            return f"You can only nominate {IMPACT_SUBS_MAX} subs — remove one first with `cssubs remove`."
+            return f"You can only nominate {IMPACT_SUBS_MAX} subs — remove one first with `rcsubs remove`."
         taken_slots = {r["slot"] for r in existing}
         slot = next(s for s in range(1, IMPACT_SUBS_MAX + 1) if s not in taken_slots)
         conn.execute(

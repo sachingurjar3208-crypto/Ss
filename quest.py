@@ -262,7 +262,7 @@ def track(user_id, metrics: dict) -> list[str]:
 
 
 def get_board(user_id) -> dict:
-    """Everything the csquest screen needs for one user."""
+    """Everything the rcquest screen needs for one user."""
     uid = int(user_id)
     day = today()
     with economy._tx() as conn:
@@ -451,7 +451,7 @@ def _notice_embed(pairs: list[tuple[int, str]]):
     if not lines:
         return None
     embed = discord.Embed(title="Quest complete", description="\n".join(lines), color=0x2FBF9B)
-    embed.set_footer(text="csquest to see today's quests")
+    embed.set_footer(text="rcquest to see today's quests")
     return embed
 
 

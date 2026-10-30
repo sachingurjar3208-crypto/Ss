@@ -10,7 +10,7 @@ How it works
 * Mentions of a player who is NOT a member of the target server are shown as a bold name there
   (Discord can't resolve such mentions).
 
-Only ranked player-vs-player matches use this. Normal `csmp @user` matches never touch this file.
+Only ranked player-vs-player matches use this. Normal `rcmp @user` matches never touch this file.
 """
 
 from __future__ import annotations

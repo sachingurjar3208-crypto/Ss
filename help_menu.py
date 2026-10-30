@@ -1,11 +1,11 @@
-"""Text help menu for `cshelp` (replaces the old help image).
+"""Text help menu for `rchelp` (replaces the old help image).
 
-    cshelp  ->  first page lists EVERY command, grouped by topic.
+    rchelp  ->  first page lists EVERY command, grouped by topic.
                 A "Select a help topic" menu under it opens one topic
                 (Rewards, Squad, Economy, Packs, Match, Ranked ...) with a short
                 explanation of each command.
 
-Look is the same as `cscd`: a bold name, the command in monospace, and the
+Look is the same as `rccd`: a bold name, the command in monospace, and the
 explanation as a quote line under it. No emojis.
 
 To change the help text, edit TOPICS below (nothing else needs to change).
@@ -26,74 +26,74 @@ OVERVIEW_KEY = "all"
 # The optional 4th item is what the first page shows for that row (default: first word of command).
 TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     "start": ("Start", "Create your team and first players", [
-        ("Debut", "csdebut", "Create your team. Do this first."),
-        ("Starter Pack", "csstarterpack", "Claim your one-time starter squad."),
-        ("Coins", "csbal", "See your coins and vouchers."),
-        ("Profile", "csprofile", "Your team profile: OVR, captain, streak and recent form."),
-        ("Team Name", "csteamname <name>", "Change your team name.", "csteamname"),
+        ("Debut", "rcdebut", "Create your team. Do this first."),
+        ("Starter Pack", "rcstarterpack", "Claim your one-time starter squad."),
+        ("Coins", "rcbal", "See your coins and vouchers."),
+        ("Profile", "rcprofile", "Your team profile: OVR, captain, streak and recent form."),
+        ("Team Name", "rcteamname <name>", "Change your team name.", "rcteamname"),
     ]),
     "rewards": ("Rewards", "Daily, weekly, monthly and claim", [
-        ("Daily", "csdaily", "Daily coins and a random player (60-78 OVR). Every 7th day gives a streak bonus."),
-        ("Weekly", "csweekly", "Premium only. Weekly coins and a random player (80-83 OVR)."),
-        ("Monthly", "csmonthly", "Monthly coins and a random player (85-88 OVR)."),
-        ("Claim", "csclaim", "A free random player every hour. Premium members can claim every 35 minutes."),
-        ("Cooldowns", "cscd", "Shows when daily, weekly, monthly and claim are ready again."),
-        ("Quests", "csquest", "Your daily quests and progress. Finishing a quest gives a voucher."),
+        ("Daily", "rcdaily", "Daily coins and a random player (60-78 OVR). Every 7th day gives a streak bonus."),
+        ("Weekly", "rcweekly", "Premium only. Weekly coins and a random player (80-83 OVR)."),
+        ("Monthly", "rcmonthly", "Monthly coins and a random player (85-88 OVR)."),
+        ("Claim", "rcclaim", "A free random player every hour. Premium members can claim every 35 minutes."),
+        ("Cooldowns", "rccd", "Shows when daily, weekly, monthly and claim are ready again."),
+        ("Quests", "rcquest", "Your daily quests and progress. Finishing a quest gives a voucher."),
     ]),
     "squad": ("Squad", "Your players, XI, captain and subs", [
-        ("Squad", "cssquad [@user]", "Show your squad, or another player's squad.", "cssquad"),
-        ("Player Card", "csshow <player>", "Show any player's card and stats.", "csshow"),
-        ("Your Card Stats", "csview <player>", "A card you own, with your own career batting and bowling stats.", "csview"),
-        ("All-Time Stats", "csdata <player>", "Premium only. That card's stats across every owner.", "csdata"),
-        ("Playing XI", "csxi", "Your playing XI in batting order. Premium members can use csxi @user to see another XI."),
-        ("XI Image", "csovr", "Your playing XI as an image with the team OVR."),
-        ("Auto XI", "csautoxi", "Pick your best XI automatically."),
-        ("Swap", "csswap 3 5", "Swap two XI spots. You can also swap by name: csswap Player A | Player B.", "csswap"),
-        ("Impact Subs", "cssubs", "View your Impact Player subs (max 4). Use cssubs add <player>, cssubs remove <player> or cssubs clear."),
-        ("Captain", "cscaptain <player>", "Set your captain. The player must be in your XI.", "cscaptain"),
+        ("Squad", "rcsquad [@user]", "Show your squad, or another player's squad.", "rcsquad"),
+        ("Player Card", "rcshow <player>", "Show any player's card and stats.", "rcshow"),
+        ("Your Card Stats", "rcview <player>", "A card you own, with your own career batting and bowling stats.", "rcview"),
+        ("All-Time Stats", "rcdata <player>", "Premium only. That card's stats across every owner.", "rcdata"),
+        ("Playing XI", "rcxi", "Your playing XI in batting order. Premium members can use rcxi @user to see another XI."),
+        ("XI Image", "rcovr", "Your playing XI as an image with the team OVR."),
+        ("Auto XI", "rcautoxi", "Pick your best XI automatically."),
+        ("Swap", "rcswap 3 5", "Swap two XI spots. You can also swap by name: rcswap Player A | Player B.", "rcswap"),
+        ("Impact Subs", "rcsubs", "View your Impact Player subs (max 4). Use rcsubs add <player>, rcsubs remove <player> or rcsubs clear."),
+        ("Captain", "rccaptain <player>", "Set your captain. The player must be in your XI.", "rccaptain"),
     ]),
     "economy": ("Economy", "Buy, sell, trade and leaderboard", [
-        ("Coins", "csbal", "See your coins and vouchers."),
-        ("Buy a Player", "csbuy <player>", "Buy a player card with coins.", "csbuy"),
-        ("Sell a Player", "cssell <player>", "Sell one of your players. You get 60% of the buy price.", "cssell"),
-        ("Multi Sell", "csms 1 20", "Sell players by squad number. This sells players 1 to 20 of cssquad.", "csms"),
-        ("Pending Cards", "cspending", "Cards that arrived while your squad was full. Sell them or replace a player."),
-        ("Trade", "cstrade @user my player | their player", "Trade players of the same OVR. Each side pays a 5,000 coin fee.", "cstrade"),
-        ("Leaderboard", "csleaderboard ovr", "Top teams. Use csleaderboard ovr or csleaderboard coins.", "csleaderboard"),
+        ("Coins", "rcbal", "See your coins and vouchers."),
+        ("Buy a Player", "rcbuy <player>", "Buy a player card with coins.", "rcbuy"),
+        ("Sell a Player", "rcsell <player>", "Sell one of your players. You get 60% of the buy price.", "rcsell"),
+        ("Multi Sell", "rcms 1 20", "Sell players by squad number. This sells players 1 to 20 of rcsquad.", "rcms"),
+        ("Pending Cards", "rcpending", "Cards that arrived while your squad was full. Sell them or replace a player."),
+        ("Trade", "rctrade @user my player | their player", "Trade players of the same OVR. Each side pays a 5,000 coin fee.", "rctrade"),
+        ("Leaderboard", "rcleaderboard ovr", "Top teams. Use rcleaderboard ovr or rcleaderboard coins.", "rcleaderboard"),
     ]),
     # "packs" page is built live, see _pack_rows()
     "packs": ("Packs", "Pack shop, prices and opening", []),
     "match": ("Match", "Play against other players", [
-        ("Challenge", "csmp @user <overs>", "Challenge a player. Overs can be 1 to 20, default is 5.", "csmp"),
-        ("Cancel", "cscancel", "End the match running in this channel. Either player or a moderator can use it."),
-        ("Resume", "csresume", "Re-send the current prompt if your match looks stuck."),
-        ("Auto Play", "csautoplay", "Premium only. The bot plays your side for you. Use it again to switch it off."),
+        ("Challenge", "rcmp @user <overs>", "Challenge a player. Overs can be 1 to 20, default is 5.", "rcmp"),
+        ("Cancel", "rccancel", "End the match running in this channel. Either player or a moderator can use it."),
+        ("Resume", "rcresume", "Re-send the current prompt if your match looks stuck."),
+        ("Auto Play", "rcautoplay", "Premium only. The bot plays your side for you. Use it again to switch it off."),
     ]),
     "ranked": ("Ranked", "Ranked mode, tiers and rewards", [
-        ("Find a Match", "csmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "csmp ranked"),
-        ("Your Rank", "csrank [@user]", "Your tier, stars and season record as a card.", "csrank"),
-        ("Top Players", "csranktop", "Global top 10 by stars this season."),
-        ("Rank Rewards", "csrankrewards", "Rewards for every tier, what you already claimed, and when the season ends."),
-        ("Season", "csseason", "The current ranked season and when it ends."),
+        ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "rcmp ranked"),
+        ("Your Rank", "rcrank [@user]", "Your tier, stars and season record as a card.", "rcrank"),
+        ("Top Players", "rcranktop", "Global top 10 by stars this season."),
+        ("Rank Rewards", "rcrankrewards", "Rewards for every tier, what you already claimed, and when the season ends."),
+        ("Season", "rcseason", "The current ranked season and when it ends."),
     ]),
     "events": ("Events", "Passes, drafts and themes", [
-        ("Star Pass", "csstarpass", "Show the Star Pass. Use csstarpass halloween to open an event pass by name."),
-        ("Halloween Pass", "cshalloween", "Show the Halloween Pass."),
-        ("Draft", "csdraft", "Spend vouchers on a player draft. Use csdraft halloween for an event draft."),
-        ("Halloween Draft", "cshalloweendraft", "Open the Halloween Draft directly."),
-        ("Summary Theme", "cssb", "Open the match summary theme menu. Use cssb use <name> to equip a theme and cssb off to go back to normal."),
+        ("Star Pass", "rcstarpass", "Show the Star Pass. Use rcstarpass halloween to open an event pass by name."),
+        ("Halloween Pass", "rchalloween", "Show the Halloween Pass."),
+        ("Draft", "rcdraft", "Spend vouchers on a player draft. Use rcdraft halloween for an event draft."),
+        ("Halloween Draft", "rchalloweendraft", "Open the Halloween Draft directly."),
+        ("Summary Theme", "rcsb", "Open the match summary theme menu. Use rcsb use <name> to equip a theme and rcsb off to go back to normal."),
     ]),
     "other": ("Other", "Bot info and card list", [
-        ("Bot Info", "cs about", "Bot latency, uptime and usage statistics.", "cs about"),
-        ("All Cards", "/csrarity", "Slash command. Lists all cards by OVR with BAT, BOWL and price. Only you can see it."),
-        ("Help", "cshelp", "This menu."),
+        ("Bot Info", "rc about", "Bot latency, uptime and usage statistics.", "rc about"),
+        ("All Cards", "/rcrarity", "Slash command. Lists all cards by OVR with BAT, BOWL and price. Only you can see it."),
+        ("Help", "rchelp", "This menu."),
     ]),
     "premium": ("Premium", "What Premium members get", [
-        ("Weekly Reward", "csweekly", "Weekly coins and a random 80-83 OVR player."),
-        ("Faster Claim", "csclaim", "Claim every 35 minutes instead of every hour."),
-        ("All-Time Stats", "csdata <player>", "A card's stats across every owner.", "csdata"),
-        ("View Other XI", "csxi @user", "See another player's playing XI."),
-        ("Auto Play", "csautoplay", "The bot plays your side of the match for you."),
+        ("Weekly Reward", "rcweekly", "Weekly coins and a random 80-83 OVR player."),
+        ("Faster Claim", "rcclaim", "Claim every 35 minutes instead of every hour."),
+        ("All-Time Stats", "rcdata <player>", "A card's stats across every owner.", "rcdata"),
+        ("View Other XI", "rcxi @user", "See another player's playing XI."),
+        ("Auto Play", "rcautoplay", "The bot plays your side of the match for you."),
     ]),
 }
 
@@ -105,9 +105,9 @@ ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "ranked", "ev
 def _pack_rows() -> list[tuple]:
     import squad_logic as sl
     rows: list[tuple] = [
-        ("Pack Shop", "cspack", "Open the pack shop, pick a pack from the menu and press Confirm to buy."),
-        ("Buy Directly", "cspack <type>", "Buy a pack by name, for example cspack gold.", "cspack"),
-        ("Open a Pack", "csopen <type>", "Open a pack you own. A short animation plays, then your player appears.", "csopen"),
+        ("Pack Shop", "rcpack", "Open the pack shop, pick a pack from the menu and press Confirm to buy."),
+        ("Buy Directly", "rcpack <type>", "Buy a pack by name, for example rcpack gold.", "rcpack"),
+        ("Open a Pack", "rcopen <type>", "Open a pack you own. A short animation plays, then your player appears.", "rcopen"),
     ]
     try:
         import economy
@@ -128,8 +128,8 @@ def _pack_rows() -> list[tuple]:
             text += " Only event players."
         if key in off:
             text += " Not available right now."
-        rows.append((spec["label"], f"cspack {key}", text, ""))   # "" = not repeated on the first page
-    rows.append(("Duplicates", "csopen", "A player you already own is turned into coins automatically.", ""))
+        rows.append((spec["label"], f"rcpack {key}", text, ""))   # "" = not repeated on the first page
+    rows.append(("Duplicates", "rcopen", "A player you already own is turned into coins automatically.", ""))
     return rows
 
 
@@ -214,7 +214,7 @@ class HelpView(OwnedView):
 
 
 async def send_help(ctx) -> None:
-    """Called by the cshelp command."""
+    """Called by the rchelp command."""
     name = ctx.author.display_name
     view = HelpView(ctx.author.id, name)
     view.message = await ctx.send(embed=overview_embed(name), view=view)

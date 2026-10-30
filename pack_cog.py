@@ -3,7 +3,7 @@
     /pack animation add     url:<link>  pathname:<pack name>
     /pack animation remove  pathname:<name>
 
-The animation is the GIF csopen shows for ANIM_SECONDS (pack_anim.py) before the player's real
+The animation is the GIF rcopen shows for ANIM_SECONDS (pack_anim.py) before the player's real
 card appears. pathname = the pack it is for: bronze, silver, gold, legendary, halloween, debut.
 Want more than one for the same pack? Use `gold_2`, `gold_fire` ... (one is picked at random).
 Adding a pathname that already exists replaces it.
@@ -61,7 +61,7 @@ pack_group = app_commands.Group(
 # /pack animation ...
 animation_group = app_commands.Group(
     name="animation",
-    description="The animation shown before the card appears in csopen",
+    description="The animation shown before the card appears in rcopen",
     parent=pack_group,
 )
 
@@ -94,7 +94,7 @@ async def animation_add(interaction: discord.Interaction, url: str, pathname: st
         return
     verb = "replaced" if res["replaced"] else "saved"
     text = (f"✅ Animation **{esc(res['pathname'])}** {verb} for the **{_label(res['pack'])}**.\n"
-            f"`csopen` plays it for {pack_anim.ANIM_SECONDS:g} seconds, then shows the real card.")
+            f"`rcopen` plays it for {pack_anim.ANIM_SECONDS:g} seconds, then shows the real card.")
     path = res["file"]
     try:
         await interaction.followup.send(
@@ -117,7 +117,7 @@ async def animation_remove(interaction: discord.Interaction, pathname: str):
         return
     left = await asyncio.to_thread(pack_anim.pick, old["pack"])
     tail = ("" if left is not None else
-            f"\nThe **{_label(old['pack'])}** has no animation now, so csopen uses the built-in pack intro.")
+            f"\nThe **{_label(old['pack'])}** has no animation now, so rcopen uses the built-in pack intro.")
     await interaction.followup.send(f"🗑️ Animation **{esc(old['pathname'])}** deleted.{tail}", ephemeral=True)
 
 

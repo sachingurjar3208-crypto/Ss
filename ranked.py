@@ -1,4 +1,4 @@
-"""Ranked mode (csmp ranked): stars, tiers, rewards, monthly season reset, bot opponents.
+"""Ranked mode (rcmp ranked): stars, tiers, rewards, monthly season reset, bot opponents.
 
 No Discord code here (except the tiny FakeMember stand-in), so it is easy to test.
 
@@ -9,7 +9,7 @@ HOW IT WORKS
 - After Ruby stars keep counting (no more tier rewards): the global top list is by stars.
 - Every month (UTC) the season resets automatically: everyone goes back to 0 stars and
   gets the SEASON_REWARDS for the tier they finished in. Rewards that arrive while the
-  user is offline are shown to them the next time they use csrank / csmp ranked.
+  user is offline are shown to them the next time they use rcrank / rcmp ranked.
 - Matchmaking only pairs players of the SAME tier. If nobody is found for BOT_WAIT_SECONDS,
   a bot with a human-looking name (BOT_NAMES) plays instead. Its strength depends on the
   tier (BOT_PROFILES): Bronze = easy ... Ruby = very hard.
@@ -37,7 +37,7 @@ RANKED_OVERS = 2             # every ranked match is exactly this many overs
 BOT_WAIT_SECONDS = 60        # nobody found for this long -> a bot opponent plays
 SEARCH_TIMEOUT = 300         # global search gives up after 5 minutes (only if no bot can be made)
 
-# Seasons are started and ended by the owner (csseasonstart / csseasonend). A season ends by itself
+# Seasons are started and ended by the owner (rcseasonstart / rcseasonend). A season ends by itself
 # after SEASON_DAYS days. Only players with MORE than 0 stars at the end get the season reward.
 SEASON_DAYS = 30
 
@@ -279,7 +279,7 @@ def _grant_bundle(conn, uid: int, spec: dict, source: str, idx_cache: list) -> t
             if res["status"] == "dupe":
                 text += f" — you already had it, sold for **{res['refund']:,}** coins"
             elif res["status"] == "pending":
-                text += " — squad full, decide with `cspending`"
+                text += " — squad full, decide with `rcpending`"
                 pending = True
             lines.append(text)
     return lines, pending
@@ -331,7 +331,7 @@ def season_active() -> bool:
 
 def _settle_season(conn, old_season: str) -> dict:
     """Pay the season-end rewards to everyone with MORE than 0 stars, then reset every player.
-    Each reward message is saved in ranked_notices (the cog DMs it; csrank shows it if the DM failed)."""
+    Each reward message is saved in ranked_notices (the cog DMs it; rcrank shows it if the DM failed)."""
     idx_cache: list = []
     rows = conn.execute("SELECT * FROM ranked_players").fetchall()
     paid = 0
@@ -347,7 +347,7 @@ def _settle_season(conn, old_season: str) -> dict:
         text = (
             f"🏁 **Ranked {old_season} ended!** You finished {tier_emoji(tier)} **{tier}** "
             f"with **{stars}** ⭐\n🎁 Rewards: " + " · ".join(lines)
-            + ("\n⚠️ A card is waiting for you: use `cspending`." if pending else "")
+            + ("\n⚠️ A card is waiting for you: use `rcpending`." if pending else "")
         )
         conn.execute("INSERT INTO ranked_notices (user_id, text, ts) VALUES (?, ?, ?)", (uid, text, time.time()))
         conn.execute(
@@ -361,7 +361,7 @@ def _settle_season(conn, old_season: str) -> dict:
 
 
 def _rollover_locked(conn) -> dict | None:
-    """Ends the running season if its 30 days are over. Ranked then waits for the owner's csseasonstart."""
+    """Ends the running season if its 30 days are over. Ranked then waits for the owner's rcseasonstart."""
     _ensure_season_meta(conn)
     if _meta_get(conn, "season_active", "1") != "1":
         return None
@@ -781,7 +781,7 @@ def build_bot_team(tier: str, bot_name: str, overs: int = RANKED_OVERS) -> dict 
     }
 
 
-# ── Admin tools (used by csrankgive / csrankreset / csrankban) ────────────────
+# ── Admin tools (used by rcrankgive / rcrankreset / rcrankban) ────────────────
 
 def _admin_log(conn, admin_id: int, target_id: int, action: str, detail: str) -> None:
     conn.execute(
@@ -860,7 +860,7 @@ def admin_unban(admin_id, user_id) -> bool:
     return had
 
 
-# ── Rewards overview (csrankrewards) ─────────────────────────────────────────
+# ── Rewards overview (rcrankrewards) ─────────────────────────────────────────
 
 def _bundle_parts(spec: dict) -> list[str]:
     """Short text for one reward bundle, e.g. ["5 Vouchers", "100,000 Coins"]."""
@@ -878,7 +878,7 @@ def _bundle_parts(spec: dict) -> list[str]:
 
 
 def reward_summary(user_id) -> dict:
-    """Everything csrankrewards needs for one player: every tier with its tier-up reward (and whether
+    """Everything rcrankrewards needs for one player: every tier with its tier-up reward (and whether
     this player already claimed it this season), its season-end reward, the player's stars / tier,
     the next tier with the stars still needed, and when the season ends."""
     uid = int(user_id)

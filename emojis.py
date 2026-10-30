@@ -9,7 +9,7 @@ NOT render in embed footers, embed author names, code blocks (`...` / ```...```)
 or inside images, so those spots keep plain text.
 
 RULE: WON / LOSS (the W and L emojis) are for the profile form only
-(csprofile). Do not use them anywhere else.
+(rcprofile). Do not use them anywhere else.
 """
 
 # ── Emoji IDs (copied from the Developer Portal → Emojis) ────────────────────
@@ -26,7 +26,7 @@ MONTHLY      = "<:Monthlypack:1558138440208486440>"
 WEEKLY       = "<:Weeklypack:1558138384675905536>"
 VOUCHER      = "<:Voucher:1558696772975464458>"       # Draft currency
 
-# Pack emojis (Developer Portal -> Emojis). Used in cspack, csopen, csinv etc.
+# Pack emojis (Developer Portal -> Emojis). Used in rcpack, rcopen, rcinv etc.
 BRONZE_PACK    = "<:Bronzepack:1564835637490884659>"
 SILVER_PACK    = "<:Silverpack:1564835559841599560>"
 GOLD_PACK      = "<:Goldpack:1564835565323423764>"
@@ -52,7 +52,7 @@ HALFCENTURY  = "<a:Halfcentury:1558777604042137700>"
 CENTURY      = "<a:Century:1558781921389977650>"
 LBW          = "<a:LBW:1558777617434419240>"
 
-# Reward emoji by claim type (csdaily / csweekly / csmonthly)
+# Reward emoji by claim type (rcdaily / rcweekly / rcmonthly)
 REWARD = {"daily": DAILY, "weekly": WEEKLY, "monthly": MONTHLY}
 
 

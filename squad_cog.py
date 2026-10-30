@@ -1,7 +1,7 @@
-"""Squad commands: csdebut, csstarterpack, cssquad, csshow, csxi, csswap,
-cscaptain, csautoxi, csteamname, csprofile, cshelp + owner tools.
+"""Squad commands: rcdebut, rcstarterpack, rcsquad, rcshow, rcxi, rcswap,
+rccaptain, rcautoxi, rcteamname, rcprofile, rchelp + owner tools.
 
-Commands are plain text (no slash) like csmp: type `csdebut`, `csxi`, ...
+Commands are plain text (no slash) like rcmp: type `rcdebut`, `rcxi`, ...
 Every command passes through security.global_check (ban list, rate limit,
 server-only) which main.py installs.
 """
@@ -30,11 +30,11 @@ from security import OwnedView, esc
 
 PAGE_SIZE = 10
 
-# Main server invite shown in the csdebut welcome message (clickable blue link).
+# Main server invite shown in the rcdebut welcome message (clickable blue link).
 MAIN_SERVER_INVITE = "https://discord.gg/UjgyV56tkT"
 JOIN_MAIN_LINK = f"[Join Main server]({MAIN_SERVER_INVITE})"
 
-# Only members with this role see the player emojis in csstarterpack.
+# Only members with this role see the player emojis in rcstarterpack.
 PREMIUM_ROLE_ID = 1556957776415035423
 
 
@@ -79,13 +79,13 @@ def _in_match(bot, user_id: int) -> bool:
 async def _need_debut(ctx: commands.Context) -> bool:
     if economy.user_exists(ctx.author.id):
         return True
-    await ctx.send("❌ You haven't debuted yet. Type `csdebut` first.")
+    await ctx.send("❌ You haven't debuted yet. Type `rcdebut` first.")
     return False
 
 
 def squad_order(cards: list) -> list:
     """The one squad order used everywhere: best OVR first, ties by name.
-    `cssquad` numbers and `csms <from> <to>` both use this, so numbers match."""
+    `rcsquad` numbers and `rcms <from> <to>` both use this, so numbers match."""
     return sorted(cards, key=lambda c: (-int(c["ovr"]), c["playername_key"]))
 
 
@@ -99,7 +99,7 @@ def _card_line(card, extra: str = "", emojis: bool = True) -> str:
 
 
 def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
-    """csxi: the XI in batting order, one monospace row per player (see xi_display.py)."""
+    """rcxi: the XI in batting order, one monospace row per player (see xi_display.py)."""
     import xi_display as xd
     xi = economy.get_xi(member.id)
     cap_key = user_row["captain_key"]
@@ -188,7 +188,7 @@ def _apply_auto_xi(user_id: int) -> str | None:
     Returns None on success, otherwise a message explaining what went wrong."""
     cards = sl.owned_cards(user_id)
     if not cards:
-        return "❌ You don't own any players yet. Try `csstarterpack`."
+        return "❌ You don't own any players yet. Try `rcstarterpack`."
     # With fewer than 11 players ALL of them still go into the XI (best_xi
     # returns every card when there are 11 or fewer); the XI just shows
     # "x/11" until the squad grows.
@@ -227,7 +227,7 @@ class AutoXiView(ui.View):
 
 
 def _show_embed(card) -> discord.Embed:
-    """The embed body `csshow` displays for one card (pulled out so the
+    """The embed body `rcshow` displays for one card (pulled out so the
     picker view below can rebuild it for whichever card is on screen)."""
     styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
     desc = (
@@ -245,7 +245,7 @@ def _show_embed(card) -> discord.Embed:
 
 
 class ShowPickerView(OwnedView):
-    """csshow with 2+ name matches (e.g. "Virat Kohli" and "Virat Kohli
+    """rcshow with 2+ name matches (e.g. "Virat Kohli" and "Virat Kohli
     (HW)"): ◀ ▶ flips between them instead of forcing a longer / exact
     search string."""
 
@@ -296,9 +296,9 @@ class ShowPickerView(OwnedView):
 
 
 class ViewPickerView(OwnedView):
-    """csview with 2+ owned matches: same ◀ ▶ browsing as ShowPickerView,
+    """rcview with 2+ owned matches: same ◀ ▶ browsing as ShowPickerView,
     but each card's content (image or text fallback) comes from the cog's
-    `_csview_content`, since it needs the caller's personal career stats."""
+    `_rcview_content`, since it needs the caller's personal career stats."""
 
     def __init__(self, viewer_id: int, cards: list, cog: "SquadCog"):
         super().__init__(viewer_id, timeout=90)
@@ -314,9 +314,9 @@ class ViewPickerView(OwnedView):
     async def _render(self, interaction: discord.Interaction):
         await interaction.response.defer()
         card = self.cards[self.idx]
-        kind, content = await self.cog._csview_content(interaction.user, card)
+        kind, content = await self.cog._rcview_content(interaction.user, card)
         if kind == "image":
-            file = discord.File(io.BytesIO(content), filename="csview.png")
+            file = discord.File(io.BytesIO(content), filename="rcview.png")
             await interaction.edit_original_response(embed=None, attachments=[file], view=self)
         else:
             await interaction.edit_original_response(embed=content, attachments=[], view=self)
@@ -338,14 +338,14 @@ class SquadCog(commands.Cog, name="Squad"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    # -- challenge a player (csmp @user <overs>) ---------------------------
-    # security.LOCKED_CHANNEL_IDS blocks this in 2 channels; also covers "csmp ranked":
+    # -- challenge a player (rcmp @user <overs>) ---------------------------
+    # security.LOCKED_CHANNEL_IDS blocks this in 2 channels; also covers "rcmp ranked":
     # both paths go through this one command, so one check guards both.
-    @commands.command(name="csmp")
+    @commands.command(name="rcmp")
     @commands.cooldown(1, 10, commands.BucketType.user)
     @security.match_channel_check()
-    async def csmp(self, ctx: commands.Context, opponent: Union[discord.Member, str], overs: int = 5):
-        """Challenge another player: `csmp @user 5`. Ranked matchmaking: `csmp ranked`."""
+    async def rcmp(self, ctx: commands.Context, opponent: Union[discord.Member, str], overs: int = 5):
+        """Challenge another player: `rcmp @user 5`. Ranked matchmaking: `rcmp ranked`."""
         from views import AcceptDeclineView, active_games
         from game import GameState
         from embeds import build_match_invite_embed
@@ -359,7 +359,7 @@ class SquadCog(commands.Cog, name="Squad"):
                     return
                 await cog.start_ranked(ctx)
                 return
-            await ctx.send("❌ Use `csmp @user 5` to challenge someone, or `csmp ranked` for ranked matchmaking.")
+            await ctx.send("❌ Use `rcmp @user 5` to challenge someone, or `rcmp ranked` for ranked matchmaking.")
             return
 
         challenger = ctx.author
@@ -378,10 +378,10 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send("❌ You can't challenge yourself.")
             return
         if not 1 <= overs <= 20:
-            await ctx.send("❌ Overs must be between 1 and 20. Example: `csmp @user 5`")
+            await ctx.send("❌ Overs must be between 1 and 20. Example: `rcmp @user 5`")
             return
         if ctx.channel.id in active_games:
-            await ctx.send("❌ A match is already running in this channel. Use `cscancel` to end it.")
+            await ctx.send("❌ A match is already running in this channel. Use `rccancel` to end it.")
             return
         if _in_match(self.bot, challenger.id):
             await ctx.send("❌ You are already in a match.")
@@ -391,7 +391,7 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         for who, label in ((challenger, "You"), (opponent, opponent.display_name)):
             if not economy.user_exists(who.id):
-                await ctx.send(f"❌ {label} must debut first. Use `csdebut`.")
+                await ctx.send(f"❌ {label} must debut first. Use `rcdebut`.")
                 return
             # Checks both the general XI rules AND whether this player has
             # enough distinct bowling options to legally cover a match of
@@ -424,9 +424,9 @@ class SquadCog(commands.Cog, name="Squad"):
         )
 
     # -- end / resume a stuck match ----------------------------------------
-    @commands.command(name="cscancel")
+    @commands.command(name="rccancel")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def cscancel(self, ctx: commands.Context):
+    async def rccancel(self, ctx: commands.Context):
         """End the match running in this channel (either player, or a moderator)."""
         from views import active_games
         game = active_games.get(ctx.channel.id)
@@ -453,9 +453,9 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         await ctx.send("Match cancelled. No result was recorded.")
 
-    @commands.command(name="csresume")
+    @commands.command(name="rcresume")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csresume(self, ctx: commands.Context):
+    async def rcresume(self, ctx: commands.Context):
         """Re-send the current match prompt if the match looks stuck."""
         from views import active_games, _resume_prompt
         game = active_games.get(ctx.channel.id)
@@ -471,13 +471,13 @@ class SquadCog(commands.Cog, name="Squad"):
         await _resume_prompt(game.__dict__.get("mirror") or ctx.channel, game)   # cross-server: both channels
 
     # -- debut -----------------------------------------------------------
-    @commands.command(name="csdebut")
+    @commands.command(name="rcdebut")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def csdebut(self, ctx: commands.Context):
+    async def rcdebut(self, ctx: commands.Context):
         """Create your team."""
         default = security.clean_team_name(f"{ctx.author.display_name} XI")[0] or f"Team {ctx.author.id % 10000}"
         if not economy.create_user(ctx.author.id, default):
-            await ctx.send("You have already debuted. Use `csprofile` to see your team.")
+            await ctx.send("You have already debuted. Use `rcprofile` to see your team.")
             return
         economy.add_pack(ctx.author.id, "debut", 1)   # one-time: create_user only succeeds once per user
         # Welcome image (falls back to the plain text message below if it can't be drawn)
@@ -487,12 +487,12 @@ class SquadCog(commands.Cog, name="Squad"):
                 build_debut_image, ctx.author.display_name, default, f"{economy.START_PURSE:,}"
             )
         except Exception as e:
-            print(f"[csdebut] image failed: {e}")
+            print(f"[rcdebut] image failed: {e}")
         if buf is not None:
             await ctx.send(
                 f"{ctx.author.mention} your team **{esc(default)}** is created with "
                 f"**{economy.fmt_coins(economy.START_PURSE)}** {JOIN_MAIN_LINK}\n"
-                f"You also got 1 `debut pack`. Open it with `csopen debut` in the main server.",
+                f"You also got 1 `debut pack`. Open it with `rcopen debut` in the main server.",
                 file=discord.File(buf, filename=DEBUT_IMG_NAME),
                 allowed_mentions=discord.AllowedMentions(users=[ctx.author]),
             )
@@ -500,21 +500,21 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(
             f"Welcome, **{esc(ctx.author.display_name)}**! Your team **{esc(default)}** is created "
             f"with **{economy.fmt_coins(economy.START_PURSE)}** {JOIN_MAIN_LINK}\n"
-            f"You also got 1 `debut pack`. Open it with `csopen debut` in the main server.\n"
-            f"Next: `csstarterpack` to get your first players, then `csxi` to see your XI.\n"
-            f"Change your team name with `csteamname <name>`."
+            f"You also got 1 `debut pack`. Open it with `rcopen debut` in the main server.\n"
+            f"Next: `rcstarterpack` to get your first players, then `rcxi` to see your XI.\n"
+            f"Change your team name with `rcteamname <name>`."
         )
 
     # -- starter pack ----------------------------------------------------
-    @commands.command(name="csstarterpack")
+    @commands.command(name="rcstarterpack")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def csstarterpack(self, ctx: commands.Context):
+    async def rcstarterpack(self, ctx: commands.Context):
         """Claim your one-time starter squad."""
         if not await _need_debut(ctx):
             return
         user = economy.get_user(ctx.author.id)
         if user["starter_claimed"]:
-            await ctx.send("You already claimed your starter pack. Try `cspack` or `csdaily`.")
+            await ctx.send("You already claimed your starter pack. Try `rcpack` or `rcdaily`.")
             return
         squad = sl.pick_starter_squad()
         if squad is None:
@@ -533,12 +533,12 @@ class SquadCog(commands.Cog, name="Squad"):
             description=f"Team **{esc(user['team_name'])}** · Team OVR **{team_ovr}** · {len(xi)} players",
             color=discord.Color.gold(),
         )
-        embed.set_footer(text="See your team: csxi • Get coins: csdaily • Buy packs: cspack")
+        embed.set_footer(text="See your team: rcxi • Get coins: rcdaily • Buy packs: rcpack")
         buf = None
         try:
             buf = await asyncio.to_thread(build_team_image, xi, user["team_name"], team_ovr)
         except Exception as e:
-            print(f"[csstarterpack] collage failed: {e}")
+            print(f"[rcstarterpack] collage failed: {e}")
         if buf is not None:
             embed.set_image(url=f"attachment://{TEAM_IMG_NAME}")
             await ctx.send(embed=embed, file=discord.File(buf, filename=TEAM_IMG_NAME))
@@ -548,9 +548,9 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(embed=embed)
 
     # -- squad list ------------------------------------------------------
-    @commands.command(name="cssquad")
+    @commands.command(name="rcsquad")
     @commands.cooldown(1, 4, commands.BucketType.user)
-    async def cssquad(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+    async def rcsquad(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show your squad (or another player's)."""
         target = member or ctx.author
         if target.bot:
@@ -565,9 +565,9 @@ class SquadCog(commands.Cog, name="Squad"):
         view.message = await ctx.send(embed=view.build(), view=view)
 
     # -- show a player ---------------------------------------------------
-    @commands.command(name="csshow")
+    @commands.command(name="rcshow")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csshow(self, ctx: commands.Context, *, player: str):
+    async def rcshow(self, ctx: commands.Context, *, player: str):
         """Show a player's card and stats."""
         query = security.clean_input(player)
         found = await asyncio.to_thread(card_db.find_cards, query, 8)
@@ -599,8 +599,8 @@ class SquadCog(commands.Cog, name="Squad"):
             else:
                 view.message = await ctx.send(embed=embed, view=view)
 
-    async def _csview_content(self, author, card):
-        """Build what `csview` shows for ONE card: ('image', png_bytes) if the
+    async def _rcview_content(self, author, card):
+        """Build what `rcview` shows for ONE card: ('image', png_bytes) if the
         drawn card worked, else ('embed', discord.Embed) as the text fallback.
         Shared by the plain command and ViewPickerView's ◀ ▶ so every card in
         a multi-match picker renders the same way a single match would."""
@@ -624,9 +624,9 @@ class SquadCog(commands.Cog, name="Squad"):
         if styles:   # only cards that have a playstyle/narrative
             lines.append("Playstyle: " + " · ".join(styles))
         # Preferred look: one image card. If anything goes wrong while drawing it,
-        # fall back to the old text embed below so csview never breaks.
+        # fall back to the old text embed below so rcview never breaks.
         try:
-            from csview_image import generate_view_card
+            from rcview_image import generate_view_card
             png = await asyncio.to_thread(
                 generate_view_card,
                 card["playername"], card["ovr"], card["bat"], card["bowl"],
@@ -635,7 +635,7 @@ class SquadCog(commands.Cog, name="Squad"):
             )
             return "image", png
         except Exception as e:
-            print(f"[csview] image card failed, using text embed: {e}")
+            print(f"[rcview] image card failed, using text embed: {e}")
 
         embed = discord.Embed(
             title=f"Player Stats: {esc(card['playername'])}",
@@ -646,9 +646,9 @@ class SquadCog(commands.Cog, name="Squad"):
         return "embed", embed
 
     # -- player stats card (personal — only your own cards) --------------
-    @commands.command(name="csview")
+    @commands.command(name="rcview")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csview(self, ctx: commands.Context, *, player: str):
+    async def rcview(self, ctx: commands.Context, *, player: str):
         """Show a card you own, with YOUR career batting/bowling stats on it."""
         query = security.clean_input(player)
         found = await asyncio.to_thread(card_db.find_cards, query, 8)
@@ -656,50 +656,50 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(f"❌ No player found matching `{sl.discord_safe(query)}`.")
             return
 
-        # csview is for cards you currently own only. Selling a card doesn't
+        # rcview is for cards you currently own only. Selling a card doesn't
         # erase your stats with it (they're kept in case you buy it back) —
-        # it just means csview won't show them to anyone while you don't
+        # it just means rcview won't show them to anyone while you don't
         # own it.
         owned = await asyncio.to_thread(sl.owned_cards, ctx.author.id)
         owned_keys = {c["playername_key"] for c in owned}
         owned_matches = [c for c in found if c["playername_key"] in owned_keys]
         if not owned_matches:
             await ctx.send(
-                f"❌ You don't own **{esc(found[0]['playername'])}**, so `csview` can't show it. "
+                f"❌ You don't own **{esc(found[0]['playername'])}**, so `rcview` can't show it. "
                 f"(Only cards you currently own can be viewed here.)"
             )
             return
 
-        # Same as csshow: every owned card matching the name, exact match first.
+        # Same as rcshow: every owned card matching the name, exact match first.
         # More than one -> ◀ ▶ picker (e.g. a normal + a Halloween card).
         cards = owned_matches
 
         if len(cards) == 1:
-            kind, content = await self._csview_content(ctx.author, cards[0])
+            kind, content = await self._rcview_content(ctx.author, cards[0])
             if kind == "image":
-                await ctx.send(file=discord.File(io.BytesIO(content), filename="csview.png"))
+                await ctx.send(file=discord.File(io.BytesIO(content), filename="rcview.png"))
             else:
                 await card_cache.send_embed(ctx, content, cards[0]["image_path"])   # cached link = no upload
             return
 
         view = ViewPickerView(ctx.author.id, cards, self)
-        kind, content = await self._csview_content(ctx.author, cards[0])
+        kind, content = await self._rcview_content(ctx.author, cards[0])
         if kind == "image":
-            view.message = await ctx.send(file=discord.File(io.BytesIO(content), filename="csview.png"), view=view)
+            view.message = await ctx.send(file=discord.File(io.BytesIO(content), filename="rcview.png"), view=view)
         else:
             view.message = await ctx.send(embed=content, view=view)
 
     # -- player stats card (universal — premium only) ---------------------
-    @commands.command(name="csdata")
+    @commands.command(name="rcdata")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csdata(self, ctx: commands.Context, *, player: str):
+    async def rcdata(self, ctx: commands.Context, *, player: str):
         """Premium-only: a player's ALL-TIME stats across every owner ever."""
         from career_stats import get_career, batting_figures, bowling_figures
 
         if not _is_premium(ctx.author):
             await ctx.send(
-                "❌ `csdata` (universal, all-owners stats) is a premium-only command. "
-                "Use `csview <player>` for your own cards instead."
+                "❌ `rcdata` (universal, all-owners stats) is a premium-only command. "
+                "Use `rcview <player>` for your own cards instead."
             )
             return
 
@@ -747,13 +747,13 @@ class SquadCog(commands.Cog, name="Squad"):
         await card_cache.send_embed(ctx, embed, card["image_path"])   # cached link = no upload
 
     # -- XI --------------------------------------------------------------
-    @commands.command(name="csxi", aliases=["csbattingorder"])
+    @commands.command(name="rcxi", aliases=["rcbattingorder"])
     @commands.cooldown(1, 4, commands.BucketType.user)
-    async def csxi(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+    async def rcxi(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show your playing XI in batting order."""
         target = member or ctx.author
         if target.id != ctx.author.id and not _is_premium(ctx.author):
-            await ctx.send("💎 Only **Premium members** can see another player's XI. You can still use `csxi` for your own XI.")
+            await ctx.send("💎 Only **Premium members** can see another player's XI. You can still use `rcxi` for your own XI.")
             return
         user = economy.get_user(target.id)
         if user is None:
@@ -765,16 +765,16 @@ class SquadCog(commands.Cog, name="Squad"):
             await quest.track_and_notify(ctx, ctx.author.id, {"xi_view": 1})
 
     # -- XI image + team OVR ----------------------------------------------
-    @commands.command(name="csovr")
+    @commands.command(name="rcovr")
     @premium_cooldown(30 * 60)          # normal users: 30 min, Premium: none
-    async def csovr(self, ctx: commands.Context):
+    async def rcovr(self, ctx: commands.Context):
         """Your real playing XI as an image, with the team OVR."""
         if not await _need_debut(ctx):
             return
         user = economy.get_user(ctx.author.id)
         cards = await asyncio.to_thread(sl.xi_cards, ctx.author.id)   # batting order, current card images
         if not cards:
-            await ctx.send("❌ Your XI is empty. Use `csstarterpack` for your first players, or `csautoxi`.")
+            await ctx.send("❌ Your XI is empty. Use `rcstarterpack` for your first players, or `rcautoxi`.")
             return
         team_ovr = sl.average_ovr(cards)
         problem = sl.xi_problem(ctx.author.id)
@@ -783,21 +783,21 @@ class SquadCog(commands.Cog, name="Squad"):
             description=f"Team **{esc(user['team_name'])}** · Team OVR **{team_ovr}** · {len(cards)} players",
             color=discord.Color.blue(),
         )
-        embed.set_footer(text=(f"⚠️ {problem}" if problem else "✅ Ready to play") + " • Edit XI: csswap • csautoxi")
+        embed.set_footer(text=(f"⚠️ {problem}" if problem else "✅ Ready to play") + " • Edit XI: rcswap • rcautoxi")
         buf = None
         try:
             buf = await asyncio.to_thread(build_team_image, cards, user["team_name"], team_ovr)
         except Exception as e:
-            print(f"[csovr] collage failed: {e}")
+            print(f"[rcovr] collage failed: {e}")
         if buf is not None:
             embed.set_image(url=f"attachment://{TEAM_IMG_NAME}")
             await ctx.send(embed=embed, file=discord.File(buf, filename=TEAM_IMG_NAME))
         else:   # image failed -> show the normal text XI instead
             await ctx.send(embed=_xi_embed(ctx.author, user))
 
-    @commands.command(name="csautoxi")
+    @commands.command(name="rcautoxi")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def csautoxi(self, ctx: commands.Context):
+    async def rcautoxi(self, ctx: commands.Context):
         """Pick your best XI automatically."""
         if not await _need_debut(ctx):
             return
@@ -811,12 +811,12 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(embed=_xi_embed(ctx.author, economy.get_user(ctx.author.id)))
 
     # -- autoplay (premium) ----------------------------------------------
-    @commands.command(name="csautoplay")
+    @commands.command(name="rcautoplay")
     @commands.cooldown(1, 3, commands.BucketType.user)
-    async def csautoplay(self, ctx: commands.Context):
+    async def rcautoplay(self, ctx: commands.Context):
         """(Premium) Let the bot play your side of the match for you. Type again to switch off."""
         if not _is_premium(ctx.author):
-            await ctx.send("💎 `csautoplay` is for **Premium members** only.")
+            await ctx.send("💎 `rcautoplay` is for **Premium members** only.")
             return
         from views import active_games, autoplay_ids, autoplay_kick
         game = active_games.get(ctx.channel.id)
@@ -834,14 +834,14 @@ class SquadCog(commands.Cog, name="Squad"):
         note = "Both sides are on autoplay — the match will run by itself." if both else "The other side still plays manually."
         await ctx.send(
             f"🤖 Autoplay **ON** for {ctx.author.mention}. Bowler, batter, deliveries and shots are chosen for you. "
-            f"{note}\nType `csautoplay` again to take control back."
+            f"{note}\nType `rcautoplay` again to take control back."
         )
         autoplay_kick(game)
 
-    @commands.command(name="csswap")
+    @commands.command(name="rcswap")
     @commands.cooldown(1, 4, commands.BucketType.user)
-    async def csswap(self, ctx: commands.Context, *, players: str):
-        """Swap two players: `csswap 3 5` (XI spots) or `csswap Virat Kohli | Rohit Sharma`."""
+    async def rcswap(self, ctx: commands.Context, *, players: str):
+        """Swap two players: `rcswap 3 5` (XI spots) or `rcswap Virat Kohli | Rohit Sharma`."""
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
@@ -850,7 +850,7 @@ class SquadCog(commands.Cog, name="Squad"):
         players = security.clean_input(players, 120)
         parts = [p.strip() for p in players.split("|")] if "|" in players else players.split()
         if len(parts) != 2:
-            await ctx.send("Usage: `csswap 3 5` or `csswap Player One | Player Two`")
+            await ctx.send("Usage: `rcswap 3 5` or `rcswap Player One | Player Two`")
             return
         xi = economy.get_xi(ctx.author.id)
         keys = []
@@ -874,9 +874,9 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(embed=_xi_embed(ctx.author, economy.get_user(ctx.author.id)))
 
     # -- impact player subs ------------------------------------------------
-    @commands.command(name="cssubs", aliases=["csimpact"])
+    @commands.command(name="rcsubs", aliases=["rcimpact"])
     @commands.cooldown(1, 4, commands.BucketType.user)
-    async def cssubs(
+    async def rcsubs(
         self,
         ctx: commands.Context,
         action: Optional[str] = None,
@@ -884,7 +884,7 @@ class SquadCog(commands.Cog, name="Squad"):
         player: Optional[str] = None,
     ):
         """Manage your Impact Player subs (bench players, max 4).
-        `cssubs` to view, `cssubs add <player>`, `cssubs remove <player>`, `cssubs clear`."""
+        `rcsubs` to view, `rcsubs add <player>`, `rcsubs remove <player>`, `rcsubs clear`."""
         if not await _need_debut(ctx):
             return
         action = (action or "list").strip().lower()
@@ -894,7 +894,7 @@ class SquadCog(commands.Cog, name="Squad"):
             if not subs:
                 await ctx.send(
                     "🔁 You have no Impact Player subs set.\n"
-                    "Add one with `cssubs add <player name>` "
+                    "Add one with `rcsubs add <player name>` "
                     f"(up to {economy.IMPACT_SUBS_MAX}, must be a bench player — not already in your XI)."
                 )
                 return
@@ -911,7 +911,7 @@ class SquadCog(commands.Cog, name="Squad"):
                 await ctx.send("❌ You can't change your subs during a match.")
                 return
             if not player:
-                await ctx.send("Usage: `cssubs add <player name>`")
+                await ctx.send("Usage: `rcsubs add <player name>`")
                 return
             card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
             if card is None:
@@ -929,7 +929,7 @@ class SquadCog(commands.Cog, name="Squad"):
                 await ctx.send("❌ You can't change your subs during a match.")
                 return
             if not player:
-                await ctx.send("Usage: `cssubs remove <player name>`")
+                await ctx.send("Usage: `rcsubs remove <player name>`")
                 return
             card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
             if card is None:
@@ -951,13 +951,13 @@ class SquadCog(commands.Cog, name="Squad"):
             return
 
         await ctx.send(
-            "Usage: `cssubs` (view), `cssubs add <player>`, `cssubs remove <player>`, `cssubs clear`."
+            "Usage: `rcsubs` (view), `rcsubs add <player>`, `rcsubs remove <player>`, `rcsubs clear`."
         )
 
     # -- captain ---------------------------------------------------------
-    @commands.command(name="cscaptain")
+    @commands.command(name="rccaptain")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def cscaptain(self, ctx: commands.Context, *, player: str):
+    async def rccaptain(self, ctx: commands.Context, *, player: str):
         """Set your captain (must be in your XI)."""
         if not await _need_debut(ctx):
             return
@@ -976,9 +976,9 @@ class SquadCog(commands.Cog, name="Squad"):
         await quest.track_and_notify(ctx, ctx.author.id, {"captain_set": 1})
 
     # -- team name -------------------------------------------------------
-    @commands.command(name="csteamname")
+    @commands.command(name="rcteamname")
     @commands.cooldown(1, 30, commands.BucketType.user)
-    async def csteamname(self, ctx: commands.Context, *, name: str):
+    async def rcteamname(self, ctx: commands.Context, *, name: str):
         """Change your team name."""
         if not await _need_debut(ctx):
             return
@@ -990,9 +990,9 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(f"✅ Team name changed to **{esc(clean)}**.")
 
     # -- profile ---------------------------------------------------------
-    @commands.command(name="csprofile")
+    @commands.command(name="rcprofile")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csprofile(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+    async def rcprofile(self, ctx: commands.Context, member: Optional[discord.Member] = None):
         """Show your team profile."""
         target = member or ctx.author
         if target.bot:
@@ -1028,17 +1028,17 @@ class SquadCog(commands.Cog, name="Squad"):
 
     # -- help ------------------------------------------------------------
     # Normal users: once every 2 minutes. Premium members: no cooldown at all.
-    @commands.command(name="cshelp")
+    @commands.command(name="rchelp")
     @premium_cooldown(120)
-    async def cshelp(self, ctx: commands.Context):
+    async def rchelp(self, ctx: commands.Context):
         """List the commands (text menu with a topic selector)."""
         import help_menu
         await help_menu.send_help(ctx)
 
     # ── Owner-only tools ─────────────────────────────────────────────────
-    @commands.command(name="csban")
+    @commands.command(name="rcban")
     @security.owner_or_admin_role()
-    async def csban(self, ctx: commands.Context, member: discord.User, *, reason: str = "No reason"):
+    async def rcban(self, ctx: commands.Context, member: discord.User, *, reason: str = "No reason"):
         """(Owner) Ban someone from using the bot."""
         if member.id == ctx.author.id or member.bot:
             await ctx.send("❌ Can't ban that user.")
@@ -1046,16 +1046,16 @@ class SquadCog(commands.Cog, name="Squad"):
         security.ban_user(member.id, security.clean_input(reason, 150))
         await ctx.send(f"🚫 Banned **{esc(member.display_name)}**.")
 
-    @commands.command(name="csunban")
+    @commands.command(name="rcunban")
     @security.owner_or_admin_role()
-    async def csunban(self, ctx: commands.Context, member: discord.User):
+    async def rcunban(self, ctx: commands.Context, member: discord.User):
         """(Owner) Let someone use the bot again."""
         security.unban_user(member.id)
         await ctx.send(f"✅ Unbanned **{esc(member.display_name)}**.")
 
-    @commands.command(name="csgivecoins")
+    @commands.command(name="rcgivecoins")
     @security.owner_or_admin_role()
-    async def csgivecoins(self, ctx: commands.Context, member: discord.Member, amount: int):
+    async def rcgivecoins(self, ctx: commands.Context, member: discord.Member, amount: int):
         """(Owner) Give (or take with a negative number) coins."""
         if not economy.user_exists(member.id):
             await ctx.send("❌ That user hasn't debuted.")
@@ -1066,9 +1066,9 @@ class SquadCog(commands.Cog, name="Squad"):
         bal = economy.add_coins(member.id, amount, f"Owner adjustment by {ctx.author.id}")
         await ctx.send(f"✅ {esc(member.display_name)} now has **{economy.fmt_coins(bal)}**.")
 
-    @commands.command(name="csgivecard")
+    @commands.command(name="rcgivecard")
     @security.owner_or_admin_role()
-    async def csgivecard(self, ctx: commands.Context, member: discord.Member, *, player: str):
+    async def rcgivecard(self, ctx: commands.Context, member: discord.Member, *, player: str):
         """(Owner) Give someone a player card."""
         card, err = sl.resolve_any(security.clean_input(player))
         if card is None:

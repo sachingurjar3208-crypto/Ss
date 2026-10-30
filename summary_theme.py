@@ -1,10 +1,10 @@
 """Match SUMMARY themes (Halloween / Diwali / Christmas ...): the owner sets the image, players own the theme.
 
-  * The OWNER sets the background image of a theme with /cssbset (the text design - colours, outline,
+  * The OWNER sets the background image of a theme with /rcsbset (the text design - colours, outline,
     glow - is fixed in summary_image.STYLES, only the image comes from the owner).
-  * A player can use a theme only after it was GIVEN to them: by the owner with /cssbgive, or as a
+  * A player can use a theme only after it was GIVEN to them: by the owner with /rcsbgive, or as a
     Star Pass reward (kind "theme").
-  * A player turns an owned theme on / off with `cssb use <theme>` / `cssb off`.
+  * A player turns an owned theme on / off with `rcsb use <theme>` / `rcsb off`.
   * At the end of a match the summary card uses the theme of the WINNER (if they have one turned on),
     otherwise the theme of the other player, otherwise the normal blue summary.
 

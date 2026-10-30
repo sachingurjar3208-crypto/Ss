@@ -1,4 +1,4 @@
-"""Quest board image for `csquest` (pure Pillow, no Discord code).
+"""Quest board image for `rcquest` (pure Pillow, no Discord code).
 
     build_quest_board(board, team_name) -> PNG BytesIO
 
@@ -197,7 +197,7 @@ def build_quest_board(board: dict, team_name: str = "") -> io.BytesIO:
             d.ellipse([cx - dot_r, cy - dot_r, cx + dot_r, cy + dot_r], outline=CARD_LINE, width=3, fill=TRACK)
     to_go = 7 - (streak % 7) if streak % 7 else (0 if streak > 0 else 7)
     if to_go:
-        msg = f"Claim csdaily {to_go} more day(s) in a row to earn 3 vouchers"
+        msg = f"Claim rcdaily {to_go} more day(s) in a row to earn 3 vouchers"
     else:
         msg = "7 day streak reached: 3 vouchers paid"
     _spaced(d, (SIDE + 28, fy + 126), msg.upper(), f_label, DIM, spacing=2)

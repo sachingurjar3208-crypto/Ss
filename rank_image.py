@@ -1,4 +1,4 @@
-"""Rank card image for `csrank` (1200x560 PNG, drawn at 2x then scaled down for smooth edges).
+"""Rank card image for `rcrank` (1200x560 PNG, drawn at 2x then scaled down for smooth edges).
 
 generate_rank_card(...) returns PNG bytes. Uses the bot's own fonts:
   name_font.ttf (Montserrat ExtraBold)  display_bold.ttf (Jersey numbers)  label.ttf (Barlow Condensed)
@@ -198,7 +198,7 @@ def generate_rank_card(*, name: str, tier: str, stars: int, wins: int, losses: i
         d.text((_p(x0 + bw / 2 + 4), _p(y1 - 22)), lab, font=_f(_LAB, 22), fill=(160, 172, 204, 255), anchor="mm")
 
     # footer
-    d.text((_p(W // 2), _p(H - 38)), "PLAY RANKED WITH  csmp ranked", font=_f(_LAB, 22),
+    d.text((_p(W // 2), _p(H - 38)), "PLAY RANKED WITH  rcmp ranked", font=_f(_LAB, 22),
            fill=(120, 132, 170, 255), anchor="mm")
 
     out = img.convert("RGB").resize((W, H), Image.LANCZOS)

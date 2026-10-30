@@ -1,4 +1,4 @@
-"""Cricket Star end-of-match SUMMARY card (1536x1024), drawn on summary_base.png.
+"""Rush Cricket end-of-match SUMMARY card (1536x1024), drawn on summary_base.png.
 
     png_bytes = generate_summary_card({
         "match_id": 194897, "venue": "National Stadium, Karachi",
@@ -44,21 +44,21 @@ _CELLS_R = [(1332, 1418), (1424, 1514)]  # right stat cells
 # glow = soft coloured light behind the text (None = off), title/foot = top-bar and footer texts.
 STYLES = {
     "halloween": {
-        "label": "Halloween", "title": "HALLOWEEN SUMMARY", "foot": "CRICKET STAR  -  HAPPY HALLOWEEN",
+        "label": "Halloween", "title": "HALLOWEEN SUMMARY", "foot": "RUSH CRICKET  -  HAPPY HALLOWEEN",
         "name": (255, 244, 226, 255), "num": (255, 142, 32, 255), "sub": (255, 196, 128, 255),
         "potm": (160, 255, 90, 255), "result": (255, 142, 32, 255), "foot_fill": (255, 142, 32, 255),
         "stroke": (28, 6, 46, 255), "stroke_w": 3, "glow": (255, 106, 10, 235), "glow_r": 7,
         "shadow": (0, 0, 0, 210),
     },
     "diwali": {
-        "label": "Diwali", "title": "DIWALI SUMMARY", "foot": "CRICKET STAR  -  HAPPY DIWALI",
+        "label": "Diwali", "title": "DIWALI SUMMARY", "foot": "RUSH CRICKET  -  HAPPY DIWALI",
         "name": (255, 248, 232, 255), "num": (255, 200, 70, 255), "sub": (255, 222, 156, 255),
         "potm": (255, 128, 64, 255), "result": (255, 200, 70, 255), "foot_fill": (255, 200, 70, 255),
         "stroke": (72, 20, 2, 255), "stroke_w": 3, "glow": (255, 164, 26, 235), "glow_r": 7,
         "shadow": (0, 0, 0, 200),
     },
     "christmas": {
-        "label": "Christmas", "title": "CHRISTMAS SUMMARY", "foot": "CRICKET STAR  -  MERRY CHRISTMAS",
+        "label": "Christmas", "title": "CHRISTMAS SUMMARY", "foot": "RUSH CRICKET  -  MERRY CHRISTMAS",
         "name": (255, 255, 255, 255), "num": (255, 96, 96, 255), "sub": (190, 255, 205, 255),
         "potm": (255, 226, 122, 255), "result": (255, 226, 122, 255), "foot_fill": (190, 255, 205, 255),
         "stroke": (8, 48, 24, 255), "stroke_w": 3, "glow": (60, 220, 110, 225), "glow_r": 7,
@@ -281,7 +281,7 @@ def generate_summary_card(data: dict, style: str | None = None, bg_bytes: bytes 
         band = Image.new("RGBA", (1536, 70), (2, 8, 24, 235))
         im.alpha_composite(band, (0, 900))
         d = ImageDraw.Draw(im, "RGBA")
-        d.text((768, 935), "CRICKET STAR", font=_f(_LAB, 34), fill=(140, 180, 255, 255), anchor="mm")
+        d.text((768, 935), "RUSH CRICKET", font=_f(_LAB, 34), fill=(140, 180, 255, 255), anchor="mm")
 
     buf = io.BytesIO()
     im.convert("RGB").save(buf, "PNG", optimize=True)

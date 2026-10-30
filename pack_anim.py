@@ -1,4 +1,4 @@
-"""Pack animations: the GIF shown for a few seconds when someone runs `csopen`,
+"""Pack animations: the GIF shown for a few seconds when someone runs `rcopen`,
 right BEFORE their real card appears.
 
 Managed with the owner/admin slash commands in pack_cog:
@@ -18,7 +18,7 @@ How it is stored (same idea as pool_anim.py)
 - Adding a name that already exists REPLACES it: the new file is put in place first and
   the old one is deleted only after that, so a failed download never loses the old animation.
 
-If a pack has NO animation here, csopen uses the built-in pack intro (pack_gif.py, no card in it).
+If a pack has NO animation here, rcopen uses the built-in pack intro (pack_gif.py, no card in it).
 
 Safety: the download code is pool_anim.fetch_image (only http(s), public addresses only,
 max 4 redirects, size + time limits) and the file name is built from a strict pathname.
@@ -40,7 +40,7 @@ from pool_anim import AnimError
 _HERE = Path(__file__).parent
 ANIM_DIR = _HERE / "pack_animations"
 
-# How long csopen shows an animation added with /pack animation add before the real card
+# How long rcopen shows an animation added with /pack animation add before the real card
 # appears. Change this one number if your animations are shorter / longer.
 ANIM_SECONDS = 5.0
 

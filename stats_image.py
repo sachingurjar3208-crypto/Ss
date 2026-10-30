@@ -1,4 +1,4 @@
-"""Cricket Star on-crease / on-bowling stat banners (ALL-TIME career stats).
+"""Rush Cricket on-crease / on-bowling stat banners (ALL-TIME career stats).
 
 views.py calls generate_bat_card() / generate_bowl_card() and sends the PNG
 bytes as a discord.File.  Template: stat_banner.png (2172x502).
@@ -107,7 +107,7 @@ def _render(tag: str, accent, name: str, status: str, cells) -> bytes:
     d.text((640 + tw / 2, 68), tag, font=tf, fill=_WHITE, anchor="mm")
     if status:
         d.text((640 + tw + 28, 68), status.upper(), font=_f(_LAB, 36), fill=_SKY2, anchor="lm")
-    d.text((im.width - 70, 68), "CRICKET STAR  |  ALL TIME", font=_f(_LAB, 38), fill=_SKY2, anchor="rm")
+    d.text((im.width - 70, 68), "RUSH CRICKET  |  ALL TIME", font=_f(_LAB, 38), fill=_SKY2, anchor="rm")
 
     # name (shrinks to fit)
     nm = (name or "").upper()

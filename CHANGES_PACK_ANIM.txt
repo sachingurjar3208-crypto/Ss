@@ -5,10 +5,10 @@ CHANGED files:  economy_cog.py, squad_logic.py, pack_gif.py, emojis.py, main.py
 Sab 7 files same naam se repo me replace/upload karo, phir: git pull + systemctl restart ssbot
 (koi nayi library nahi chahiye). Naya cog `pack_cog` main.py me add ho gaya hai.
 
-1) cspack  (shop)
+1) rcpack  (shop)
    - Ab embed me har pack (emoji, naam, price, OVR range, kitne tumhare paas) + niche "Select a pack" dropdown.
    - Pack chuno -> Confirm / Cancel -> buy. Paisa sirf Confirm par kata (pehle jaisa safe flow).
-   - `cspack bronze` (naam likh kar) abhi bhi chalta hai.
+   - `rcpack bronze` (naam likh kar) abhi bhi chalta hai.
    - Pack emojis emojis.py me: BRONZE_PACK, SILVER_PACK, GOLD_PACK, LEGENDARY_PACK, HALLOWEEN_PACK.
 
 2) Halloween pack  (squad_logic.PACKS["halloween"])
@@ -16,12 +16,12 @@ Sab 7 files same naam se repo me replace/upload karo, phir: git pull + systemctl
    - Price 250,000, OVR 60-99 (bade OVR bahut rare). Badalna ho: squad_logic.py me _HALLOWEEN_PRICE
      aur "halloween" wali line.
    - Event band (/eventdisable halloween) ya Halloween ka koi obtainable card na ho -> pack shop se hat jata hai,
-     csopen bhi nahi khulta aur kharida hua pack kharab nahi hota (wapas event aane par khul jayega).
+     rcopen bhi nahi khulta aur kharida hua pack kharab nahi hota (wapas event aane par khul jayega).
    - `admin pack give @user halloween` bhi kaam karta hai.
 
-3) csopen  (animation -> asli card)
+3) rcopen  (animation -> asli card)
    - Pehle animation chalta hai, phir usi message me ASLI card ki poori image aa jati hai
-     (wahi image jo csview / csbuy dikhate hain). Nakli card hata diya.
+     (wahi image jo rcview / rcbuy dikhate hain). Nakli card hata diya.
    - Animation ka time: pack_anim.py me ANIM_SECONDS = 5.
    - Agar us pack ki koi animation add nahi hai -> built-in pack intro chalta hai (pack khulta hai, ~2.2 sec,
      usme koi card nahi hota), phir asli card.

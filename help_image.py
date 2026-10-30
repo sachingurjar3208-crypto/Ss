@@ -1,4 +1,4 @@
-"""Help menu image for `cshelp` (pure Pillow, no Discord code).
+"""Help menu image for `rchelp` (pure Pillow, no Discord code).
 
     build_help_image() -> PNG BytesIO
 
@@ -23,7 +23,7 @@ _NUM, _LAB, _NAME = _HERE / "display_bold.ttf", _HERE / "label.ttf", _HERE / "na
 
 W = 1000
 SIDE = 46
-FILENAME = "cshelp.png"
+FILENAME = "rchelp.png"
 
 BG_TOP, BG_BOT = (12, 16, 27), (20, 27, 45)
 CARD, CARD_LINE = (24, 31, 52), (40, 51, 79)
@@ -41,42 +41,42 @@ HEADER_PAD = 14
 # (section name, accent colour, [(command markdown, description), ...])
 SECTIONS = [
     ("START", (47, 191, 155), [
-        ("`csdebut`", "Create your team"),
-        ("`csstarterpack`", "Claim your first 11 players"),
-        ("`csdaily` `csweekly` (Premium) `csmonthly`", "Free coins + a player card"),
-        ("`csclaim`", "Free random card every hour — Premium: every 35 min"),
-        ("`cscd`", "Check when your claim cooldowns are ready"),
-        ("`csmp ranked`", "Rank-up mode queue (2 overs, same-tier opponents)"),
-        ("`csrank`", "Your tier, stars and season record"),
-        ("`csranktop`", "Global top 10 by stars"),
-        ("`csrankrewards`", "Ranked rewards for every tier + your progress"),
+        ("`rcdebut`", "Create your team"),
+        ("`rcstarterpack`", "Claim your first 11 players"),
+        ("`rcdaily` `rcweekly` (Premium) `rcmonthly`", "Free coins + a player card"),
+        ("`rcclaim`", "Free random card every hour — Premium: every 35 min"),
+        ("`rccd`", "Check when your claim cooldowns are ready"),
+        ("`rcmp ranked`", "Rank-up mode queue (2 overs, same-tier opponents)"),
+        ("`rcrank`", "Your tier, stars and season record"),
+        ("`rcranktop`", "Global top 10 by stars"),
+        ("`rcrankrewards`", "Ranked rewards for every tier + your progress"),
     ]),
     ("SQUAD", (90, 156, 248), [
-        ("`cssquad` `csshow <player>`", "View your squad, or one card"),
-        ("`csxi` `csovr`", "Your starting XI image + OVR"),
-        ("`csautoxi` `csautoplay` (Premium)", "Auto-pick your XI / auto-play a match"),
-        ("`csxi @user` (Premium)", "View someone else's XI"),
-        ("`csswap 3 5`", "Swap two XI slots (also `csswap A | B`)"),
-        ("`cscaptain <player>`", "Set your captain"),
-        ("`csteamname <name>`", "Rename your team"),
-        ("`csprofile`", "Your team profile card"),
-        ("`csview <player>`", "Your stats on a card you own"),
-        ("`csdata <player>` (Premium)", "That card's stats across every owner"),
-        ("`cssubs`", "Impact Player subs — add / remove / clear"),
+        ("`rcsquad` `rcshow <player>`", "View your squad, or one card"),
+        ("`rcxi` `rcovr`", "Your starting XI image + OVR"),
+        ("`rcautoxi` `rcautoplay` (Premium)", "Auto-pick your XI / auto-play a match"),
+        ("`rcxi @user` (Premium)", "View someone else's XI"),
+        ("`rcswap 3 5`", "Swap two XI slots (also `rcswap A | B`)"),
+        ("`rccaptain <player>`", "Set your captain"),
+        ("`rcteamname <name>`", "Rename your team"),
+        ("`rcprofile`", "Your team profile card"),
+        ("`rcview <player>`", "Your stats on a card you own"),
+        ("`rcdata <player>` (Premium)", "That card's stats across every owner"),
+        ("`rcsubs`", "Impact Player subs — add / remove / clear"),
     ]),
     ("ECONOMY", (240, 184, 70), [
-        ("`cspurse`", "Coins and vouchers"),
-        ("`cspack` `csopen <type>`", "Buy and open packs"),
-        ("`csbuy <player>` `cssell <player>`", "Buy or sell a card"),
-        ("`cstrade @user my X | their Y`", "Trade cards — same OVR, 5,000 coin fee each"),
-        ("`cspending` `csleaderboard`", "Cards waiting on a decision / top teams"),
-        ("`csquest`", "5 daily quests — 1 voucher each"),
-        ("`csdraft`", "Spend vouchers on a player draft"),
+        ("`rcpurse`", "Coins and vouchers"),
+        ("`rcpack` `rcopen <type>`", "Buy and open packs"),
+        ("`rcbuy <player>` `rcsell <player>`", "Buy or sell a card"),
+        ("`rctrade @user my X | their Y`", "Trade cards — same OVR, 5,000 coin fee each"),
+        ("`rcpending` `rcleaderboard`", "Cards waiting on a decision / top teams"),
+        ("`rcquest`", "5 daily quests — 1 voucher each"),
+        ("`rcdraft`", "Spend vouchers on a player draft"),
     ]),
     ("PLAY", (240, 106, 106), [
-        ("`csmp @user <overs>`", "Challenge another player to a match"),
-        ("`cscancel`", "Cancel the match running in this channel"),
-        ("`csresume`", "Re-send a stuck match's current prompt"),
+        ("`rcmp @user <overs>`", "Challenge another player to a match"),
+        ("`rccancel`", "Cancel the match running in this channel"),
+        ("`rcresume`", "Re-send a stuck match's current prompt"),
     ]),
 ]
 
@@ -182,7 +182,7 @@ def build_help_image() -> io.BytesIO:
     d = ImageDraw.Draw(img)
 
     # ── header ──────────────────────────────────────────────────────────────
-    d.text((SIDE, 32), "CRICSTAR HELP", font=f_title, fill=WHITE)
+    d.text((SIDE, 32), "RUSH CRICKET HELP", font=f_title, fill=WHITE)
     d.text((SIDE, 94), "Every command, one screen. Type any of these in chat.", font=f_sub, fill=DIM)
     d.line([(SIDE, header_h - 6), (W - SIDE, header_h - 6)], fill=CARD_LINE, width=2)
 

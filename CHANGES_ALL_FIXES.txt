@@ -9,18 +9,18 @@ Sab 8 .py file same naam se repo me replace/upload karo, phir: git pull + system
    Normal packs me OFF cards ab bhi nahi aate. /eventdisable halloween kaam karta rahega.
 
 2) ADMIN PACK OFF / ON                       -> admin_cog.py, economy.py, economy_cog.py
-   admin pack off <pack>   pack cspack me dikhega, par buy (Confirm) button grey
+   admin pack off <pack>   pack rcpack me dikhega, par buy (Confirm) button grey
    admin pack on <pack>    pack wapas kharid sakte hain
    admin pack off          (bina naam) abhi kaun se packs off hain
    Off pack ko pehle se khula Confirm button bhi nahi kharid sakta (database me bhi check hai).
-   Pehle kharide hue packs csopen se khul jaate hain. Setting restart ke baad bhi rehti hai.
+   Pehle kharide hue packs rcopen se khul jaate hain. Setting restart ke baad bhi rehti hai.
 
-3) CSHELP TEXT MENU                          -> help_menu.py (NAYI), squad_cog.py
-   Image ki jagah text help, cscd jaisa. Pehle page par sab commands, niche topic select menu
+3) RCHELP TEXT MENU                          -> help_menu.py (NAYI), squad_cog.py
+   Image ki jagah text help, rccd jaisa. Pehle page par sab commands, niche topic select menu
    (Start, Rewards, Squad, Economy, Packs, Match, Ranked, Events, Other, Premium).
-   Packs page live bana hai (prices, OVR, off packs). cspurse galti theek: asli command csbal.
+   Packs page live bana hai (prices, OVR, off packs). rcpurse galti theek: asli command rcbal.
 
-4) CSRANKTOP IMAGE                           -> rank_top_image.py (NAYI), ranked_cog.py
+4) RCRANKTOP IMAGE                           -> rank_top_image.py (NAYI), ranked_cog.py
    Text ki jagah leaderboard image. Rank 1 gold champion card (crown), 2 aur 3 silver/bronze,
    4 se 10 rows. Discord avatar aur naam aate hain. Cooldown 20 sec.
 

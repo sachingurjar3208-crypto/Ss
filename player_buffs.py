@@ -8,7 +8,7 @@ that player only, by role:
 Positive % = buff, negative % = nerf.
 
 Nothing here is ever shown to players: no message, no card change, no text. Admins see the
-result only in their own DM (see ranked_cog.py: csbuff / csbuffoff / csbufflist).
+result only in their own DM (see ranked_cog.py: rcbuff / rcbuffoff / rcbufflist).
 """
 from __future__ import annotations
 

@@ -151,7 +151,7 @@ PACKS = {
     "gold":   {"label": "Gold Pack",   "emoji": emojis.GOLD_PACK, "price": _GOLD_PRICE, "cards": 1,
                "range": (84, 88),
                "weights": _loss_profit_weights(84, 88, _GOLD_PRICE)},
-    # Free one-time pack given at csdebut. Not sold in the shop; opens only in the main server.
+    # Free one-time pack given at rcdebut. Not sold in the shop; opens only in the main server.
     "debut":  {"label": "Debut Pack",  "emoji": "",   "price": 0, "cards": 1,
                "range": (82, 85), "shop": False},
     "legendary": {"label": "Legendary Pack", "emoji": emojis.LEGENDARY_PACK, "price": _LEGEND_PRICE, "cards": 1,

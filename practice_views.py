@@ -196,7 +196,7 @@ async def _practice_process_delivery(
             if ch and active_practice.get(ch.id) is game:
                 await ch.send(
                     "⚠️ Something went wrong. Attempting to recover...\n"
-                    "If the match is stuck, use `!cs cancel` to end it."
+                    "If the match is stuck, use `!rc cancel` to end it."
                 )
                 await _practice_send_bowling(ch, game)
         except Exception:
@@ -462,7 +462,7 @@ async def _practice_send_bowling(channel: discord.TextChannel, game: GameState):
             if bname not in game.bowler_stats:
                 game.bowler_stats[bname] = {"balls": 0, "runs": 0, "wickets": 0}
         else:
-            await channel.send("❌ **Practice match ended** — no bowler available. Use `/cs practice` to start again.")
+            await channel.send("❌ **Practice match ended** — no bowler available. Use `/rc practice` to start again.")
             active_practice.pop(channel.id, None)
             return
 
@@ -731,7 +731,7 @@ class _PracticeTimeoutMixin:
         try:
             await ch.send(
                 "⏰ **Practice match abandoned — no response received.**\n"
-                "Use `/cs practice` to start a new session."
+                "Use `/rc practice` to start a new session."
             )
         except Exception:
             pass

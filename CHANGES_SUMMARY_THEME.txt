@@ -6,12 +6,12 @@ Sab 8 files same naam se repo me replace/upload karo, phir: git pull + systemctl
 Slash commands sync hone me thoda time lag sakta hai.
 
 OWNER ONLY (slash)
-  /cssbset    themeimage:<image> pathname:<Halloween|Diwali|Christmas>   (image ka preview bhi aata hai)
-  /cssbremove pathname:<theme> [user:@user]   (user ke bina = image delete, user ke saath = us player se theme wapas)
-  /cssbgive   user:@user pathname:<theme>
+  /rcsbset    themeimage:<image> pathname:<Halloween|Diwali|Christmas>   (image ka preview bhi aata hai)
+  /rcsbremove pathname:<theme> [user:@user]   (user ke bina = image delete, user ke saath = us player se theme wapas)
+  /rcsbgive   user:@user pathname:<theme>
 
 PLAYERS
-  cssb | cssb use halloween | cssb off
+  rcsb | rcsb use halloween | rcsb off
 
 STAR PASS
   /starpass-rewardadd ... summary_theme:<Halloween|Diwali|Christmas>  -> level reward me theme

@@ -1,20 +1,20 @@
 """Ranked matchmaking cog.
 
 Commands:
-  csmp ranked   join the ranked queue (2 overs, same-tier opponents only)
-  csrank        your tier / stars / season record     (csrank @user for someone else)
-  csrankrewards  every tier's tier-up + season-end reward, your progress, season end time
-  csranktop     global top 10 by stars
-  csseason                    current season and when it ends
-  csseasonstart [days]        (owner) start a season now; it ends by itself after 30 days (or `days`)
-  csseasonend                 (owner) end the season now: rewards + DMs to everyone with stars > 0
-  csrankgive @user <n>        (staff) add / remove stars (negative n removes)
-  csrankreset @user | all     (staff / owner) reset stars + record
-  csrankban @user [days]      (staff) ranked ban (default 30 days)
-  csrankunban @user           (staff) lift a ranked ban
+  rcmp ranked   join the ranked queue (2 overs, same-tier opponents only)
+  rcrank        your tier / stars / season record     (rcrank @user for someone else)
+  rcrankrewards  every tier's tier-up + season-end reward, your progress, season end time
+  rcranktop     global top 10 by stars
+  rcseason                    current season and when it ends
+  rcseasonstart [days]        (owner) start a season now; it ends by itself after 30 days (or `days`)
+  rcseasonend                 (owner) end the season now: rewards + DMs to everyone with stars > 0
+  rcrankgive @user <n>        (staff) add / remove stars (negative n removes)
+  rcrankreset @user | all     (staff / owner) reset stars + record
+  rcrankban @user [days]      (staff) ranked ban (default 30 days)
+  rcrankunban @user           (staff) lift a ranked ban
 
-The rules and numbers live in ranked.py. The `csmp` command itself is in squad_cog.py:
-it hands "csmp ranked" over to RankedCog.start_ranked().
+The rules and numbers live in ranked.py. The `rcmp` command itself is in squad_cog.py:
+it hands "rcmp ranked" over to RankedCog.start_ranked().
 """
 
 from __future__ import annotations
@@ -124,10 +124,10 @@ class RankedCog(commands.Cog, name="Ranked"):
             self._stop_tasks(e)
         _queue.clear()
 
-    # ── season end (auto after the season's days, or by csseasonend) ───────
+    # ── season end (auto after the season's days, or by rcseasonend) ───────
     async def _deliver_season_dms(self) -> tuple[int, int]:
         """DM every waiting season-end message. A message that was DMed is deleted; one that couldn't be
-        sent (DMs closed) stays and is shown the next time the player uses csrank / csmp ranked."""
+        sent (DMs closed) stays and is shown the next time the player uses rcrank / rcmp ranked."""
         sent = failed = 0
         for n in await asyncio.to_thread(ranked.list_notices):
             if n["id"] in _dm_tried:
@@ -181,7 +181,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             from economy_cog import send_next_pending
             await send_next_pending(ctx_or_channel, user_id)
 
-    # ── csmp ranked ───────────────────────────────────────────────────────
+    # ── rcmp ranked ───────────────────────────────────────────────────────
     async def start_ranked(self, ctx: commands.Context):
         me = ctx.author
         if ctx.guild is None:
@@ -293,7 +293,7 @@ class RankedCog(commands.Cog, name="Ranked"):
                     return
                 if time.monotonic() - entry.joined >= ranked.SEARCH_TIMEOUT:
                     if await self._remove(entry):
-                        await self._edit_search(entry, "No player found.\nTry `csmp ranked` again.")
+                        await self._edit_search(entry, "No player found.\nTry `rcmp ranked` again.")
                     return
                 if await self._try_bot(entry):
                     return
@@ -388,7 +388,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             game.is_bot_match = True
             game.bot_ids = {opponent.id}
             game.bot_skill = ranked.BOT_PROFILES[tier]["skill"]
-            autoplay_ids(game).add(opponent.id)   # the existing csautoplay machinery plays for the bot
+            autoplay_ids(game).add(opponent.id)   # the existing rcautoplay machinery plays for the bot
 
         cond = random_match_conditions()
         game.conditions = cond
@@ -420,21 +420,21 @@ class RankedCog(commands.Cog, name="Ranked"):
         if flashed:
             await asyncio.sleep(2)
 
-        # 2) the match card: same layout as a normal csmp challenge, titled RANK UP MODE
+        # 2) the match card: same layout as a normal rcmp challenge, titled RANK UP MODE
         embed = build_ranked_match_embed(challenger, opponent, ranked.RANKED_OVERS, cond,
                                          gif_url=cond.get("gif_url"))
         mentions = " ".join(m.mention for m in humans)
         await channel.send(content=mentions, embed=embed)
         await start_toss(channel, game)
 
-    # ── csrank ────────────────────────────────────────────────────────────
-    @commands.command(name="csrank")
+    # ── rcrank ────────────────────────────────────────────────────────────
+    @commands.command(name="rcrank")
     @commands.cooldown(1, 30, commands.BucketType.user)   # image command: 30 s cooldown
-    async def csrank(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        """Your ranked card (image): `csrank` or `csrank @user`."""
+    async def rcrank(self, ctx: commands.Context, member: Optional[discord.Member] = None):
+        """Your ranked card (image): `rcrank` or `rcrank @user`."""
         who = member or ctx.author
         if not await asyncio.to_thread(economy.user_exists, who.id):
-            await ctx.send("❌ That player hasn't debuted yet." if member else "❌ You must debut first. Use `csdebut`.")
+            await ctx.send("❌ That player hasn't debuted yet." if member else "❌ You must debut first. Use `rcdebut`.")
             return
         if who.id == ctx.author.id:
             await self._show_notices(ctx, who.id)
@@ -462,12 +462,12 @@ class RankedCog(commands.Cog, name="Ranked"):
             note = f"🚫 Ranked blacklist ends <t:{int(info['blacklist_until'])}:R>"
         await ctx.send(content=note, file=discord.File(io.BytesIO(png), filename="rank.png"))
 
-    @commands.command(name="csrankrewards")
+    @commands.command(name="rcrankrewards")
     @commands.cooldown(1, 20, commands.BucketType.user)
-    async def csrankrewards(self, ctx: commands.Context):
+    async def rcrankrewards(self, ctx: commands.Context):
         """Rewards for every tier (Bronze -> Ruby), what you already claimed, and when the season ends."""
         if not await asyncio.to_thread(economy.user_exists, ctx.author.id):
-            await ctx.send("❌ You must debut first. Use `csdebut`.")
+            await ctx.send("❌ You must debut first. Use `rcdebut`.")
             return
         info = await asyncio.to_thread(ranked.reward_summary, ctx.author.id)
         png = await asyncio.to_thread(rank_rewards_image.generate_rewards_card, **info)
@@ -483,13 +483,13 @@ class RankedCog(commands.Cog, name="Ranked"):
         out = "".join(ch for ch in (text or "") if 32 <= ord(ch) < 0x250).strip()
         return out[:24]
 
-    @commands.command(name="csranktop")
+    @commands.command(name="rcranktop")
     @commands.cooldown(1, 20, commands.BucketType.user)   # image command
-    async def csranktop(self, ctx: commands.Context):
+    async def rcranktop(self, ctx: commands.Context):
         """Global top 10 by stars this season (image)."""
         top = await asyncio.to_thread(ranked.top_players, 10)
         if not top:
-            await ctx.send("No one has any stars yet this season. Be the first: `csmp ranked`")
+            await ctx.send("No one has any stars yet this season. Be the first: `rcmp ranked`")
             return
 
         async def one(p: dict) -> dict:
@@ -522,9 +522,9 @@ class RankedCog(commands.Cog, name="Ranked"):
         await ctx.send(file=discord.File(io.BytesIO(png), filename=rank_top_image.FILENAME))
 
     # ── seasons ───────────────────────────────────────────────────────────
-    @commands.command(name="csseason")
+    @commands.command(name="rcseason")
     @commands.cooldown(1, 5, commands.BucketType.user)
-    async def csseason(self, ctx: commands.Context):
+    async def rcseason(self, ctx: commands.Context):
         """Current ranked season and when it ends."""
         info = await asyncio.to_thread(ranked.season_info)
         if not info["active"]:
@@ -532,9 +532,9 @@ class RankedCog(commands.Cog, name="Ranked"):
             return
         await ctx.send(f"🏆 **{info['name']}** is running.\nStarted <t:{info['start']}:D> · ends <t:{info['end']}:f> (<t:{info['end']}:R>)")
 
-    @commands.command(name="csseasonstart")
-    async def csseasonstart(self, ctx: commands.Context, days: int = 0):
-        """Owner: `csseasonstart` starts a season now that ends by itself after 30 days (`csseasonstart 45` = 45 days)."""
+    @commands.command(name="rcseasonstart")
+    async def rcseasonstart(self, ctx: commands.Context, days: int = 0):
+        """Owner: `rcseasonstart` starts a season now that ends by itself after 30 days (`rcseasonstart 45` = 45 days)."""
         await self.cog_check_staff(ctx)
         if ctx.author.id != OWNER_ID:
             await ctx.send("❌ Only the bot owner can start a season.")
@@ -545,15 +545,15 @@ class RankedCog(commands.Cog, name="Ranked"):
             return
         r = await asyncio.to_thread(ranked.start_season, ctx.author.id, days)
         if not r["ok"]:
-            await ctx.send(f"❌ **{r['name']}** is already running (ends <t:{r['end']}:R>). End it first with `csseasonend`.")
+            await ctx.send(f"❌ **{r['name']}** is already running (ends <t:{r['end']}:R>). End it first with `rcseasonend`.")
             return
         await ctx.send(
             f"✅ **{r['name']}** started! Everyone starts at 0 ⭐.\n"
             f"Ends automatically <t:{r['end']}:f> (<t:{r['end']}:R>), after **{r['days']}** days."
         )
 
-    @commands.command(name="csseasonend")
-    async def csseasonend(self, ctx: commands.Context):
+    @commands.command(name="rcseasonend")
+    async def rcseasonend(self, ctx: commands.Context):
         """Owner: end the season now. Everyone with more than 0 stars gets the reward for their tier by DM."""
         await self.cog_check_staff(ctx)
         if ctx.author.id != OWNER_ID:
@@ -577,12 +577,12 @@ class RankedCog(commands.Cog, name="Ranked"):
             raise commands.NotOwner("Only the bot owner or an admin can use this.")
         return True
 
-    @commands.command(name="csrankgive")
-    async def csrankgive(self, ctx: commands.Context, member: discord.Member, amount: int):
-        """`csrankgive @user 5` adds 5 stars, `csrankgive @user -3` removes 3. No rewards are paid."""
+    @commands.command(name="rcrankgive")
+    async def rcrankgive(self, ctx: commands.Context, member: discord.Member, amount: int):
+        """`rcrankgive @user 5` adds 5 stars, `rcrankgive @user -3` removes 3. No rewards are paid."""
         await self.cog_check_staff(ctx)
         if amount == 0 or abs(amount) > 500:
-            await ctx.send("❌ Amount must be between -500 and 500 (not 0). Example: `csrankgive @user 5`")
+            await ctx.send("❌ Amount must be between -500 and 500 (not 0). Example: `rcrankgive @user 5`")
             return
         if member.bot or not await asyncio.to_thread(economy.user_exists, member.id):
             await ctx.send("❌ That user hasn't debuted.")
@@ -614,13 +614,13 @@ class RankedCog(commands.Cog, name="Ranked"):
         hits = await asyncio.to_thread(card_db.find_cards, query, 2)
         return hits[0]["playername"] if len(hits) == 1 else None
 
-    @commands.command(name="csbuff")
-    async def csbuff(self, ctx: commands.Context, *, arg: str = ""):
-        """`csbuff <player> <+/-percent>` e.g. `csbuff Virat Kohli +10`. Hidden from players.
+    @commands.command(name="rcbuff")
+    async def rcbuff(self, ctx: commands.Context, *, arg: str = ""):
+        """`rcbuff <player> <+/-percent>` e.g. `rcbuff Virat Kohli +10`. Hidden from players.
         Batter/WK -> batting, Bowler -> bowling, All-rounder -> both."""
         await self.cog_check_staff(ctx)
         parts = arg.strip().rsplit(None, 1)
-        usage = "Usage: `csbuff <player> <+/-percent>`  e.g. `csbuff Virat Kohli +10` or `csbuff Virat Kohli -15`"
+        usage = "Usage: `rcbuff <player> <+/-percent>`  e.g. `rcbuff Virat Kohli +10` or `rcbuff Virat Kohli -15`"
         if len(parts) != 2:
             await self._admin_reply(ctx, usage)
             return
@@ -644,12 +644,12 @@ class RankedCog(commands.Cog, name="Ranked"):
         else:
             await self._admin_reply(ctx, f"✅ **{name}**: `{pct:+g}%` saved. Hidden from players.")
 
-    @commands.command(name="csbuffoff")
-    async def csbuffoff(self, ctx: commands.Context, *, player: str = ""):
-        """`csbuffoff <player>` removes a hidden buff/nerf."""
+    @commands.command(name="rcbuffoff")
+    async def rcbuffoff(self, ctx: commands.Context, *, player: str = ""):
+        """`rcbuffoff <player>` removes a hidden buff/nerf."""
         await self.cog_check_staff(ctx)
         if not player.strip():
-            await self._admin_reply(ctx, "Usage: `csbuffoff <player>`")
+            await self._admin_reply(ctx, "Usage: `rcbuffoff <player>`")
             return
         name = await self._find_card_name(player.strip())
         if name is None:
@@ -658,8 +658,8 @@ class RankedCog(commands.Cog, name="Ranked"):
         had = await asyncio.to_thread(player_buffs.clear_buff, ctx.author.id, name)
         await self._admin_reply(ctx, f"✅ Buff for **{name}** removed." if had else f"ℹ️ **{name}** had no buff.")
 
-    @commands.command(name="csbufflist")
-    async def csbufflist(self, ctx: commands.Context):
+    @commands.command(name="rcbufflist")
+    async def rcbufflist(self, ctx: commands.Context):
         """Lists every hidden buff/nerf (sent to your DM)."""
         await self.cog_check_staff(ctx)
         rows = await asyncio.to_thread(player_buffs.list_buffs)
@@ -669,13 +669,13 @@ class RankedCog(commands.Cog, name="Ranked"):
         body = "\n".join(f"`{pct:+g}%`  {key}" for key, pct in rows)
         await self._admin_reply(ctx, f"**Hidden buffs / nerfs ({len(rows)})**\n{body}"[:1900])
 
-    @commands.command(name="csrankreset")
-    async def csrankreset(self, ctx: commands.Context, member: Optional[discord.Member] = None, *, arg: str = ""):
-        """`csrankreset @user` resets one player. `csrankreset all` resets everyone (owner only)."""
+    @commands.command(name="rcrankreset")
+    async def rcrankreset(self, ctx: commands.Context, member: Optional[discord.Member] = None, *, arg: str = ""):
+        """`rcrankreset @user` resets one player. `rcrankreset all` resets everyone (owner only)."""
         await self.cog_check_staff(ctx)
         if member is None:
             if arg.strip().lower() != "all":
-                await ctx.send("Usage: `csrankreset @user`  or  `csrankreset all` (owner only)")
+                await ctx.send("Usage: `rcrankreset @user`  or  `rcrankreset all` (owner only)")
                 return
             if ctx.author.id != OWNER_ID:
                 await ctx.send("❌ Only the bot owner can reset everyone.")
@@ -696,9 +696,9 @@ class RankedCog(commands.Cog, name="Ranked"):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @commands.command(name="csrankban")
-    async def csrankban(self, ctx: commands.Context, member: discord.Member, days: int = 30, *, reason: str = ""):
-        """`csrankban @user [days] [reason]` bans from ranked (default 30 days)."""
+    @commands.command(name="rcrankban")
+    async def rcrankban(self, ctx: commands.Context, member: discord.Member, days: int = 30, *, reason: str = ""):
+        """`rcrankban @user [days] [reason]` bans from ranked (default 30 days)."""
         await self.cog_check_staff(ctx)
         if member.bot or member.id == OWNER_ID or member.id == ctx.author.id:
             await ctx.send("❌ Can't ban that user from ranked.")
@@ -715,9 +715,9 @@ class RankedCog(commands.Cog, name="Ranked"):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
-    @commands.command(name="csrankunban")
-    async def csrankunban(self, ctx: commands.Context, member: discord.Member):
-        """`csrankunban @user` lifts a ranked ban."""
+    @commands.command(name="rcrankunban")
+    async def rcrankunban(self, ctx: commands.Context, member: discord.Member):
+        """`rcrankunban @user` lifts a ranked ban."""
         await self.cog_check_staff(ctx)
         had = await asyncio.to_thread(ranked.admin_unban, ctx.author.id, member.id)
         if had:
@@ -745,7 +745,7 @@ class _ConfirmEndSeason(OwnedView):
         await interaction.edit_original_response(
             content=(f"✅ **{res['season']}** ended. Rewards paid to **{res['paid']}** player(s): "
                      f"**{sent}** DM(s) sent, **{failed}** could not be DMed "
-                     f"(they will see it next time they use `csrank`). Stars are reset; start the next one with `csseasonstart`.")
+                     f"(they will see it next time they use `rcrank`). Stars are reset; start the next one with `rcseasonstart`.")
         )
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)

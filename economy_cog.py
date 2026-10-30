@@ -1,5 +1,5 @@
-"""Economy commands: csbal, csdaily, csweekly, csmonthly, cspack, csopen,
-csbuy, cssell, csms, cstrade, csleaderboard.
+"""Economy commands: rcbal, rcdaily, rcweekly, rcmonthly, rcpack, rcopen,
+rcbuy, rcsell, rcms, rctrade, rcleaderboard.
 
 Safety notes
 - Anything that spends coins or gives a player away asks for a button
@@ -37,13 +37,13 @@ from security import OwnedView, esc, fmt_wait
 from squad_cog import _card_line, _in_match, _is_premium, _need_debut, squad_order
 
 # ── One shared 5 second cooldown for ALL economy commands ────────────────────
-# Each command used to have its own timer, so spamming csbal/csopen/csbuy one
+# Each command used to have its own timer, so spamming rcbal/rcopen/rcbuy one
 # after another still worked. Now every economy command shares ONE timer per
 # user: after any of them, the user must wait ECONOMY_COOLDOWN seconds.
 ECONOMY_COOLDOWN = 5
 
-# Any command that opens a "spend coins" confirm button (cspack, csbuy,
-# cssell, cstrade), plus csopen (opens a pack — same pacing, even though it
+# Any command that opens a "spend coins" confirm button (rcpack, rcbuy,
+# rcsell, rctrade), plus rcopen (opens a pack — same pacing, even though it
 # has no confirm button of its own), uses this pair instead of/alongside
 # ECONOMY_COOLDOWN:
 # the buttons grey out at CONFIRM_TIMEOUT, and the user can't issue the same
@@ -57,7 +57,7 @@ CONFIRM_COOLDOWN = 15.0
 
 # The free debut pack can only be opened in this server.
 DEBUT_PACK_GUILD_ID = 1556644438917382150
-# csbuy / cssell only need a 2 second gap. csms (multi sell) has its own
+# rcbuy / rcsell only need a 2 second gap. rcms (multi sell) has its own
 # 15 second cooldown per user, the same in every server and channel.
 BUYSELL_COOLDOWN = 2
 MULTISELL_COOLDOWN = 15.0
@@ -81,14 +81,14 @@ def is_busy(uid: int) -> bool:
 
 
 def economy_gate(seconds: float = ECONOMY_COOLDOWN):
-    """Shared gate for every economy command (and csdraft).
+    """Shared gate for every economy command (and rcdraft).
 
     1. If the user already has a command pending (confirm button open, trade
        waiting, pack opening, draft running) no other command can start. This
        is what stops farming by firing several commands at once.
     2. One timer per user shared by all economy commands: after any economy
        command the user waits `seconds` before the next one. seconds=0 only
-       does the pending check (used by csdraft, which has its own cooldown).
+       does the pending check (used by rcdraft, which has its own cooldown).
     """
     async def predicate(ctx: commands.Context) -> bool:
         uid = ctx.author.id
@@ -136,7 +136,7 @@ def exclusive(fn):
 # Players with a trade waiting for an answer (each can only have one at a time).
 _pending_trade: set[int] = set()
 
-# Players with a cspack/csbuy/cssell confirm button waiting for a press (each
+# Players with a rcpack/rcbuy/rcsell confirm button waiting for a press (each
 # can only have ONE at a time — this is what actually blocks the farm, the
 # cooldown above is just pacing on top of it).
 _pending_confirm: set[int] = set()
@@ -179,10 +179,10 @@ class ConfirmView(OwnedView):
         await super().on_timeout()
 
 
-# ── cspack: pack shop with a "Select a pack" menu ────────────────────────────
-# `cspack` shows every pack on sale (emoji, price, OVR range, how many you own) and a
+# ── rcpack: pack shop with a "Select a pack" menu ────────────────────────────
+# `rcpack` shows every pack on sale (emoji, price, OVR range, how many you own) and a
 # drop-down. Picking a pack asks Confirm / Cancel, the same safe buy flow as before.
-# `cspack bronze` (typing the name) still works as a shortcut.
+# `rcpack bronze` (typing the name) still works as a shortcut.
 
 SHOP_TIMEOUT = 60.0
 
@@ -208,7 +208,7 @@ def _buy_action(channel, uid: int, key: str) -> Callable[[], Awaitable[str]]:
         await quest.track_and_notify(channel, uid, {"packs_bought": 1})
         return (
             f"✅ Bought 1× {spec['emoji']} {spec['label']} for {economy.fmt_coins(spec['price'])}. "
-            f"Open it with `csopen {key}`."
+            f"Open it with `rcopen {key}`."
         )
     return do_buy
 
@@ -229,7 +229,7 @@ def _shop_embed(uid: int) -> discord.Embed:
         )
     embed = discord.Embed(title="📦 Pack Shop", description="\n\n".join(lines) or "No packs on sale right now.",
                           color=discord.Color.gold())
-    embed.set_footer(text="Pick a pack below to buy it, then open it with csopen <type>. Duplicates turn into coins.")
+    embed.set_footer(text="Pick a pack below to buy it, then open it with rcopen <type>. Duplicates turn into coins.")
     return embed
 
 
@@ -283,7 +283,7 @@ class PackShopView(OwnedView):
             raise
 
 
-# ── csopen: pack animation, then the REAL card ───────────────────────────────
+# ── rcopen: pack animation, then the REAL card ───────────────────────────────
 
 async def _pack_intro(key: str):
     """(discord.File, seconds to wait) for the opening animation of this pack:
@@ -294,11 +294,11 @@ async def _pack_intro(key: str):
         try:
             return discord.File(str(path), filename=f"pack_open{path.suffix.lower()}"), pack_anim.ANIM_SECONDS
         except OSError as e:
-            print(f"[csopen] could not read animation {path}: {e}")
+            print(f"[rcopen] could not read animation {path}: {e}")
     return await pack_gif.intro_file(key)
 
 
-# ── csbuy / cssell: card image + two emoji buttons ───────────────────────────
+# ── rcbuy / rcsell: card image + two emoji buttons ───────────────────────────
 # The message shows the card image with a green check and a red cross under it.
 # After BUYSELL_TIMEOUT seconds both buttons switch off (greyed out), so
 # pressing them later does nothing.
@@ -394,8 +394,8 @@ class BuySellView(OwnedView):
         await super().on_timeout()
 
 
-# ── csbuy browser: same name, many cards (◀ ▶) ─────────────────────────────
-# `csbuy virat kohli` shows every Virat Kohli card (normal, event, renamed ...).
+# ── rcbuy browser: same name, many cards (◀ ▶) ─────────────────────────────
+# `rcbuy virat kohli` shows every Virat Kohli card (normal, event, renamed ...).
 # ✅ buys the card on screen, ❌ cancels, ◀ ▶ flip through the cards.
 
 def _buy_text(card) -> str:
@@ -484,7 +484,7 @@ class BuyBrowseView(OwnedView):
             result = "You already own this player."
         elif economy.squad_count(uid) >= economy.SQUAD_MAX:
             result = (f"❌ Your squad is full (**{economy.SQUAD_MAX}/{economy.SQUAD_MAX}**). "
-                      f"Sell a player first with `cssell`.")
+                      f"Sell a player first with `rcsell`.")
         else:
             price = sl.buy_price(card)
             e = economy.buy_card(uid, key, price)
@@ -539,10 +539,10 @@ async def _send_buy_browser(ctx: commands.Context, cards: list):
         raise
 
 
-# ── csms: multi sell ─────────────────────────────────────────────────────────
+# ── rcms: multi sell ─────────────────────────────────────────────────────────
 
 class MultiSellView(OwnedView):
-    """Sell / Cancel buttons for csms. Nothing is sold until Sell is pressed."""
+    """Sell / Cancel buttons for rcms. Nothing is sold until Sell is pressed."""
 
     def __init__(self, bot, user_id: int, items: list, bench_order: list):
         super().__init__(user_id, timeout=MULTISELL_TIMEOUT)
@@ -646,7 +646,7 @@ class PendingCardView(OwnedView):
         self.used = True
         self.stop()
         await interaction.response.edit_message(
-            embed=self._embed("Saved. Use `cspending` whenever you want to decide."), view=None
+            embed=self._embed("Saved. Use `rcpending` whenever you want to decide."), view=None
         )
 
     def _embed(self, text: str) -> discord.Embed:
@@ -699,7 +699,7 @@ async def send_next_pending(dest, user_id: int) -> bool:
             ),
             color=discord.Color.orange(),
         )
-        embed.set_footer(text="Not now? It stays saved — use cspending later.")
+        embed.set_footer(text="Not now? It stays saved — use rcpending later.")
         view.message = await card_cache.send_embed(dest, embed, card["image_path"], view=view)
         return True
     return False
@@ -782,9 +782,9 @@ class EconomyCog(commands.Cog, name="Economy"):
         self.bot = bot
 
     # -- purse -----------------------------------------------------------
-    @commands.command(name="csbal")
+    @commands.command(name="rcbal")
     @economy_cooldown()
-    async def csbal(self, ctx: commands.Context):
+    async def rcbal(self, ctx: commands.Context):
         """Show your coins and vouchers."""
         if not await _need_debut(ctx):
             return
@@ -864,29 +864,29 @@ class EconomyCog(commands.Cog, name="Economy"):
         if kind == "daily":
             await quest.track_and_notify(ctx, ctx.author.id, {"daily_claim": 1})
 
-    @commands.command(name="csdaily")
+    @commands.command(name="rcdaily")
     @economy_cooldown()
-    async def csdaily(self, ctx: commands.Context):
+    async def rcdaily(self, ctx: commands.Context):
         """Claim daily coins + a random 60-78 player (streak bonus every 7th day)."""
         await self._claim(ctx, "daily")
 
-    @commands.command(name="csweekly")
+    @commands.command(name="rcweekly")
     @economy_cooldown()
-    async def csweekly(self, ctx: commands.Context):
+    async def rcweekly(self, ctx: commands.Context):
         """(Premium) Claim weekly coins + a random 80-83 player."""
         await self._claim(ctx, "weekly")
 
-    @commands.command(name="csmonthly")
+    @commands.command(name="rcmonthly")
     @economy_cooldown()
-    async def csmonthly(self, ctx: commands.Context):
+    async def rcmonthly(self, ctx: commands.Context):
         """Claim monthly coins + a random 85-88 player."""
         await self._claim(ctx, "monthly")
 
-    # -- csclaim: free card every hour (Premium: every 35 min) -------------
-    @commands.command(name="csclaim")
+    # -- rcclaim: free card every hour (Premium: every 35 min) -------------
+    @commands.command(name="rcclaim")
     @economy_cooldown()
     @exclusive
-    async def csclaim(self, ctx: commands.Context):
+    async def rcclaim(self, ctx: commands.Context):
         """Claim a free random player card every hour (Premium: every 35 min)."""
         if not await _need_debut(ctx):
             return
@@ -928,17 +928,17 @@ class EconomyCog(commands.Cog, name="Economy"):
         if res["pending"]:
             await send_next_pending(ctx, ctx.author.id)
 
-    # -- cscd: when is every claim command ready again? --------------------
-    @commands.command(name="cscd")
+    # -- rccd: when is every claim command ready again? --------------------
+    @commands.command(name="rccd")
     @commands.cooldown(1, 10, commands.BucketType.user)
-    async def cscd(self, ctx: commands.Context):
-        """Show when csdaily/csweekly/csmonthly/csclaim are next ready."""
+    async def rccd(self, ctx: commands.Context):
+        """Show when rcdaily/rcweekly/rcmonthly/rcclaim are next ready."""
         if not await _need_debut(ctx):
             return
         premium = _is_premium(ctx.author)
         status = await asyncio.to_thread(economy.reward_cooldowns, ctx.author.id, premium)
         if status is None:
-            await ctx.send("❌ You haven't debuted yet. Use `csdebut`.")
+            await ctx.send("❌ You haven't debuted yet. Use `rcdebut`.")
             return
 
         def short(sec: int) -> str:
@@ -959,24 +959,24 @@ class EconomyCog(commands.Cog, name="Economy"):
         def state(wait: int) -> str:
             return "Ready" if wait <= 0 else short(wait)
 
-        rows = [row("Daily", "csdaily", state(status["daily"]))]
-        rows.append(row("Weekly", "csweekly", state(status["weekly"]) if premium else "Premium only"))
+        rows = [row("Daily", "rcdaily", state(status["daily"]))]
+        rows.append(row("Weekly", "rcweekly", state(status["weekly"]) if premium else "Premium only"))
         if status["monthly_locked"] > 0:
-            rows.append(row("Monthly", "csmonthly", f"Unlocks in {short(status['monthly_locked'])}"))
+            rows.append(row("Monthly", "rcmonthly", f"Unlocks in {short(status['monthly_locked'])}"))
         else:
-            rows.append(row("Monthly", "csmonthly", state(status["monthly"])))
-        rows.append(row("Claim", "csclaim", state(status["claim"])))
+            rows.append(row("Monthly", "rcmonthly", state(status["monthly"])))
+        rows.append(row("Claim", "rcclaim", state(status["claim"])))
 
         embed = discord.Embed(title="Cooldowns", description="\n\n".join(rows), color=discord.Color.teal())
         embed.set_footer(text=f"Requested by: {ctx.author.name}")
         await ctx.send(embed=embed)
 
     # -- packs -----------------------------------------------------------
-    @commands.command(name="cspack")
+    @commands.command(name="rcpack")
     @economy_cooldown()
     @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
-    async def cspack(self, ctx: commands.Context, pack: Optional[str] = None):
-        """See the pack shop (pick a pack from the menu), or buy one directly: `cspack bronze`."""
+    async def rcpack(self, ctx: commands.Context, pack: Optional[str] = None):
+        """See the pack shop (pick a pack from the menu), or buy one directly: `rcpack bronze`."""
         if not await _need_debut(ctx):
             return
         if pack is None:
@@ -1009,12 +1009,12 @@ class EconomyCog(commands.Cog, name="Economy"):
             _pending_confirm.discard(uid)
             raise
 
-    @commands.command(name="csopen")
+    @commands.command(name="rcopen")
     @economy_cooldown()
     @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
     @exclusive
-    async def csopen(self, ctx: commands.Context, pack: Optional[str] = None):
-        """Open one of your packs: `csopen bronze`. A short animation plays, then your real card appears."""
+    async def rcopen(self, ctx: commands.Context, pack: Optional[str] = None):
+        """Open one of your packs: `rcopen bronze`. A short animation plays, then your real card appears."""
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
@@ -1023,13 +1023,13 @@ class EconomyCog(commands.Cog, name="Economy"):
         have = economy.get_packs(ctx.author.id)
         have = {k: v for k, v in have.items() if k in sl.PACKS}
         if not have:
-            await ctx.send("You have no packs. Buy them with `cspack`.")
+            await ctx.send("You have no packs. Buy them with `rcpack`.")
             return
         if pack is None:
             if len(have) == 1:
                 pack = next(iter(have))
             else:
-                await ctx.send("You have: " + ", ".join(f"{n}× {k}" for k, n in have.items()) + ". Use `csopen <type>`.")
+                await ctx.send("You have: " + ", ".join(f"{n}× {k}" for k, n in have.items()) + ". Use `rcopen <type>`.")
                 return
         key = security.clean_input(pack, 12).lower()
         if key not in have:
@@ -1067,7 +1067,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if result["refund"]:
             embed.set_footer(text=f"Duplicates gave you back {result['refund']:,} coins")
 
-        # The REAL card image (the same one csview / csbuy show) is prepared BEFORE the animation
+        # The REAL card image (the same one rcview / rcbuy show) is prepared BEFORE the animation
         # starts, so it can appear the moment the animation ends.
         path = rolled[0]["image_path"]
         has_img = bool(path) and Path(path).exists()
@@ -1088,7 +1088,7 @@ class EconomyCog(commands.Cog, name="Economy"):
                 msg = await ctx.send(embed=intro_embed, file=intro)
                 await asyncio.sleep(wait)
             except discord.HTTPException as e:
-                print(f"[csopen] animation step failed: {e}")
+                print(f"[rcopen] animation step failed: {e}")
 
         # 2) the real card replaces the animation in the same message
         shown = None
@@ -1096,7 +1096,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             try:
                 shown = await msg.edit(embed=embed, attachments=[card_file] if card_file is not None else [])
             except discord.HTTPException as e:       # e.g. the message was deleted meanwhile
-                print(f"[csopen] reveal edit failed: {e}")
+                print(f"[rcopen] reveal edit failed: {e}")
                 if card_file is not None:            # a discord.File can only be sent once
                     card_file = await card_cache.card_file(path)
         if shown is None:
@@ -1112,10 +1112,10 @@ class EconomyCog(commands.Cog, name="Economy"):
         await quest.track_and_notify(ctx, ctx.author.id, {"packs_opened": 1})
 
     # -- buy / sell ------------------------------------------------------
-    @commands.command(name="csbuy")
+    @commands.command(name="rcbuy")
     @economy_gate(BUYSELL_COOLDOWN)
-    async def csbuy(self, ctx: commands.Context, *, player: str):
-        """Buy a player: `csbuy Virat Kohli`."""
+    async def rcbuy(self, ctx: commands.Context, *, player: str):
+        """Buy a player: `rcbuy Virat Kohli`."""
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
@@ -1129,9 +1129,9 @@ class EconomyCog(commands.Cog, name="Economy"):
         # Buy / owned / squad-full checks happen when ✅ is pressed, for the card on screen.
         await _send_buy_browser(ctx, cards)
 
-    @commands.command(name="cssell")
+    @commands.command(name="rcsell")
     @economy_gate(BUYSELL_COOLDOWN)
-    async def cssell(self, ctx: commands.Context, *, player: str):
+    async def rcsell(self, ctx: commands.Context, *, player: str):
         """Sell one of your players for coins."""
         if not await _need_debut(ctx):
             return
@@ -1162,17 +1162,17 @@ class EconomyCog(commands.Cog, name="Economy"):
             do_sell,
         )
 
-    @commands.command(name="csms", cooldown_after_parsing=True)
+    @commands.command(name="rcms", cooldown_after_parsing=True)
     @economy_gate(ECONOMY_COOLDOWN)
     @commands.cooldown(1, MULTISELL_COOLDOWN, commands.BucketType.user)
-    async def csms(self, ctx: commands.Context, start: int, end: Optional[int] = None):
-        """Multi sell by squad number: `csms 1 20` sells players 1 to 20 of `cssquad`."""
+    async def rcms(self, ctx: commands.Context, start: int, end: Optional[int] = None):
+        """Multi sell by squad number: `rcms 1 20` sells players 1 to 20 of `rcsquad`."""
         if not await _need_debut(ctx):
             return
         uid = ctx.author.id
 
         async def refuse(text: str):
-            self.csms.reset_cooldown(ctx)   # a refused command shouldn't cost the 15 seconds
+            self.rcms.reset_cooldown(ctx)   # a refused command shouldn't cost the 15 seconds
             await ctx.send(text)
 
         if _in_match(self.bot, uid):
@@ -1181,12 +1181,12 @@ class EconomyCog(commands.Cog, name="Economy"):
         if end is None:
             end = start
         if start < 1 or end < start:
-            await refuse("Usage: `csms <from> <to>`, for example `csms 1 20`. Numbers are the ones shown in `cssquad`.")
+            await refuse("Usage: `rcms <from> <to>`, for example `rcms 1 20`. Numbers are the ones shown in `rcsquad`.")
             return
         cards = squad_order(await asyncio.to_thread(sl.owned_cards, uid))
         n = len(cards)
         if end > n:
-            await refuse(f"Your squad has only {n} players. Check the numbers in `cssquad`.")
+            await refuse(f"Your squad has only {n} players. Check the numbers in `rcsquad`.")
             return
         chosen = cards[start - 1:end]
         if n - len(chosen) < economy.MIN_SQUAD:
@@ -1228,9 +1228,9 @@ class EconomyCog(commands.Cog, name="Economy"):
             raise
 
     # -- cards waiting because the squad was full ---------------------------
-    @commands.command(name="cspending")
+    @commands.command(name="rcpending")
     @economy_cooldown()
-    async def cspending(self, ctx: commands.Context):
+    async def rcpending(self, ctx: commands.Context):
         """Cards that arrived while your squad was full (25): sell them or replace a player."""
         if not await _need_debut(ctx):
             return
@@ -1241,11 +1241,11 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send(f"✅ No cards are waiting. Squad: **{economy.squad_count(ctx.author.id)}/{economy.SQUAD_MAX}**.")
 
     # -- trade -----------------------------------------------------------
-    @commands.command(name="cstrade")
+    @commands.command(name="rctrade")
     @economy_cooldown()
     @commands.cooldown(1, CONFIRM_COOLDOWN, commands.BucketType.user)
-    async def cstrade(self, ctx: commands.Context, member: discord.Member, *, players: str):
-        """Trade players of the SAME OVR (5,000 coins fee each): `cstrade @user my player | their player`."""
+    async def rctrade(self, ctx: commands.Context, member: discord.Member, *, players: str):
+        """Trade players of the SAME OVR (5,000 coins fee each): `rctrade @user my player | their player`."""
         if not await _need_debut(ctx):
             return
         if member.bot or member.id == ctx.author.id:
@@ -1265,7 +1265,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             return
         players = security.clean_input(players, 120)
         if players.count("|") != 1:
-            await ctx.send("Usage: `cstrade @user Your Player | Their Player`")
+            await ctx.send("Usage: `rctrade @user Your Player | Their Player`")
             return
         mine_txt, theirs_txt = (p.strip() for p in players.split("|"))
         mine, err = sl.resolve_owned(ctx.author.id, mine_txt)
@@ -1305,13 +1305,13 @@ class EconomyCog(commands.Cog, name="Economy"):
         view.message = await ctx.send(content=member.mention, embed=embed, view=view)
 
     # -- leaderboard -----------------------------------------------------
-    @commands.command(name="csleaderboard", aliases=["csleaderboards", "cslb"])
+    @commands.command(name="rcleaderboard", aliases=["rcleaderboards", "rclb"])
     @commands.cooldown(1, 8, commands.BucketType.user)
-    async def csleaderboard(self, ctx: commands.Context, board: str = "ovr"):
-        """Top teams: `csleaderboard ovr` or `csleaderboard coins`."""
+    async def rcleaderboard(self, ctx: commands.Context, board: str = "ovr"):
+        """Top teams: `rcleaderboard ovr` or `rcleaderboard coins`."""
         board = security.clean_input(board, 10).lower()
         if board not in ("ovr", "coins"):
-            await ctx.send("Use `csleaderboard ovr` or `csleaderboard coins`.")
+            await ctx.send("Use `rcleaderboard ovr` or `rcleaderboard coins`.")
             return
         users = [u for u in economy.list_users() if not security.is_banned(u["user_id"])]
         rows = []

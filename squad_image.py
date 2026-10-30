@@ -1,5 +1,5 @@
-"""Team collage image for csstarterpack: the 11 player cards in a 4-3-4 grid
-on the CricketStar backdrop (starter_bg.png), with the team name on the left
+"""Team collage image for rcstarterpack: the 11 player cards in a 4-3-4 grid
+on the Rush Cricket backdrop (starter_bg.png), with the team name on the left
 of the logo and the team OVR on the right. Pure Pillow, no Discord code.
 
 Uses card_cache's small display copies (800px JPEG) so it is fast; the copy
@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 import card_cache
 
 _HERE = Path(__file__).parent
-BG_FILE = _HERE / "starter_bg.png"   # 1254x1254 backdrop with the CricketStar logo at top-centre
+BG_FILE = _HERE / "starter_bg.png"   # 1254x1254 backdrop with the Rush Cricket logo at top-centre
 FILENAME = "starterpack.jpg"          # embeds must use attachment://starterpack.jpg
 
 CANVAS_W = 1254                       # = backdrop width, so it is never resized sideways
@@ -53,7 +53,7 @@ def _load_card(path: str | None) -> Image.Image | None:
 
 
 def _backdrop(height: int) -> Image.Image | None:
-    """The CricketStar backdrop made `height` px tall by stretching only its plain
+    """The Rush Cricket backdrop made `height` px tall by stretching only its plain
     dark-blue middle band (logo, floodlights and stadium keep their size).
     None if the file is missing."""
     try:

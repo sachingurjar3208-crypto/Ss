@@ -1,20 +1,20 @@
 """Match SUMMARY themes (Halloween / Diwali / Christmas) - see summary_theme.py.
 
 Owner only (slash commands, hidden from everybody else, main server only)
-    /cssbset      themeimage:<image> pathname:<Halloween|Diwali|Christmas>
+    /rcsbset      themeimage:<image> pathname:<Halloween|Diwali|Christmas>
                   set (or replace) the background image of a theme. Image = same layout as the
                   normal summary card, best 1536x1024 (3:2). The text design is built in.
-    /cssbremove   pathname:<theme> [user:<@user>]
+    /rcsbremove   pathname:<theme> [user:<@user>]
                   without `user`: delete the image of the theme (players keep owning it, the normal
                   summary shows until you set an image again). With `user`: take the theme from that player.
-    /cssbgive     user:<@user> pathname:<theme>
+    /rcsbgive     user:<@user> pathname:<theme>
                   give a theme to a player (a player can also win one in a Star Pass).
 
 Players (text commands, only for themes they own)
-    cssb                  theme menu: the theme that is ON, all themes (ON / OWNED / LOCKED), a preview,
+    rcsb                  theme menu: the theme that is ON, all themes (ON / OWNED / LOCKED), a preview,
                           and buttons  < Use this theme | Turn off >  to browse and switch
-    cssb use halloween    turn an owned theme on (used when YOU win, or when the other player has none)
-    cssb off              back to the normal summary
+    rcsb use halloween    turn an owned theme on (used when YOU win, or when the other player has none)
+    rcsb off              back to the normal summary
 """
 from __future__ import annotations
 
@@ -50,11 +50,11 @@ def owner_slash():
     return decorator
 
 
-# ── cssb menu (embed + preview + buttons) ────────────────────────────────────
+# ── rcsb menu (embed + preview + buttons) ────────────────────────────────────
 
 THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78}
 NORMAL_COLOR = 0x5865F2
-MENU_COOLDOWN = 60                                        # seconds between two `cssb` menus per player
+MENU_COOLDOWN = 60                                        # seconds between two `rcsb` menus per player
 BUTTON_GAP = 1.0                                          # seconds between two button presses per player
 _menu_cd = commands.CooldownMapping.from_cooldown(1, MENU_COOLDOWN, commands.BucketType.user)
 ANIMATED = {"halloween"}                                  # themes that move (gif) at the end of a match
@@ -104,7 +104,7 @@ def menu_text(idx: int, mine: list[str], on: str | None, has_img: bool) -> str:
 
 
 class ThemeMenu(discord.ui.View):
-    """cssb menu. Only the person who opened it can press the buttons."""
+    """rcsb menu. Only the person who opened it can press the buttons."""
 
     def __init__(self, user_id: int, idx: int = 0):
         super().__init__(timeout=180)
@@ -114,7 +114,7 @@ class ThemeMenu(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This menu is not yours. Type cssb to open your own.", ephemeral=True)
+            await interaction.response.send_message("This menu is not yours. Type rcsb to open your own.", ephemeral=True)
             return False
         now = time.monotonic()
         if now - self._last < BUTTON_GAP:                  # pressed too fast: ignore quietly
@@ -188,15 +188,15 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
         except Exception as e:
             print(f"[summary-theme] could not create tables: {e}")
 
-    # ── Owner: /cssbset ──────────────────────────────────────────────────────
-    @app_commands.command(name="cssbset", description="Set the image of a summary theme (Halloween, Diwali, Christmas)")
+    # ── Owner: /rcsbset ──────────────────────────────────────────────────────
+    @app_commands.command(name="rcsbset", description="Set the image of a summary theme (Halloween, Diwali, Christmas)")
     @app_commands.describe(
         themeimage="Background image for the summary card (same layout as the normal summary, best 1536x1024)",
         pathname="Which theme this image is for",
     )
     @app_commands.choices(pathname=THEME_CHOICES)
     @owner_slash()
-    async def cssbset(self, interaction: discord.Interaction, themeimage: discord.Attachment,
+    async def rcsbset(self, interaction: discord.Interaction, themeimage: discord.Attachment,
                       pathname: app_commands.Choice[str]):
         await interaction.response.defer(ephemeral=True)
         if not (themeimage.content_type or "").startswith("image/"):
@@ -231,21 +231,21 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
             print(f"[summary-theme] preview failed: {type(e).__name__}: {e}")
             file = None
         msg = (f"**{esc(pathname.name)}** summary theme saved. Players who own it and turn it on "
-               f"(`cssb use {pathname.value}`) get it at the end of their matches.")
+               f"(`rcsb use {pathname.value}`) get it at the end of their matches.")
         if file is not None:
             await interaction.followup.send(msg + "\nPreview with sample numbers:", file=file, ephemeral=True)
         else:
             await interaction.followup.send(msg, ephemeral=True)
 
-    # ── Owner: /cssbremove ───────────────────────────────────────────────────
-    @app_commands.command(name="cssbremove", description="Remove a summary theme image (or take a theme from one player)")
+    # ── Owner: /rcsbremove ───────────────────────────────────────────────────
+    @app_commands.command(name="rcsbremove", description="Remove a summary theme image (or take a theme from one player)")
     @app_commands.describe(
         pathname="Which theme",
         user="Optional: take this theme away from ONE player instead of deleting the image",
     )
     @app_commands.choices(pathname=THEME_CHOICES)
     @owner_slash()
-    async def cssbremove(self, interaction: discord.Interaction, pathname: app_commands.Choice[str],
+    async def rcsbremove(self, interaction: discord.Interaction, pathname: app_commands.Choice[str],
                          user: discord.Member | None = None):
         if user is not None:
             res = await asyncio.to_thread(st.take, user.id, pathname.value)
@@ -257,18 +257,18 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
             res = await asyncio.to_thread(st.remove_image, pathname.value)
             if res:
                 text = (f"The **{esc(pathname.name)}** image was deleted. Players keep owning the theme, "
-                        f"but they get the normal summary until you set a new image with /cssbset.")
+                        f"but they get the normal summary until you set a new image with /rcsbset.")
             else:
                 text = f"There is no image set for **{esc(pathname.name)}**."
         await interaction.response.send_message(text, ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
 
-    # ── Owner: /cssbgive ─────────────────────────────────────────────────────
-    @app_commands.command(name="cssbgive", description="Give a summary theme to a player")
+    # ── Owner: /rcsbgive ─────────────────────────────────────────────────────
+    @app_commands.command(name="rcsbgive", description="Give a summary theme to a player")
     @app_commands.describe(user="Who gets the theme", pathname="Which theme")
     @app_commands.choices(pathname=THEME_CHOICES)
     @owner_slash()
-    async def cssbgive(self, interaction: discord.Interaction, user: discord.Member,
+    async def rcsbgive(self, interaction: discord.Interaction, user: discord.Member,
                        pathname: app_commands.Choice[str]):
         if user.bot:
             await interaction.response.send_message("Bots can't own a theme.", ephemeral=True)
@@ -280,19 +280,19 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
         else:
             text = f"{user.mention} already owns the **{esc(pathname.name)}** summary theme."
         if not has_img:
-            text += f"\nNote: no image is set for {esc(pathname.name)} yet. Use /cssbset first, until then the normal summary shows."
+            text += f"\nNote: no image is set for {esc(pathname.name)} yet. Use /rcsbset first, until then the normal summary shows."
         await interaction.response.send_message(text, ephemeral=True,
                                                 allowed_mentions=discord.AllowedMentions.none())
         if res:
             try:
                 await user.send(f"You received the **{pathname.name}** match summary theme! "
-                                f"Turn it on with `cssb use {pathname.value}`.")
+                                f"Turn it on with `rcsb use {pathname.value}`.")
             except discord.HTTPException:
                 pass                                              # DMs closed: the theme is still saved
 
-    # ── Players: cssb ────────────────────────────────────────────────────────
-    @commands.group(name="cssb", aliases=["summarytheme"], invoke_without_command=True)
-    async def cssb(self, ctx: commands.Context):
+    # ── Players: rcsb ────────────────────────────────────────────────────────
+    @commands.group(name="rcsb", aliases=["summarytheme"], invoke_without_command=True)
+    async def rcsb(self, ctx: commands.Context):
         """Theme menu: current theme, all themes, preview and buttons."""
         bucket = _menu_cd.get_bucket(ctx.message)
         retry = bucket.update_rate_limit() if bucket else None
@@ -305,9 +305,9 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
         view.message = await ctx.send(embed=embed, file=file, view=view) if file else \
             await ctx.send(embed=embed, view=view)
 
-    @cssb.command(name="use", aliases=["on", "equip"])
-    async def cssb_use(self, ctx: commands.Context, *, pathname: str):
-        """cssb use halloween"""
+    @rcsb.command(name="use", aliases=["on", "equip"])
+    async def rcsb_use(self, ctx: commands.Context, *, pathname: str):
+        """rcsb use halloween"""
         res = await asyncio.to_thread(st.equip, ctx.author.id, pathname)
         if res == "unknown":
             await ctx.send("Unknown theme. Themes: " + ", ".join(st.label(n) for n in st.NAMES) + ".")
@@ -318,8 +318,8 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
             extra = "" if await asyncio.to_thread(st.has_image, key) else " (its image isn't set yet, so the normal summary shows for now)"
             await ctx.send(f"{st.label(key)} summary theme is ON{extra}.")
 
-    @cssb.command(name="off", aliases=["default", "normal", "remove"])
-    async def cssb_off(self, ctx: commands.Context):
+    @rcsb.command(name="off", aliases=["default", "normal", "remove"])
+    async def rcsb_off(self, ctx: commands.Context):
         """Back to the normal summary."""
         await asyncio.to_thread(st.unequip, ctx.author.id)
         await ctx.send("Summary theme is OFF. Your matches use the normal summary.")
@@ -342,7 +342,7 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
 
 
 _SAMPLE = {
-    "match_id": 100001, "venue": "Cricket Star Stadium", "result": "TEAM A WON BY 12 RUNS", "potm": "Sample Player",
+    "match_id": 100001, "venue": "Rush Cricket Stadium", "result": "TEAM A WON BY 12 RUNS", "potm": "Sample Player",
     "team1": {"name": "Team A", "runs": 187, "wickets": 6, "overs": "20.0", "max_overs": "20",
               "batters": [("Player One", 82, 47, False), ("Player Two", 46, 28, True), ("Player Three", 31, 15, False), ("Player Four", 14, 9, False)],
               "bowlers": [("Bowler One", 3, 24, "4.0"), ("Bowler Two", 2, 31, "4.0"), ("Bowler Three", 1, 28, "4.0"), ("Bowler Four", 0, 39, "4.0")]},

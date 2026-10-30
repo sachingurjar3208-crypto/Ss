@@ -2,7 +2,7 @@
 
 Everything goes to ONE channel (LOG_CHANNEL_ID):
   * Economy cog commands (trade, sell, buy, packs, daily ...) and Draft cog commands
-  * every `admin ...` command and the owner tools (csgivecoins, csgivecard, csban, csunban)
+  * every `admin ...` command and the owner tools (rcgivecoins, rcgivecard, rcban, rcunban)
   * every slash command that is actually used (cardmaker, pool, stadium, addgif ...)
   * ⚠️ spam warnings: same command used again and again in a short time
   * 🚫 blacklist add / remove (written by the `admin blacklist` command)
@@ -27,14 +27,14 @@ LOG_CHANNEL_ID = 1560951155838947388
 # Cogs whose commands are all logged.
 LOGGED_COGS = {"Economy", "Draft"}
 # Extra text commands that are logged even though they live in another cog.
-LOGGED_COMMANDS = {"admin", "csgivecoins", "csgivecard", "csban", "csunban"}
+LOGGED_COMMANDS = {"admin", "rcgivecoins", "rcgivecard", "rcban", "rcunban"}
 # Read-only commands: logging them would only be noise.
-SKIP_COMMANDS = {"csbal", "cspending", "csleaderboard", "cslb", "csleaderboards"}
+SKIP_COMMANDS = {"rcbal", "rcpending", "rcleaderboard", "rclb", "rcleaderboards"}
 
 # Spam rules: (uses, seconds). Commands in SENSITIVE use the stricter rule.
 SPAM_DEFAULT = (8, 15.0)
 SPAM_SENSITIVE = (5, 30.0)
-SENSITIVE = {"cstrade", "cssell", "csbuy", "cspack", "csopen", "csclaim", "csgivecoins", "csgivecard"}
+SENSITIVE = {"rctrade", "rcsell", "rcbuy", "rcpack", "rcopen", "rcclaim", "rcgivecoins", "rcgivecard"}
 ALERT_GAP = 60.0   # at most one alert per user+command per minute
 
 _NO_PINGS = discord.AllowedMentions.none()

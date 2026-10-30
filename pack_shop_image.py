@@ -1,11 +1,11 @@
-"""PACK SHOP preview image — shown when a user runs `cspack` with no argument.
+"""PACK SHOP preview image — shown when a user runs `rcpack` with no argument.
 
     buf  = build_pack_shop_image(user_id)        # io.BytesIO (PNG), sync/CPU work
     file = await pack_shop_file(ctx.author.id)    # discord.File, ready to send
 
 Pulls live data: squad_logic.PACKS (label/price/OVR range) and
 economy.get_packs(user_id) (how many of each the user already owns), so the
-image always matches what `cspack`/`csopen` would actually do.
+image always matches what `rcpack`/`rcopen` would actually do.
 
 Pack art reuses pack_gif.py's thumbnails/colours so the shop, the open
 animation and the classic cards' medal icon all look like the same game.
@@ -64,7 +64,7 @@ def _row(img: Image.Image, d: ImageDraw.ImageDraw, ry: int, key: str, spec: dict
     d.text((tx + 30, ry + 108), _fmt_coins(spec["price"]), font=_font(_LABEL, 20), fill=COIN, anchor="lm")
 
     f_cmd = _font(_LABEL, 14)
-    cmd = f"cspack {key}"
+    cmd = f"rcpack {key}"
     cw = d.textlength(cmd, font=f_cmd) + 24
     d.rounded_rectangle([tx, ry + 134, tx + cw, ry + 160], radius=13, fill=(255, 255, 255, 18))
     d.text((tx + 12, ry + 147), cmd, font=f_cmd, fill=(220, 215, 230), anchor="lm")
@@ -91,7 +91,7 @@ def build_pack_shop_image(user_id) -> io.BytesIO:
     d = ImageDraw.Draw(img, "RGBA")
 
     d.text((W / 2, 58), "PACK SHOP", font=_font(_NAME, 38), fill=(255, 255, 255), anchor="mm")
-    d.text((W / 2, 96), "Buy with cspack <type>  •  Open with csopen <type>",
+    d.text((W / 2, 96), "Buy with rcpack <type>  •  Open with rcopen <type>",
             font=_font(_LABEL, 16), fill=(190, 180, 200), anchor="mm")
     d.line([(60, 124), (W - 60, 124)], fill=(255, 255, 255, 40), width=2)
 

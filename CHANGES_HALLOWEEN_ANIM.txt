@@ -19,5 +19,5 @@ DISCORD LIMIT
 
 RULES
   - Diwali / Christmas / normal blue summary pehle jaise PNG hi rahte hain.
-  - /cssbset halloween ka preview bhi ab animated GIF aata hai.
+  - /rcsbset halloween ka preview bhi ab animated GIF aata hai.
   - Tuning: summary_anim.py me MAX_BYTES, _LADDER, _DELAY_MS (speed).

@@ -5,7 +5,7 @@
     admin coin remove @user <coins>
     admin pack give @user gold silver debut bronze   (1 of each; add a number after a pack for more)
     admin pack reset @user [pack ...]                (no pack = remove ALL packs)
-    admin pack off <pack>      (pack stays in cspack but the buy button turns grey)
+    admin pack off <pack>      (pack stays in rcpack but the buy button turns grey)
     admin pack on <pack>       (pack can be bought again)
     admin player reset @user all      (cards only)
     admin reset all @user             (coins -> 0, all cards removed AND debut reset)
@@ -230,7 +230,7 @@ class AdminCog(commands.Cog):
             "`admin pack give @user gold silver debut bronze`  (1 of each, add a number after a pack for more, e.g. `gold 3`)\n"
             "`admin pack reset @user`  (remove ALL their packs)\n"
             "`admin pack reset @user gold silver 2`  (all gold, and 2 silver)\n"
-            "`admin pack off <pack>`  (still shown in cspack, buy button greyed)\n"
+            "`admin pack off <pack>`  (still shown in rcpack, buy button greyed)\n"
             "`admin pack on <pack>`  (buyable again)"
         )
 
@@ -296,7 +296,7 @@ class AdminCog(commands.Cog):
     @pack.command(name="off")
     @admin_only()
     async def pack_off(self, ctx: commands.Context, packname: str | None = None):
-        """admin pack off <pack>: the pack stays in cspack, but its buy button is grey."""
+        """admin pack off <pack>: the pack stays in rcpack, but its buy button is grey."""
         if packname is None:
             off = sorted(economy.packs_off())
             now = ", ".join(f"`{k}`" for k in off) if off else "none"
@@ -308,7 +308,7 @@ class AdminCog(commands.Cog):
             return
         label = sl.PACKS[key]["label"]
         if economy.set_pack_off(key, True):
-            await ctx.send(f"🔒 **{label}** is OFF. It still shows in `cspack`, but nobody can buy it "
+            await ctx.send(f"🔒 **{label}** is OFF. It still shows in `rcpack`, but nobody can buy it "
                            f"(buy button is grey). Turn it back on with `admin pack on {key}`.")
         else:
             await ctx.send(f"ℹ️ **{label}** was already off.")
@@ -370,11 +370,11 @@ class AdminCog(commands.Cog):
         await ctx.send(
             f"✅ Full reset for {esc(member.display_name)}: removed **{res['cards']}** card(s) "
             f"and **{economy.fmt_coins(res['coins'])}**. Their packs, XI and captain were cleared too. "
-            f"Their debut was reset as well, so they can use `csdebut` again."
+            f"Their debut was reset as well, so they can use `rcdebut` again."
         )
 
     # -- vouchers --------------------------------------------------------
-    # Same rules as csvoucher (draft_cog): owner / full-admin only, main server
+    # Same rules as rcvoucher (draft_cog): owner / full-admin only, main server
     # only, 1..VOUCHER_ADMIN_MAX per command, logged in voucher_log.
     @admin.group(name="voucher", invoke_without_command=True)
     @security.owner_or_admin_role()
