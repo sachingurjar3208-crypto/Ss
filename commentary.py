@@ -1,18 +1,20 @@
 """
 Ball-by-ball commentary.
 
-Look:  one monospace code block per ball, no emoji.
+Look (normal Discord text, no emoji, its OWN message right under the scoreboard):
 
-    ```
-    5.3  Bumrah to Rohit               FOUR
-    Upper Cut, over the slips and away to
-    the third man rope.
-    > Rohit moves to 47. Three away from fifty.
-    ```
+    ### That's huge! **SIX**
+    `0.3` **Holder** to **Rathore**
+    Gets under it and upper-cuts it for six.
+    -# Rathore moves to 47. 3 runs away from fifty.
+
+  * small monospace chips only for the ball number and the result (`0.5` ... `1 RUN`)
+  * a big heading line only for FOUR / SIX / OUT
+  * the situation / playstyle / milestone / chase lines are small grey "-#" subtext
 
 Public API (used by views.py / practice_views.py):
     build_ball_commentary(...)  -> str   the block for one ball (same args as before + optional game)
-    add_lines(block, *lines)    -> str   add extra lines INSIDE the block (playstyle, milestone, chase)
+    add_lines(block, *lines)    -> str   add small extra lines (playstyle, milestone, chase)
     pop_animation(game)         -> list  suspense frames for this ball ([] most of the time)
     play_animated(...)          -> bool  shows the frames, then the final block (message edits)
 
@@ -26,7 +28,6 @@ Rules kept from the old version (other code depends on them):
 import asyncio
 import random
 import re
-import textwrap
 
 from data import button_label, bat_label
 
@@ -34,8 +35,8 @@ from data import button_label, bat_label
 # Settings
 # ─────────────────────────────────────────────────────────────────────────────
 
-BLOCK_WIDTH = 40          # characters per line inside the code block (fits phones)
-MARK        = "> "        # prefix for extra lines (situation / playstyle / chase)
+HEADLINE_BIG = "### "      # Discord heading size for FOUR / SIX / OUT ("## " = bigger, "" = off)
+SUBTEXT      = "-# "       # small grey line for situation / playstyle / chase
 
 ANIMATION_ENABLED        = True
 ANIM_CHANCE              = {"6": 0.20, "W": 0.25, "4": 0.04}   # chance per ball
@@ -43,7 +44,6 @@ ANIM_CLOSE_FINISH_CHANCE = 0.60   # any ball when a chase is down to the wire
 ANIM_MIN_GAP_BALLS       = 8      # never two animations within this many balls
 ANIM_FRAME_DELAY         = 0.8    # seconds between frames
 
-_FENCE = "```"
 _RECENT_LIMIT = 16        # no line repeats until this many other lines were used
 
 _PACE_TYPES = ("Fast", "Medium Pacer")
@@ -52,6 +52,18 @@ TAGS = {
     "0": "DOT", "1": "1 RUN", "2": "2 RUNS", "3": "3 RUNS", "4": "FOUR", "6": "SIX",
     "W": "OUT", "Wd": "WIDE", "NB": "NO BALL", "NB+1": "NO BALL +1",
 }
+
+# Big heading for the big moments (the result word is bolded).
+HEADLINES = {
+    "6": ["That's huge! **SIX**", "Into the stands! **SIX**", "Out of the ground! **SIX**",
+          "What a hit! **SIX**", "All the way! **SIX**"],
+    "4": ["Cracking shot! **FOUR**", "Races away! **FOUR**", "Finds the gap! **FOUR**",
+          "Too good! **FOUR**"],
+    "W": ["Gone! **OUT**", "Big breakthrough! **OUT**", "He has to go! **OUT**",
+          "Got him! **OUT**"],
+}
+
+_KIND_WORD = {"bowled": "BOWLED", "lbw": "LBW", "caught": "CAUGHT", "stumped": "STUMPED"}
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Lines by SHOT  (internal shot name -> outcome -> lines)
@@ -289,11 +301,16 @@ _EMOJI_RE = re.compile(
 
 
 def clean(text: str) -> str:
-    """Plain text for inside the code block: no emoji, no markdown, no backticks."""
+    """Plain text: no emoji, no markdown, no backticks."""
     t = _EMOJI_RE.sub("", str(text or ""))
     t = t.replace("**", "").replace("__", "").replace("`", "'")
     t = t.replace("*", "")
     return re.sub(r"[ \t]+", " ", t).strip()
+
+
+def _esc(text: str) -> str:
+    """Escape Discord markdown in names (so 'A_B' or 'x*y' don't break the formatting)."""
+    return re.sub(r"([\\*_~|`>])", r"\\\1", str(text or ""))
 
 
 def _short(name: str) -> str:
@@ -302,15 +319,6 @@ def _short(name: str) -> str:
         return short_name(name) or str(name)
     except Exception:
         return str(name or "")
-
-
-def _wrap(text: str, prefix: str = "") -> list[str]:
-    text = clean(text)
-    if not text:
-        return []
-    width = BLOCK_WIDTH - len(prefix)
-    lines = textwrap.wrap(text, width) or [text]
-    return [prefix + lines[0]] + [" " * len(prefix) + l for l in lines[1:]]
 
 
 def _pick(game, pool: list[str]) -> str:
@@ -327,34 +335,37 @@ def _pick(game, pool: list[str]) -> str:
     return line
 
 
-def _header(game, bowler: str, batter: str, tag: str) -> str:
-    ball_no = ""
-    if game is not None:
-        try:
-            lb = int(game.current_legal_balls)
-            ball_no = f"{lb // 6}.{lb % 6 + 1}  "
-        except Exception:
-            ball_no = ""
-    left = clean(f"{ball_no}{_short(bowler)} to {_short(batter)}")
-    room = BLOCK_WIDTH - len(tag) - 1
-    if len(left) > room:
-        left = left[: max(0, room - 1)].rstrip() + "."
-    return left.ljust(room) + " " + tag
+def _ball_no(game) -> str:
+    if game is None:
+        return ""
+    try:
+        lb = int(game.current_legal_balls)
+        return f"{lb // 6}.{lb % 6 + 1}"
+    except Exception:
+        return ""
 
 
-def _render(header: str, body: list[str]) -> str:
-    return "\n".join([_FENCE, header, *body, _FENCE])
+def _header(game, bowler: str, batter: str, tag: str | None) -> str:
+    """`0.5` **Holder** to **Rathore**  `1 RUN`   (tag chip left out when a headline shows it)"""
+    ball = _ball_no(game)
+    parts = [f"`{ball}`"] if ball else []
+    parts.append(f"**{_esc(clean(_short(bowler)))}** to **{_esc(clean(_short(batter)))}**")
+    line = " ".join(parts)
+    if tag:
+        line += f"  `{tag}`"
+    return line
+
+
+def _render(header: str, body: list[str], headline: str | None = None) -> str:
+    lines = ([HEADLINE_BIG + headline] if headline else []) + [header] + [b for b in body if b]
+    return "\n".join(lines)
 
 
 def add_lines(block: str, *lines: str) -> str:
-    """Add extra lines (playstyle / milestone / chase) inside the code block."""
-    extra = []
-    for ln in lines:
-        extra += _wrap(ln, MARK)
+    """Add small grey lines (playstyle / milestone / chase / free hit) under the commentary."""
+    extra = [SUBTEXT + _esc(clean(ln)) for ln in lines if clean(ln)]
     if not extra:
         return block
-    if block.endswith(_FENCE) and block.count(_FENCE) >= 2:
-        return block[: -len(_FENCE)] + "\n".join(extra) + "\n" + _FENCE
     return block + "\n" + "\n".join(extra)
 
 
@@ -456,7 +467,7 @@ def _choose_animation(game, outcome, kind, header_no_tag, shot) -> list[str]:
         if not key:
             return []
         game.__dict__["_anim_last"] = stamp
-        return [_render(header_no_tag, _wrap(_fill(t, shot=shot))) for t in _ANIM_TEXT[key]]
+        return [_render(header_no_tag, [f"*{_esc(clean(_fill(t, shot=shot)))}*"]) for t in _ANIM_TEXT[key]]
     except Exception as e:
         print(f"[commentary] animation skipped ({type(e).__name__}: {e})")
         return []
@@ -533,7 +544,7 @@ def build_ball_commentary(
     game=None,
     shot_quality: str | None = None,
 ) -> str:
-    """One ball of commentary as a monospace block.
+    """One ball of commentary (Discord markdown, see module doc).
 
     game          optional: adds ball number, situation lines, no-repeat, animation.
                   Must be called BEFORE the ball is applied to the game (as views do).
@@ -563,19 +574,25 @@ def build_ball_commentary(
                 shot_pool = dpool
         main = _pick(game, shot_pool or GENERIC_LINES.get(outcome, ["No run."]))
 
-    body = _wrap(_fill(main, **kw))
+    text = _esc(clean(_fill(main, **kw)))
+    if kind:   # make the dismissal word stand out: **CAUGHT**
+        word = _KIND_WORD[kind]
+        text = text.replace(word, f"**{word}**", 1)
+    body = [text]
     situation = _situation(
         game, outcome=outcome, batter=batsman_name, bowler=bowler_name,
         bowling_type=bowling_type, speed=speed, shot_quality=shot_quality, kind=kind,
     )
-    body += _wrap(situation, MARK)
+    if situation:
+        body.append(SUBTEXT + _esc(clean(situation)))
 
-    header = _header(game, bowler_name, batsman_name, tag)
-    block = _render(header, body)
+    headline = _pick(game, HEADLINES[outcome]) if (outcome in HEADLINES and HEADLINE_BIG) else None
+    header = _header(game, bowler_name, batsman_name, None if headline else tag)
+    block = _render(header, body, headline)
 
     if game is not None:
         frames = _choose_animation(
-            game, outcome, kind, _header(game, bowler_name, batsman_name, "..."), shot)
+            game, outcome, kind, _header(game, bowler_name, batsman_name, None), shot)
         if frames:
             game.__dict__["_anim_frames"] = frames
         else:

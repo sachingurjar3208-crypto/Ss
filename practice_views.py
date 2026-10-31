@@ -224,10 +224,13 @@ async def _practice_process_delivery(
 
 
 async def _send_practice_commentary(channel, commentary, embed, anim=None):
-    """Commentary + scoreboard; plays the rare suspense animation first when there is one."""
-    if anim and await _comm.play_animated(channel, commentary, embed, anim):
+    """Scoreboard first, then the commentary as its own message below it
+    (with the rare suspense animation when there is one)."""
+    if embed is not None:
+        await channel.send(embed=embed)
+    if anim and await _comm.play_animated(channel, commentary, None, anim):
         return
-    await channel.send(content=commentary, embed=embed)
+    await channel.send(content=commentary)
 
 
 async def _practice_process_delivery_inner(

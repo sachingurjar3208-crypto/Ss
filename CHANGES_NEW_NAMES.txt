@@ -124,3 +124,51 @@ NAYA MATCH START CARD (embeds.py, squad_cog.py, ranked_cog.py, views.py)
     Stadium GIF ab chhota thumbnail hai.
   rcmp ranked: same card "RANKED MATCH", neeche "Win +1 star  Lose -1 star".
   Fix: pehle 30 sec baad card update nahi hota tha (message save nahi hota tha).
+
+
+TOSS ANIMATION (toss_anim.py naya + views.py)
+=============================================
+
+  * Toss ke result par static image ki jagah apna animated GIF:
+    umpire coin uchhalta hai, coin ghoomta hai, girta hai (gold = HEADS,
+    dark = TAILS), phir HEADS / TAILS ki patti.
+  * Message pehle "Coin is in the air..." dikhata hai; GIF khatam hone par
+    (~2.2 sec) wahi message edit hokar result + "X wins the toss" dikhata hai.
+  * GIF bot apni toss images se banata hai (Pillow), har result ka ek baar,
+    phir memory mein cache. ~200 KB.
+  * Kuch gadbad ho to purani static image apne aap chali jaati hai.
+  * Band karna ho: toss_anim.py mein TOSS_ANIMATION_ENABLED = False
+
+
+FIX: BUTTON DABANE KE BAAD BHI BUTTONS REH JAATE THE (views.py)
+===============================================================
+
+  * Wajah: ranked bot (aur rcautoplay) jab click karta tha, us prompt ka message
+    code ke paas save nahi hota tha, isliye buttons hatane wala edit fail ho jata
+    tha aur result naye message mein aata tha (Bat First, openers, striker,
+    shot buttons sab wahi reh jaate the).
+  * Fix: bot click se pehle channel ke pichhle 15 messages mein us prompt ka
+    message (button IDs se) dhoondh leta hai, phir normal edit hota hai.
+    Ranked do-server match mein dono channels ke message milte hain.
+
+
+COMMENTARY KA NAYA LOOK + SAHI JAGAH (commentary.py, views.py, practice_views.py)
+=================================================================================
+
+  * Code block (```) hata diya. Ab normal Discord text:
+        ### That's huge! **SIX**
+        `0.3` **Holder** to **Rathore**
+        Gets under it and upper-cuts it for six.
+        -# Rathore moves to 47. 3 runs away from fifty.
+    - monospace sirf chhote chips: ball number aur result (`0.5` ... `1 RUN`)
+    - FOUR / SIX / OUT par badi heading (### ...), result word bold
+    - wicket word bold: **CAUGHT** / **LBW** / **BOWLED** / **STUMPED**
+    - situation, playstyle, milestone, chase lines: chhoti grey "-#" line
+    - heading size: commentary.py -> HEADLINE_BIG ("## " = aur bada, "" = band)
+  * Har ball ke messages ka naya order (pehle 3 scoreboard aate the, ab 1):
+        1. "Rapid Bouncer is coming ..." + shot buttons (dabane par buttons hat jaate hain)
+        2. Scoreboard
+        3. Commentary - ALAG message, scoreboard ke neeche
+        4. "Choose delivery @..." + bowling buttons (bina dobara scoreboard)
+    Naye over, wicket ke baad aur DRS not-out par bowling prompt ke saath
+    scoreboard pehle jaisa aata hai.

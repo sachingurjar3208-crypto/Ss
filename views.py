@@ -732,6 +732,42 @@ def autoplay_kick(game) -> None:
         autoplay_schedule(view)
 
 
+async def _find_view_message(channel, view):
+    """The message that carries this view's buttons / dropdown.
+
+    Most prompts are sent with `channel.send(view=...)` and the message is never stored on
+    the view. A human click brings the message along (interaction.message), but an autoplay /
+    ranked-bot click does not, so its edit failed and the old buttons stayed on screen.
+    Find it by the components' custom_ids in the last few messages of the channel(s)."""
+    ids = {getattr(c, "custom_id", None) for c in getattr(view, "children", [])}
+    ids.discard(None)
+    if not ids:
+        return None
+    found = []
+    for ch in (getattr(channel, "channels", None) or [channel]):   # mirrored ranked match: every channel
+        try:
+            async for m in ch.history(limit=15):
+                for row in getattr(m, "components", []) or []:
+                    kids = getattr(row, "children", None) or [row]
+                    if any(getattr(k, "custom_id", None) in ids for k in kids):
+                        found.append(m)
+                        break
+                else:
+                    continue
+                break
+        except Exception as e:
+            print(f"[autoplay] message lookup skipped ({type(e).__name__}: {e})")
+    if not found:
+        return None
+    if len(found) == 1:
+        return found[0]
+    try:
+        from ranked_mirror import MirrorMessage
+        return MirrorMessage(channel, found)
+    except Exception:
+        return found[0]
+
+
 async def _autoplay_act(view, uid: int) -> None:
     try:
         # A ranked bot "thinks" for a random, human-like time; real players' autoplay uses the fixed delay.
@@ -754,6 +790,11 @@ async def _autoplay_act(view, uid: int) -> None:
         handler = _AUTOPLAY_HANDLERS.get(type(view).__name__)
         if member is None or handler is None:
             return
+        if message is None:
+            # FIX: buttons stayed on screen after a bot / autoplay click (nothing to edit).
+            message = await _find_view_message(channel, view)
+            if message is not None:
+                view.__dict__["message"] = message
 
         def make(values=None):
             return _AutoInteraction(member, channel, message, values)
@@ -1038,17 +1079,13 @@ async def _send_commentary_with_gifs(
     the channel clean).  Otherwise send a fresh message.
     `background=True` posts the GIFs/banners without making the caller wait for them.
     """
-    # Rare suspense animation (a few message edits), then the final commentary.
-    shown = await _comm.play_animated(channel, commentary, embed, anim, interaction) if anim else False
-    if shown:
-        pass
-    elif interaction is not None:
-        try:
-            await interaction.edit_original_response(content=commentary, embed=embed)
-        except Exception:
-            await channel.send(content=commentary, embed=embed)
-    else:
-        await channel.send(content=commentary, embed=embed)
+    # The shot message keeps its "X is coming with N kmph" line (buttons already removed).
+    # Then: 1) the scoreboard, 2) the commentary as its OWN message right below it.
+    if embed is not None:
+        await channel.send(embed=embed)
+    shown = await _comm.play_animated(channel, commentary, None, anim) if anim else False
+    if not shown:
+        await channel.send(content=commentary)
 
     if wheel:   # wagon wheel for a four / six
         try:
@@ -1093,7 +1130,7 @@ async def _post_delivery_prompt(interaction, channel, game, *, content, view, al
         pass  # cosmetic only
 
     async def _send():
-        await channel.send(embed=build_scoreboard_embed(game))
+        # (no extra score box here any more: the last ball's scoreboard is right above)
         await channel.send(content=content, view=view)
 
     await _run_safely(_send, allowed_ids=allowed_ids, notify_channel=channel)
@@ -1105,8 +1142,12 @@ async def _send_bowling_prompt(
     *,
     intro: str | None = None,
     files: list | None = None,
+    scoreboard: bool = True,
 ):
     """Send the bowling UI for the current bowler.
+
+    scoreboard=False: no score box on this prompt, because the ball result has just
+    posted a fresh scoreboard + commentary right above it (one score box per ball).
 
     `intro` (e.g. "X starts a new over") is rendered as the last line INSIDE
     the scoreboard box, so the next-bowler info sits directly under the score.
@@ -1135,6 +1176,11 @@ async def _send_bowling_prompt(
     view._channel = channel
     prefix = "**FREE HIT!**  " if is_free_hit else ""
     content = f"{prefix}Choose delivery  {game.bowling_user.mention}"
+    if not scoreboard:
+        if intro:
+            content = f"{intro}\n{content}"
+        await channel.send(content=content, view=view, files=files or [])
+        return
     await channel.send(content=content, embed=embed, view=view, files=files or [])
 
 
@@ -1584,12 +1630,12 @@ async def _process_delivery(
             await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
             # NB outcomes set pending_free_hit; wides do not.
             # _send_bowling_prompt reads and clears the flag to show FREE HIT label.
-            await _send_bowling_prompt(channel, game)
+            await _send_bowling_prompt(channel, game, scoreboard=False)
             return
 
         # ── Normal continue ───────────────────────────────────────────────
         await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
-        await _send_bowling_prompt(channel, game)
+        await _send_bowling_prompt(channel, game, scoreboard=False)
 
     except Exception as e:
         print(f"[match recovery] _process_delivery tail failed: {type(e).__name__}: {e}")
@@ -1877,16 +1923,49 @@ class TossView(_TimeoutMixin, ui.View):
                 pass
 
             async def _send_result():
-                result_file, result_fname = _toss_result_file(result)
-                result_embed = discord.Embed(title="COIN TOSS", color=discord.Color.from_rgb(212, 175, 55))
-                result_embed.description = (
-                    f"{sep}\nThe coin spins in the air…\n\n"
-                    f"{coin_face}\n\n"
-                    f"**{winner.display_name}** won the toss!\n{sep}"
-                )
-                result_embed.set_footer(text=f"{loser.display_name} called {call.lower()} — coin landed {result.lower()}.")
-                result_embed.set_image(url=f"attachment://{result_fname}")
-                await channel.send(embed=result_embed, file=result_file)
+                caller = self.game.challenger.display_name
+                face   = "HEADS" if result == "Head" else "TAILS"
+                called = "HEADS" if call == "Head" else "TAILS"
+                gif = None
+                try:
+                    import toss_anim
+                    if toss_anim.TOSS_ANIMATION_ENABLED:
+                        gif = await asyncio.to_thread(toss_anim.toss_gif_bytes, result)
+                        wait = toss_anim.reveal_seconds(result)
+                except Exception as e:
+                    print(f"[toss] animation skipped ({type(e).__name__}: {e})")
+                    gif = None
+
+                def _box(lines):
+                    return "```\n" + "\n".join(lines) + "\n```"
+                head_lines = ["COIN TOSS", "-" * 33, f"{caller[:16]:<16}calls  {called}"]
+                final_desc = _box(head_lines + [f"{'Result':<16}       {face}",
+                                                f"{winner.display_name[:20]} wins the toss"])
+                result_embed = discord.Embed(color=discord.Color.from_rgb(212, 175, 55))
+
+                if gif is None:
+                    # fallback: the old static picture, result shown straight away
+                    result_file, result_fname = _toss_result_file(result)
+                    result_embed.description = final_desc
+                    result_embed.set_footer(text=f"Next: {winner.display_name} picks Bat or Bowl")
+                    result_embed.set_image(url=f"attachment://{result_fname}")
+                    await channel.send(embed=result_embed, file=result_file)
+                    return
+
+                # 1) GIF + "coin is in the air", 2) when it lands, the text shows the result
+                result_embed.description = _box(head_lines + ["Coin is in the air..."])
+                result_embed.set_footer(text="Tossing...")
+                result_embed.set_image(url="attachment://toss.gif")
+                msg = await channel.send(embed=result_embed,
+                                         file=discord.File(io.BytesIO(gif), filename="toss.gif"))
+                await asyncio.sleep(wait)
+                try:
+                    done = msg.embeds[0] if getattr(msg, "embeds", None) else result_embed
+                    done.description = final_desc
+                    done.set_footer(text=f"Next: {winner.display_name} picks Bat or Bowl")
+                    await msg.edit(embed=done)
+                except Exception as e:   # cosmetic: the next step still comes
+                    print(f"[toss] result edit skipped ({type(e).__name__}: {e})")
             await _run_safely(_send_result, allowed_ids=allowed, notify_channel=channel)
 
             async def _send_choice():
