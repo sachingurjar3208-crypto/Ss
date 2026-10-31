@@ -13,6 +13,9 @@
     admin voucher give @user <n>
     admin voucher remove @user <n>
     admin voucher check @user
+    admin rcp give @user <n>      (RC Points for the Signature Box)
+    admin rcp remove @user <n>
+    admin rcp check @user
     admin quest reset @user      (clears today's quest progress for that user)
 """
 from __future__ import annotations
@@ -445,6 +448,61 @@ class AdminCog(commands.Cog):
             f"Pool A guaranteed in **{left}** draft(s).",
             allowed_mentions=discord.AllowedMentions.none(),
         )
+
+    # -- RC Points (Signature Box) ---------------------------------------
+    # Owner / full-admin only, main server only, logged in rcp_log (sigbox.py).
+    RCP_ADMIN_MAX = 1_000_000
+
+    @admin.group(name="rcp", invoke_without_command=True)
+    @security.owner_or_admin_role()
+    async def rcp_group(self, ctx: commands.Context):
+        await ctx.send(
+            "`admin rcp give @user <amount>`\n"
+            "`admin rcp remove @user <amount>`\n"
+            "`admin rcp check @user`"
+        )
+
+    @rcp_group.command(name="give")
+    @security.owner_or_admin_role()
+    async def rcp_give(self, ctx: commands.Context, member: discord.Member, amount: int):
+        await self._rcp_adjust(ctx, member, amount, +1)
+
+    @rcp_group.command(name="remove")
+    @security.owner_or_admin_role()
+    async def rcp_remove(self, ctx: commands.Context, member: discord.Member, amount: int):
+        await self._rcp_adjust(ctx, member, amount, -1)
+
+    async def _rcp_adjust(self, ctx: commands.Context, member: discord.Member, amount: int, sign: int):
+        if not self._main_guild(ctx):
+            return
+        if member.bot:
+            await ctx.send("❌ Bots can't have RCP.")
+            return
+        if not 1 <= amount <= self.RCP_ADMIN_MAX:
+            await ctx.send(f"❌ Use an amount between 1 and {self.RCP_ADMIN_MAX:,}.")
+            return
+        if not economy.user_exists(member.id):
+            await ctx.send("❌ That user hasn't debuted.")
+            return
+        import sigbox
+        verb = "give" if sign > 0 else "remove"
+        old, new = await asyncio.to_thread(
+            sigbox.rcp_change, member.id, sign * amount, f"Admin {verb} by {ctx.author.id}")
+        if sign > 0:
+            msg = f"✅ Gave **{new - old:,} RCP** to {esc(member.display_name)}."
+        else:
+            msg = f"✅ Removed **{old - new:,} RCP** from {esc(member.display_name)}."
+        await ctx.send(f"{msg} They now have **{new:,} RCP**.", allowed_mentions=discord.AllowedMentions.none())
+
+    @rcp_group.command(name="check")
+    @security.owner_or_admin_role()
+    async def rcp_check(self, ctx: commands.Context, member: discord.Member):
+        if not self._main_guild(ctx):
+            return
+        import sigbox
+        bal = await asyncio.to_thread(sigbox.rcp_balance, member.id)
+        await ctx.send(f"**{esc(member.display_name)}** has **{bal:,} RCP**.",
+                       allowed_mentions=discord.AllowedMentions.none())
 
     # -- quests ----------------------------------------------------------
     @admin.group(name="quest", invoke_without_command=True)

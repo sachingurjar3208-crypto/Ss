@@ -272,3 +272,46 @@ WAGON WHEEL POORA HATAYA (views.py, 2 files delete)
   * Ye 2 files repo se DELETE karo (ab koi use nahi karta):
         wagon_wheel.py
         wagon_wheel_gif.py
+
+
+SIGNATURE BOX + RC POINTS (naya: sigbox.py, sigbox_image.py, sigbox_cog.py
+                           badla: admin_cog.py, main.py, help_menu.py)
+==========================================================================
+
+  User:
+    rcbox  (rcsigbox, sigbox)   box ki image + "Spin" aur "Prices" buttons
+                                (Signature chance user ko kahin nahi dikhta, sirf /sigbox info mein)
+    rcp    (rcpoints)           apne RC Points
+
+  Kaise chalta hai:
+    * Signature card image ke BEECH mein bada, 9 rewards uske aas-paas
+      (3 left, 3 right, 3 card ke neeche). Har reward sirf EK baar milta hai.
+    * Har user ke 10 spin. Default price (RCP):
+        spin 1 FREE, 2 FREE, 3 30, 4 60, 5 120, 6 240, 7 480, 8 900, 9 1800, 10 3600
+        (saare 10 = 7,230 RCP)
+    * Signature chance: spin 1-5 = 1%, 6-8 = 2%, 9 = 10%, spin 10 = PAKKA
+      (agar pehle nahi mila). Signature na lage to bachi hui tiles mein se random.
+      Signature mil gaya to baaki spins bachi hui tiles dete hain.
+    * Spin dabane par light tiles par ghoomti hai, dheemi hoti hai aur inaam par rukti hai
+      (GIF ~2.5 sec), phir board update + inaam ka message. Signature mila to card ki image.
+    * 480 RCP ya usse mehnga spin -> pehle "Spin for X RCP / Cancel" poochta hai.
+      (sigbox_cog.py -> CONFIRM_FROM)
+    * Card pehle se hai -> uske coins wapas (duplicate refund). Squad full -> rcpending.
+    * Double click / do menu khule ho tab bhi ek spin do baar nahi hota.
+
+  Admin (slash, sirf main server):
+    /sigbox create   playername + days (+ name)   naya box (purana band, sabke spin naye)
+    /sigbox reward   slot 1-9 + reward/quantity YA playername YA summary_theme
+    /sigbox cost     spin 1-10 + rcp (0 = free)
+    /sigbox chance   spin 1-9 + percent (spin 10 hamesha pakka)
+    /sigbox info     saari settings + preview image
+    /sigbox end      box abhi band
+
+  RC Points (prefix, owner / full admin, main server):
+    admin rcp give @user <amount>
+    admin rcp remove @user <amount>
+    admin rcp check @user
+    Har badlaav rcp_log table mein save hota hai.
+
+  Tables apne aap bante hain: sigbox_box, sigbox_reward, sigbox_draw, rcp_wallet, rcp_log
+  Default rewards / prices / chances: sigbox.py ke upar (DEFAULT_...)
