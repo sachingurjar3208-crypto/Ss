@@ -28,7 +28,6 @@ from commentary import build_ball_commentary
 import commentary as _comm
 import drs_text as _drs
 import moments as _moments
-from wagon_wheel import wagon_wheel_png
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed, card_status
 
 
@@ -1106,7 +1105,6 @@ async def _send_commentary_with_gifs(
     embed: discord.Embed,
     gif_urls: list[str],
     interaction: discord.Interaction | None = None,
-    wheel: bytes | None = None,
     background: bool = True,
     anim: list[str] | None = None,
 ):
@@ -1123,12 +1121,6 @@ async def _send_commentary_with_gifs(
     shown = await _comm.play_animated(channel, commentary, None, anim) if anim else False
     if not shown:
         await channel.send(content=commentary)
-
-    if wheel:   # wagon wheel for a four / six
-        try:
-            await channel.send(file=discord.File(io.BytesIO(wheel), filename="wagon_wheel.png"))
-        except Exception:
-            pass
 
     if not gif_urls:
         return
@@ -1316,7 +1308,7 @@ async def _process_delivery(
         return
 
     # FIX (ranked "match ruk jata hai"): Discord gives only 3 seconds to answer a button
-    # click. Everything below (esp. the wagon-wheel GIF for a 4/6, ~5s of CPU on a small
+    # click. Everything below (heavy image work, ~5s of CPU on a small
     # VPS) used to run BEFORE the ack, so the token expired, the late ack raised
     # discord.NotFound (not caught), and the function died AFTER the ball was already
     # counted -> no commentary, no next prompt, view already stopped = stuck match.
@@ -1412,17 +1404,6 @@ async def _process_delivery(
     if commentary_suffix:
         commentary = _comm.add_lines(commentary, commentary_suffix)
     _anim = _comm.pop_animation(game)   # rare suspense frames for this ball ([] usually)
-
-    # Wagon wheel: only for a four or a six (None for everything else).
-    wheel = None
-    if outcome in ("4", "6"):
-        try:
-            _dir = game._choose_direction(delivery_internal, shot_internal, 6 if outcome == "6" else 4)
-            wheel = await asyncio.to_thread(
-                wagon_wheel_png, _dir, outcome, None, sname, shot_internal, "R",
-            )
-        except Exception:
-            wheel = None
 
     # BUG FIX #8: bowler_stats[bname] is initialised inside BowlerSelectView
     # when the bowler is first chosen, but the snapshot below is taken before
@@ -1596,7 +1577,7 @@ async def _process_delivery(
             # decision is confirmed (see DRSView._flush_held_gifs).
             await _send_commentary_with_gifs(
                 channel, commentary, embed,
-                [] if reviews > 0 else gif_urls, interaction, wheel=wheel, anim=_anim)
+                [] if reviews > 0 else gif_urls, interaction, anim=_anim)
             if reviews > 0:
                 drs_view = DRSView(
                     game, channel, delivery_internal, shot_internal,
@@ -1637,7 +1618,7 @@ async def _process_delivery(
                 save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
                 _save_match_record(game)
                 _start_match_summary(game)          # card renders while the messages below go out
-                await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
+                await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, anim=_anim)
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
                 await _send_match_summary(channel, game)   # right after the result, not at the very end
@@ -1661,20 +1642,20 @@ async def _process_delivery(
             game.rotate_strike()
             game.timeline.append("|")
             game.end_over()
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, anim=_anim)
             await _send_next_bowler_prompt(channel, game)
             return
 
         # ── Extras (wide / no-ball) — re-bowl ────────────────────────────
         if is_extra:
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, anim=_anim)
             # NB outcomes set pending_free_hit; wides do not.
             # _send_bowling_prompt reads and clears the flag to show FREE HIT label.
             await _send_bowling_prompt(channel, game, scoreboard=False)
             return
 
         # ── Normal continue ───────────────────────────────────────────────
-        await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
+        await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, anim=_anim)
         await _send_bowling_prompt(channel, game, scoreboard=False)
 
     except Exception as e:

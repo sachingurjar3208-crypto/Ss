@@ -261,3 +261,14 @@ PLAYSTYLE INFO COMMAND (playstyle_info_cog.py naya, main.py, help_menu.py)
                              milte-julte naam ho to "Did you mean: ..." batata hai
   * Aliases: rcplaystyle, rcps.  Cooldown 10 sec.  Koi power / % nahi dikhaya jata.
   * main.py: cog list mein "playstyle_info_cog" joda.  help_menu.py: "Other" page mein entry.
+
+
+WAGON WHEEL POORA HATAYA (views.py, 2 files delete)
+==================================================
+
+  * Four / six par wagon wheel image ab kabhi nahi aati. Har boundary par ek
+    message kam, CPU bhi bachta hai.
+  * views.py se wagon wheel ka saara code nikal diya.
+  * Ye 2 files repo se DELETE karo (ab koi use nahi karta):
+        wagon_wheel.py
+        wagon_wheel_gif.py
