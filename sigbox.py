@@ -44,7 +44,7 @@ SPINS = 10                                   # tiles = spins = 10 (Signature + 9
 OTHER_SLOTS = SPINS - 1
 SIGNATURE_SLOT = 0
 DEFAULT_COSTS = [0, 0, 30, 60, 120, 240, 480, 900, 1800, 3600]     # RCP for spin 1 .. 10
-DEFAULT_CHANCES = [1, 1, 1, 1, 1, 2, 2, 2, 10]                      # % Signature on spin 1 .. 9 (10 = guaranteed)
+DEFAULT_CHANCES = [0.1] * 9                                        # % Signature on spin 1 .. 9 (10 = guaranteed)
 DEFAULT_REWARDS = [                                                 # slot 1 .. 9
     ("coins", 5_000), ("bronze", 1), ("coins", 10_000), ("voucher", 1), ("silver", 1),
     ("coins", 25_000), ("voucher", 2), ("gold", 1), ("legendary", 1),

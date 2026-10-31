@@ -289,7 +289,7 @@ SIGNATURE BOX + RC POINTS (naya: sigbox.py, sigbox_image.py, sigbox_cog.py
     * Har user ke 10 spin. Default price (RCP):
         spin 1 FREE, 2 FREE, 3 30, 4 60, 5 120, 6 240, 7 480, 8 900, 9 1800, 10 3600
         (saare 10 = 7,230 RCP)
-    * Signature chance: spin 1-5 = 1%, 6-8 = 2%, 9 = 10%, spin 10 = PAKKA
+    * Signature chance: spin 1-9 = 0.1% har spin, spin 10 = PAKKA
       (agar pehle nahi mila). Signature na lage to bachi hui tiles mein se random.
       Signature mil gaya to baaki spins bachi hui tiles dete hain.
     * Spin dabane par light tiles par ghoomti hai, dheemi hoti hai aur inaam par rukti hai
