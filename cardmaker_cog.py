@@ -1433,7 +1433,11 @@ class CardMakerCog(commands.Cog):
     # ── /playstyle add  /playstyle remove ────────────────────────────
     # The old link-logo commands (/logoadderofplaystyle, /playstylelogoremover, /setplaystylelogo)
     # are gone: every playstyle now has its own built-in badge in 3 levels (playstyle_badges.py).
-    playstyle = app_commands.Group(name="playstyle", description="Put playstyles (with a level) on a player card")
+    playstyle = app_commands.Group(
+        name="playstyle", description="Put playstyles (with a level) on a player card",
+        guild_only=True, default_permissions=discord.Permissions(),
+    )
+    app_commands.guilds(ADMIN_GUILD_ID)(playstyle)   # only exists in your server (set on the GROUP, not the subcommands)
 
     @playstyle.command(name="add", description="Put 1 or 2 playstyles on a card, each with a level (Silver / Gold / Golden Pink)")
     @app_commands.describe(
@@ -1446,7 +1450,7 @@ class CardMakerCog(commands.Cog):
     @app_commands.choices(key1=NARRATIVE_CHOICES, key2=NARRATIVE_CHOICES,
                           level1=LEVEL_CHOICES, level2=LEVEL_CHOICES)
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @is_owner()
+    @app_commands.check(lambda i: is_staff(i.user))
     async def playstyle_add(self, interaction: discord.Interaction, playername: str,
                             key1: app_commands.Choice[str], level1: app_commands.Choice[int],
                             key2: app_commands.Choice[str] | None = None,
@@ -1482,7 +1486,7 @@ class CardMakerCog(commands.Cog):
         app_commands.Choice(name="Both", value="both"),
     ])
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @is_owner()
+    @app_commands.check(lambda i: is_staff(i.user))
     async def playstyle_remove(self, interaction: discord.Interaction, playername: str,
                                slot: app_commands.Choice[str]):
         await interaction.response.defer()
