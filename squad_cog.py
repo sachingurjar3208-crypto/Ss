@@ -414,13 +414,19 @@ class SquadCog(commands.Cog, name="Squad"):
         conditions = random_match_conditions()
         game.conditions = conditions
         game.pitch_type = conditions["pitch_type"]
+        import time as _time
+        from embeds import INVITE_SECONDS
         embed = build_match_invite_embed(
-            challenger, opponent, overs, conditions, gif_url=conditions.get("gif_url")
+            challenger, opponent, overs, conditions, gif_url=conditions.get("gif_url"),
+            teams=(game.teams.get(challenger.id), game.teams.get(opponent.id)),
+            expires_at=int(_time.time()) + INVITE_SECONDS,
         )
-        await ctx.send(
+        invite_view = AcceptDeclineView(game)
+        # keep the message so the card can show "Expired" when nobody answers
+        invite_view.message = await ctx.send(
             content=opponent.mention,
             embed=embed,
-            view=AcceptDeclineView(game),
+            view=invite_view,
         )
 
     # -- end / resume a stuck match ----------------------------------------

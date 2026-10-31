@@ -661,6 +661,16 @@ def calculate_outcome(
             if delivery_internal in _SEAM_DELIVERIES:
                 w["W"] = w["W"] * up
 
+    # ── MYSTERY TURN (Googly button) ─────────────────────────────────────────
+    # 4 / 6 chance 30% kam, wicket chance 10% zyada. Applied AFTER the global
+    # wicket cap (like the stadium effect) so the full effect always shows up.
+    from data import (MYSTERY_TURN_BUTTON, MYSTERY_TURN_BOUNDARY_MULT,
+                      MYSTERY_TURN_WICKET_MULT)
+    if delivery_button == MYSTERY_TURN_BUTTON:
+        w["4"] = w["4"] * MYSTERY_TURN_BOUNDARY_MULT
+        w["6"] = w["6"] * MYSTERY_TURN_BOUNDARY_MULT
+        w["W"] = w["W"] * MYSTERY_TURN_WICKET_MULT
+
     outcome = random.choices(list(w.keys()), weights=list(w.values()), k=1)[0]
     is_extra = outcome in ("Wd", "NB", "NB+1")
     return outcome, is_extra

@@ -1,0 +1,126 @@
+NAYE BUTTON NAAM + TOE CRUSHER / MYSTERY TURN RULES
+====================================================
+
+Game ka logic same hai. Andar ke (original) naam bhi same hain, sirf button par
+dikhne wale naam badle hain. Naam baad mein badalne ho to sirf data.py mein
+BAT_DISPLAY (batting) aur BUTTON_DISPLAY (bowling) edit karo.
+
+BATTING
+  Drive  -> Drive         Loft  -> Smash       Flick  -> Flick
+  Pull   -> Hook          Cut   -> Upper Cut   Sweep  -> Sweep
+  Scoop  -> Lap           Defend-> Block       Leave  -> Skip
+
+FAST BOWLER
+  Row 1: Outswing | Inswing | Rapid | Off Pace
+  Row 2: Bouncer | Over Pitch | Good | Toe Crusher
+
+MEDIUM PACER
+  Row 1: Outswing | Inswing | Cutter | Off Pace
+  Row 2: Bouncer | Over Pitch | Good | Toe Crusher   (order bhi isi tarah kiya)
+
+OFF SPIN : Off Break | Carrom | Undercutter | Reverse Turn | Dipper
+LEG SPIN : Leg Break | Mystery Turn | Flipper | Floater | Zooter
+ORTHODOX : Undercutter | Dipper | Reverse Turn | Carrom | Zooter
+
+NAYE RULES
+  * Toe Crusher (Fast + Medium Pacer): ek over mein max 2. Uske baad button grey.
+  * Mystery Turn (Leg Spin): ek over mein max 2. Uske baad button grey.
+      - 4 aur 6 ka weight x0.70, wicket ka weight x1.10
+      - Test (200,000 balls): 4 -28%, 6 -27%, wicket +13%
+  * Wide / no-ball wali ball bhi limit mein ginti hai.
+  * Naye over aur doosri innings mein count 0 se shuru hota hai.
+  * Autoplay aur practice CPU grey button nahi chunte.
+  * Settings: data.py -> LIMITED_DELIVERIES, MYSTERY_TURN_*_MULT
+
+FILES CHANGED
+  data.py           - BAT_DISPLAY, bat_label(), naya BUTTON_DISPLAY, delivery_label(),
+                      LIMITED_DELIVERIES, Mystery Turn settings, commentary words,
+                      MEDIUM_STAGE2 order
+  game.py           - special_balls_this_over counter, special_ball_left(),
+                      count_special_ball(), end_over / 2nd innings reset
+  logic.py          - Mystery Turn effect (calculate_outcome ke end mein)
+  views.py          - batting labels + custom_id, bowling grey buttons, limit check,
+                      announcement mein naye naam, autoplay fix (_shot_key)
+  practice_views.py - wahi changes practice mode mein + CPU limit respect karta hai
+  commentary.py     - Skip = "leaves", wicket lines mein naye naam
+
+
+NAYI COMMENTARY (commentary.py)
+===============================
+
+Look: har ball ek monospace code block mein, koi emoji nahi.
+
+    ```
+    5.3  Bumrah to Sharma               FOUR
+    Upper Cut, over the slips and away.
+    Four.
+    > Sharma moves to 49. 1 run away from
+      fifty.
+    ```
+
+  * Header: over.ball, bowler to batter, result (DOT / 1 RUN / FOUR / SIX / OUT / WIDE ...)
+  * Har shot ki apni lines (Drive, Smash, Flick, Hook, Upper Cut, Sweep, Lap, Block, Skip)
+    aur 1/2/3 runs ki lines bhi. Dot ball par delivery ke hisaab se lines
+    (Toe Crusher, Mystery Turn, Bouncer, swing, turn...).
+  * Wicket: BOWLED / LBW / CAUGHT / STUMPED shot aur ball ke hisaab se chuna jata hai.
+    Bowler ka wicket credit aur DRS isi word se chalte hain.
+  * Ek "situation" line (max 1 per ball): hat-trick ball, partnership toota,
+    bowler ke 3+ wickets, fifty/hundred ke paas, 50/100 run stand, lagatar dot balls,
+    sahi/galat shot, 148+ kph pace.
+  * Playstyle, milestone aur chase lines bhi block ke andar, bina emoji ("> ...").
+  * Line repeat nahi hoti jab tak 16 doosri lines na aa jayein.
+  * Animated text: kabhi-kabhar (6, wicket, kabhi 4, ya close finish par) message
+    2 baar edit hota hai ("it's in the air... is it enough?") phir result.
+    Ek 20-over innings mein ~4 baar. Do animations ke beech kam se kam 8 balls.
+
+Settings (commentary.py ke upar):
+  BLOCK_WIDTH, ANIMATION_ENABLED, ANIM_CHANCE, ANIM_CLOSE_FINISH_CHANCE,
+  ANIM_MIN_GAP_BALLS, ANIM_FRAME_DELAY
+Animation band karni ho to: ANIMATION_ENABLED = False
+
+Files: commentary.py (naya), views.py, practice_views.py (jodna + animation),
+       moments.py (playstyle / chase lines se emoji hataye)
+
+
+NAYA DRS (drs_text.py + views.py)
+=================================
+
+  * DRS prompt ek monospace box mein: call (LBW/CAUGHT/...), batter ka score,
+    bowler, reviews left. Buttons: "Review" aur "Walk off".
+  * Review dabane par wicket ke hisaab se step-by-step animation (message edits):
+      LBW     : front foot -> ball tracking -> pitching / impact / wickets
+      Caught  : front foot -> UltraEdge (spike ya flat)
+      Bowled  : sirf no-ball check
+      Stumped : back foot frame check
+    Aakhri frame mein faisla. Har frame ke beech 1.3 sec.
+  * Naye rules:
+      - LBW "Umpire's call": OUT rehta hai par review wapas milta hai.
+        (Upheld LBW reviews mein se 30% umpire's call)
+      - Bowled review par no ball mila to: NOT OUT, ball legal nahi ginti,
+        1 run extra (bowler ke khaate), aur agli ball FREE HIT.
+        Ye kam hota hai: normal overturn chance x 0.35.
+  * Overturn hoga ya nahi, ye pehle jaisa _drs_overturn_chance hi tay karta hai.
+
+Settings (drs_text.py ke upar):
+  DRS_FRAME_DELAY, DRS_UMPIRES_CALL_SHARE, DRS_BOWLED_NOBALL_FACTOR
+
+
+NAYA MATCH START CARD (embeds.py, squad_cog.py, ranked_cog.py, views.py)
+=======================================================================
+
+  rcmp @user: chhota monospace card
+      FRIENDLY MATCH               5 OVERS
+      ------------------------------------
+      Arjun XI        OVR  84  CHEM  92
+                       vs
+      Rahul XI        OVR  81  CHEM  88
+      ------------------------------------
+      Venue    Eden Gardens
+      Pitch    Pace friendly
+      Weather  Sunny  31C
+    Neeche: "@Rahul accept in 28 seconds" (Discord ka live countdown).
+    Accept / Decline / time khatam hone par woh line badal jati hai:
+    ACCEPTED / DECLINED / CANCELLED (challenger ne dabaya) / EXPIRED.
+    Stadium GIF ab chhota thumbnail hai.
+  rcmp ranked: same card "RANKED MATCH", neeche "Win +1 star  Lose -1 star".
+  Fix: pehle 30 sec baad card update nahi hota tha (message save nahi hota tha).

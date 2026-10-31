@@ -304,6 +304,28 @@ class GameState:
         self.consecutive_dots: int = 0
         self.pending_free_hit: bool = False
 
+        # Limited deliveries (Toe Crusher / Mystery Turn): balls used in the CURRENT over,
+        # keyed by original button name. Reset in end_over() and start_second_innings().
+        self.special_balls_this_over: dict[str, int] = {}
+
+    def special_ball_left(self, button: str) -> bool:
+        """False once this limited delivery has been bowled its max times this over."""
+        from data import LIMITED_DELIVERIES
+        limit = LIMITED_DELIVERIES.get(button)
+        if limit is None:
+            return True
+        used = getattr(self, "special_balls_this_over", {}).get(button, 0)
+        return used < limit
+
+    def count_special_ball(self, button: str | None) -> None:
+        """Call once per bowled ball (wides / no-balls count too)."""
+        from data import LIMITED_DELIVERIES
+        if not button or button not in LIMITED_DELIVERIES:
+            return
+        if not hasattr(self, "special_balls_this_over"):
+            self.special_balls_this_over = {}
+        self.special_balls_this_over[button] = self.special_balls_this_over.get(button, 0) + 1
+
     @property
     def batting_user(self):
         return (
@@ -633,6 +655,7 @@ class GameState:
         self.current_over_batters_runs = 0
         self.current_over_bowlers_runs = 0
         self.current_bowler = None
+        self.special_balls_this_over = {}
 
     def _do_record_boundary_direction(
         self, runs: int, delivery: str, shot: str
@@ -878,6 +901,7 @@ class GameState:
         self.non_striker = None
         self.current_bowler = None
         self.dismissed = []
+        self.special_balls_this_over = {}
         self.bowler_ball_count = {}
         self.bowler_maidens = {}
         self.bowler_stats = {}

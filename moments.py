@@ -281,7 +281,7 @@ def win_bar_field(game) -> tuple[str, str] | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def pressure_line(game) -> str:
-    """'😰 12 needed off 6 balls' in the last 2-3 overs of a chase, else ''."""
+    """'12 needed off 6 balls. Big ask.' in the last 2-3 overs of a chase, else ''."""
     try:
         if game.innings != 2:
             return ""
@@ -294,10 +294,12 @@ def pressure_line(game) -> str:
             return ""
         p = chase_win_probability(game)
         p = 0.5 if p is None else p
-        emoji = "😱" if p < 0.15 else "😰" if p < 0.35 else "😬" if p < 0.55 else "😮" if p < 0.75 else "😎"
         if balls_left == 1:
-            return f"{emoji} **Last ball! {needed} needed to win**"
-        return f"{emoji} **{needed} needed off {balls_left} balls**"
+            return f"Last ball. {needed} needed to win."
+        mood = ("Almost impossible now." if p < 0.15 else "Big ask." if p < 0.35
+                else "This is tight." if p < 0.55 else "Advantage batting side." if p < 0.75
+                else "Should be a cruise from here.")
+        return f"{needed} needed off {balls_left} balls. {mood}"
     except Exception as e:  # pragma: no cover
         print(f"[moments] pressure line skipped ({type(e).__name__}: {e})")
         return ""
@@ -311,38 +313,38 @@ def pressure_line(game) -> str:
 # type / DRS prompt are guessed from the commentary text.
 _BAT_LINES = {
     "Chase Master": [
-        "{n}'s chase mode is ON 🔥",
-        "Chase Master {n} is in the zone! 🎯",
-        "{n} was born for run chases! 🔥",
+        "{n}'s chase mode is ON",
+        "Chase Master {n} is in the zone!",
+        "{n} was born for run chases!",
     ],
     "Aggressive": [
-        "{n} attacks from ball one, pure aggression! 💥",
-        "Aggressive {n} refuses to sit back! 💥",
+        "{n} attacks from ball one, pure aggression!",
+        "Aggressive {n} refuses to sit back!",
     ],
     "Breakthrough": [
-        "{n}, the game changer, is turning this chase around! 💣",
-        "Breakthrough moment from {n}! 💣",
+        "{n}, the game changer, is turning this chase around!",
+        "Breakthrough moment from {n}!",
     ],
     "Cover Drive Specialist": [
-        "{n}'s signature cover drive, pure class! 🏏",
-        "Textbook cover drive from {n}! 🏏",
+        "{n}'s signature cover drive, pure class!",
+        "Textbook cover drive from {n}!",
     ],
     "Mr360": [
-        "{n} goes 360°, there is no safe place to bowl! 🌀",
-        "Mr 360 {n} finds the gap again! 🌀",
+        "{n} goes 360°, there is no safe place to bowl!",
+        "Mr 360 {n} finds the gap again!",
     ],
 }
 
 _BOWL_LINES = {
-    "Swing King": ["Swing King {n} makes it talk! 🌪️", "The ball swings late, {n} strikes! 🌪️"],
-    "Swing Master": ["Swing Master {n} bends it again! 🌪️", "Prodigious swing from {n}! 🌪️"],
-    "Yorker King": ["Yorker King {n} nails it! 🎯", "Toe-crusher from {n}, the Yorker King delivers! 🎯"],
-    "Lethal Pace": ["Lethal pace from {n}, too hot to handle! ⚡", "{n} is flat-out express! ⚡"],
-    "Googly Master": ["{n}'s googly does the trick! 🌀", "Googly Master {n} strikes! 🌀"],
-    "Mystery": ["Mystery ball from {n}, nobody read that! 🕵️", "{n}'s mystery delivery strikes! 🕵️"],
-    "Early Breaker": ["Early Breaker {n} strikes at the start! 🔨", "{n} breaks through early! 🔨"],
-    "Spell Finisher": ["{n} finishes the spell in style! 🏁", "Spell Finisher {n} saves his best for last! 🏁"],
-    "Mind Games": ["Mind games from {n}, the batter never saw it coming! 🧠", "{n} changes it up and gets his man! 🧠"],
+    "Swing King": ["Swing King {n} makes it talk!", "The ball swings late, {n} strikes!"],
+    "Swing Master": ["Swing Master {n} bends it again!", "Prodigious swing from {n}!"],
+    "Yorker King": ["Yorker King {n} nails it!", "Toe-crusher from {n}, the Yorker King delivers!"],
+    "Lethal Pace": ["Lethal pace from {n}, too hot to handle!", "{n} is flat-out express!"],
+    "Googly Master": ["{n}'s googly does the trick!", "Googly Master {n} strikes!"],
+    "Mystery": ["Mystery ball from {n}, nobody read that!", "{n}'s mystery delivery strikes!"],
+    "Early Breaker": ["Early Breaker {n} strikes at the start!", "{n} breaks through early!"],
+    "Spell Finisher": ["{n} finishes the spell in style!", "Spell Finisher {n} saves his best for last!"],
+    "Mind Games": ["Mind games from {n}, the batter never saw it coming!", "{n} changes it up and gets his man!"],
 }
 
 _STYLE_GAP_BALLS = 6   # the same player + playstyle can't repeat its line within one over
@@ -382,7 +384,7 @@ def playstyle_line(
                 fired.append("Aggressive")
             for style in fired:   # strongest / most specific first (list order)
                 if _style_ok(game, striker_name, style, _STYLE_GAP_BALLS):
-                    return random.choice(_BAT_LINES[style]).format(n=f"**{short_name(striker_name)}**")
+                    return random.choice(_BAT_LINES[style]).format(n=short_name(striker_name))
             return ""
 
         # ── bowler playstyles: on a wicket ─────────────────────────────────
@@ -414,7 +416,7 @@ def playstyle_line(
                 fired.append("Lethal Pace")
             for style in fired:
                 if _style_ok(game, bowler_name, style, 0):
-                    return random.choice(_BOWL_LINES[style]).format(n=f"**{short_name(bowler_name)}**")
+                    return random.choice(_BOWL_LINES[style]).format(n=short_name(bowler_name))
     except Exception as e:  # pragma: no cover
         print(f"[moments] playstyle line skipped ({type(e).__name__}: {e})")
     return ""

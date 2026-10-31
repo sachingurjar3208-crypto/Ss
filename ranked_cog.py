@@ -422,7 +422,8 @@ class RankedCog(commands.Cog, name="Ranked"):
 
         # 2) the match card: same layout as a normal rcmp challenge, titled RANK UP MODE
         embed = build_ranked_match_embed(challenger, opponent, ranked.RANKED_OVERS, cond,
-                                         gif_url=cond.get("gif_url"))
+                                         gif_url=cond.get("gif_url"),
+                                         teams=(game.teams.get(challenger.id), game.teams.get(opponent.id)))
         mentions = " ".join(m.mention for m in humans)
         await channel.send(content=mentions, embed=embed)
         await start_toss(channel, game)

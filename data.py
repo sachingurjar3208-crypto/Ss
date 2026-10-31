@@ -299,24 +299,24 @@ BALL_SPEEDS = {
 BALL_DESCRIPTIONS = {
     "Inswing":    "inswinging delivery",
     "Outswing":   "outswinging delivery",
-    "Slow":       "slow delivery",
-    "Fast":       "fast delivery",
+    "Slow":       "off-pace delivery",
+    "Fast":       "rapid delivery",
     "Bouncer":    "throat-high bouncer",
     "Good":       "good length delivery",
-    "Full":       "full-pitched delivery",
-    "Yorker":     "toe-crushing yorker",
-    "Offspin":    "off-break",
+    "Full":       "over-pitched delivery",
+    "Yorker":     "toe crusher",
+    "Offspin":    "off break",
     "Carrom":     "carrom ball",
-    "Arm Ball":   "arm ball",
-    "Doosra":     "doosra",
-    "Topspin":    "top-spinner",
-    "Legspin":    "leg-break",
-    "Googly":     "googly",
+    "Arm Ball":   "undercutter",
+    "Doosra":     "reverse turn",
+    "Topspin":    "dipper",
+    "Legspin":    "leg break",
+    "Googly":     "mystery turn",
     "Flipper":    "flipper",
-    "Drifter":    "drifting delivery",
-    "Slider":     "slider",
+    "Drifter":    "floater",
+    "Slider":     "zooter",
     "Cutter":     "cutter",
-    "Slower":     "slower ball",
+    "Slower":     "off-pace delivery",
     "Swing":       "swinging delivery",
     "Good Length": "good length delivery",
     "Off Break":   "off-break",
@@ -324,17 +324,17 @@ BALL_DESCRIPTIONS = {
     "Top Spin":    "top-spinner",
     "Drift Ball":  "drifting delivery",
     "Leg Break":   "leg-break",
-    "Top Spinner": "top-spinner",
+    "Top Spinner": "dipper",
 }
 
 SHOT_DESCRIPTIONS = {
     "Drive":         "drives",
-    "Lofted":        "lofts",
-    "Defend":        "defends",
+    "Lofted":        "smashes",
+    "Defend":        "blocks",
     "Sweep":         "sweeps",
-    "Cut":           "cuts",
-    "Pull":          "pulls",
-    "Reverse-Sweep": "reverse-sweeps",
+    "Cut":           "upper-cuts",
+    "Pull":          "hooks",
+    "Reverse-Sweep": "laps",
 }
 
 # Fast bowler two-stage button groups
@@ -343,7 +343,7 @@ FAST_STAGE2 = ["Bouncer", "Full", "Good", "Yorker"]
 
 # Medium pacer — same two-stage flow as the fast bowler (row 1 first, then row 2)
 MEDIUM_STAGE1 = ["Outswing", "Inswing", "Cutter", "Slower"]
-MEDIUM_STAGE2 = ["Bouncer", "Yorker", "Good Length", "Full"]
+MEDIUM_STAGE2 = ["Bouncer", "Full", "Good Length", "Yorker"]   # Bouncer · Over Pitch · Good · Toe Crusher
 MEDIUM_PACER_SPEED = (110, 135)    # km/h — every medium-pacer delivery is random in this range
 
 OFF_SPIN_BUTTONS  = ["Offspin", "Carrom", "Arm Ball", "Doosra", "Topspin"]
@@ -375,17 +375,60 @@ SPIN_BUTTONS_BY_TYPE = {
 # playstyles, commentary) keeps using the original names above, so nothing else changes.
 # Buttons not listed here show their normal name.
 BUTTON_DISPLAY: dict[str, dict[str, str]] = {
-    "Fast":         {"Fast": "Pace", "Slow": "Slower", "Bouncer": "Bumper",
-                     "Full": "Fuller", "Good": "Length"},
-    "Medium Pacer": {"Bouncer": "Bumper", "Full": "Fuller", "Good Length": "Length"},
-    "Off Spin":     {"Offspin": "Offbreak"},
-    "Leg Spin":     {"Legspin": "Legbreak", "Drifter": "Drift"},
+    "Fast": {
+        "Fast": "Rapid", "Slow": "Off Pace",
+        "Full": "Over Pitch", "Yorker": "Toe Crusher",
+        # Outswing, Inswing, Bouncer, Good -> same naam
+    },
+    "Medium Pacer": {
+        "Slower": "Off Pace",
+        "Full": "Over Pitch", "Good Length": "Good", "Yorker": "Toe Crusher",
+        # Outswing, Inswing, Cutter, Bouncer -> same naam
+    },
+    "Off Spin": {
+        "Offspin": "Off Break", "Arm Ball": "Undercutter",
+        "Doosra": "Reverse Turn", "Topspin": "Dipper",
+        # Carrom -> same naam
+    },
+    "Leg Spin": {
+        "Legspin": "Leg Break", "Googly": "Mystery Turn",
+        "Drifter": "Floater", "Slider": "Zooter",
+        "Topspin": "Dipper",   # not a button; practice CPU sometimes bowls it
+        # Flipper -> same naam
+    },
+    "Orthodox": {
+        "Arm Ball": "Undercutter", "Top Spinner": "Dipper",
+        "Doosra": "Reverse Turn", "Slider": "Zooter",
+        # Carrom -> same naam
+    },
 }
 
 
 def button_label(bowling_type, key: str) -> str:
     """The name to print on a bowler's delivery button (falls back to the original name)."""
     return BUTTON_DISPLAY.get(bowling_type, {}).get(key, key)
+
+
+def delivery_label(bowling_type, stage1: str, button: str) -> str:
+    """Full delivery name for messages, e.g. "Inswing Toe Crusher" (display names)."""
+    parts = [button_label(bowling_type, stage1)] if stage1 else []
+    parts.append(button_label(bowling_type, button))
+    return " ".join(p for p in parts if p)
+
+
+# ── Limited deliveries: max N per over (key = original button name) ─────────
+#   Yorker  -> "Toe Crusher"  (Fast + Medium Pacer)
+#   Googly  -> "Mystery Turn" (Leg Spin)
+# Once the limit is reached the button turns grey for the rest of that over.
+LIMITED_DELIVERIES: dict[str, int] = {
+    "Yorker": 2,
+    "Googly": 2,
+}
+
+# Mystery Turn (Googly button) effect, applied in logic.calculate_outcome
+MYSTERY_TURN_BUTTON          = "Googly"
+MYSTERY_TURN_BOUNDARY_MULT   = 0.70   # 4 and 6 chance 30% kam
+MYSTERY_TURN_WICKET_MULT     = 1.10   # wicket chance 10% zyada
 
 
 def is_two_stage(bowling_type) -> bool:
@@ -400,6 +443,23 @@ def get_spin_buttons(bowling_type) -> list:
     return SPIN_BUTTONS_BY_TYPE.get(bowling_type, LEG_SPIN_BUTTONS)
 
 BATTING_BUTTONS = ["Drive", "Loft", "Flick", "Pull", "Cut", "Sweep", "Scoop", "Defend", "Leave"]
+
+# Text shown ON the batting buttons. Display only: the logic keeps the original
+# names above (shot guide, matchups, autoplay). Shots not listed keep their name.
+BAT_DISPLAY: dict[str, str] = {
+    "Loft":   "Smash",
+    "Scoop":  "Lap",
+    "Pull":   "Hook",
+    "Cut":    "Upper Cut",
+    "Defend": "Block",
+    "Leave":  "Skip",
+    # Drive, Sweep, Flick -> same naam
+}
+
+
+def bat_label(key: str) -> str:
+    """The name to print on a batting button (falls back to the original name)."""
+    return BAT_DISPLAY.get(key, key)
 
 # ── Two-step direction batting ─────────────────────────────────────────────
 # key -> (arrow, display name). Rename shots only through this dict.

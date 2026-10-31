@@ -43,25 +43,82 @@ def _conditions_block(conditions: dict) -> str:
     return "\n".join(lines)
 
 
+# ── Match start cards (short, monospace) ────────────────────────────────────
+_CARD_W   = 36
+_CARD_SEP = "-" * _CARD_W
+_PITCH_HINT = {
+    "spinner":     "Spin friendly",
+    "pacer":       "Pace friendly",
+    "medium_pace": "Seam friendly",
+    "batting":     "Batting friendly",
+}
+INVITE_SECONDS = 30   # must match AcceptDeclineView timeout
+
+
+def _cut(text, n: int) -> str:
+    t = str(text or "").replace("`", "'")
+    return t if len(t) <= n else t[: n - 1].rstrip() + "."
+
+
+def _team_line(team: dict | None, fallback: str) -> str:
+    team = team or {}
+    name = _cut(team.get("name") or fallback, 14)
+    ovr  = team.get("ovr", "-")
+    chem = team.get("chem", "-")
+    return f"{name:<14}  OVR {str(ovr):>3}  CHEM {str(chem):>3}"
+
+
+def _match_card(title: str, right: str, challenger, opponent, conditions: dict,
+                teams: tuple | None, extra: list[str] | None = None) -> str:
+    t1, t2 = (teams or (None, None))
+    venue   = _cut(conditions.get("venue", "-"), 26)
+    pitch   = _PITCH_HINT.get(conditions.get("pitch_type"), "Balanced")
+    weather = _cut(f"{conditions.get('weather', '-')}  {conditions.get('temperature', '-')}C", 26)
+    lines = [
+        f"{title}{right:>{_CARD_W - len(title)}}",
+        _CARD_SEP,
+        _team_line(t1, getattr(challenger, "display_name", "Team 1")),
+        f"{'vs':^{_CARD_W}}",
+        _team_line(t2, getattr(opponent, "display_name", "Team 2")),
+        _CARD_SEP,
+        f"{'Venue':<9}{venue}",
+        f"{'Pitch':<9}{pitch}",
+        f"{'Weather':<9}{weather}",
+    ]
+    if extra:
+        lines += [_CARD_SEP, *extra]
+    return "```\n" + "\n".join(lines) + "\n```"
+
+
+def card_status(embed: discord.Embed, status: str) -> discord.Embed:
+    """Replace the line under the card (countdown) with a short status, e.g. 'Accepted'."""
+    desc = embed.description or ""
+    end = desc.rfind("```")
+    if end != -1:
+        desc = desc[: end + 3]
+    embed.description = f"{desc}\n`{status}`"
+    return embed
+
+
 def build_match_invite_embed(
     challenger: discord.Member,
     opponent: discord.Member,
     overs: int,
     conditions: dict,
     gif_url: str | None = None,
+    teams: tuple | None = None,
+    expires_at: int | None = None,
 ) -> discord.Embed:
-    embed = discord.Embed(
-        title="Match Challenge",
-        color=discord.Color.from_rgb(8, 22, 60),
-    )
+    """Friendly match challenge card. teams = (challenger_team, opponent_team) dicts."""
+    import time as _time
+    expires_at = expires_at or int(_time.time()) + INVITE_SECONDS
+    embed = discord.Embed(color=discord.Color.from_rgb(29, 158, 117))
     embed.description = (
-        f"**{challenger.mention}** has challenged **{opponent.mention}**\n"
-        f"**{overs} over** match\n\n"
-        + _conditions_block(conditions)
+        _match_card("FRIENDLY MATCH", f"{overs} OVERS", challenger, opponent, conditions, teams)
+        + f"\n{opponent.mention} accept <t:{int(expires_at)}:R>"
     )
-    embed.set_footer(text=f"{opponent.display_name}, accept or decline below.")
     if gif_url:
-        embed.set_image(url=gif_url)
+        embed.set_thumbnail(url=gif_url)
     return embed
 
 
@@ -71,20 +128,16 @@ def build_ranked_match_embed(
     overs: int,
     conditions: dict,
     gif_url: str | None = None,
+    teams: tuple | None = None,
 ) -> discord.Embed:
-    """Ranked variant of the invite — no Accept / Decline, star stakes in footer."""
-    embed = discord.Embed(
-        title="Rank Up Mode",
-        color=discord.Color.from_rgb(8, 22, 60),
+    """Ranked match card (no Accept / Decline)."""
+    embed = discord.Embed(color=discord.Color.from_rgb(83, 74, 183))
+    embed.description = _match_card(
+        "RANKED MATCH", f"{overs} OVERS", challenger, opponent, conditions, teams,
+        extra=["Win  +1 star      Lose  -1 star"],
     )
-    embed.description = (
-        f"**{challenger.mention}** vs **{opponent.mention}**\n"
-        f"**{overs} over** match\n\n"
-        + _conditions_block(conditions)
-    )
-    embed.set_footer(text="Win: +1 star  ·  Lose: -1 star")
     if gif_url:
-        embed.set_image(url=gif_url)
+        embed.set_thumbnail(url=gif_url)
     return embed
 
 

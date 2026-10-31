@@ -14,6 +14,7 @@ from discord import ui
 from game import GameState, _pname
 from logic import calculate_outcome, player_attributes
 from commentary import build_ball_commentary
+import commentary as _comm
 import moments as _moments
 from embeds import build_scoreboard_embed, build_playing_xi_embed, build_result_embed
 from data import (
@@ -21,7 +22,7 @@ from data import (
     FAST_STAGE1, FAST_STAGE2,
     OFF_SPIN_BUTTONS, LEG_SPIN_BUTTONS,
     is_two_stage, get_two_stage_buttons, get_spin_buttons, button_label,
-    BATTING_BUTTONS, SHOT_BUTTON_MAP,
+    BATTING_BUTTONS, SHOT_BUTTON_MAP, bat_label, delivery_label,
     get_delivery_speed, resolve_delivery,
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
@@ -64,6 +65,25 @@ def _get_difficulty(game: GameState) -> dict:
 
 
 def _bot_pick_delivery(game: GameState) -> tuple[str, str, str]:
+    """CPU delivery pick that respects the per-over limits (Toe Crusher / Mystery Turn)."""
+    pick = _bot_pick_delivery_raw(game)
+    for _ in range(20):
+        if game.special_ball_left(pick[1]):
+            return pick
+        pick = _bot_pick_delivery_raw(game)
+    # Fallback: any allowed button of this bowler
+    btype = (game.current_bowler or {}).get("bowling_type", "Fast")
+    if is_two_stage(btype):
+        s1_pool, s2_pool = get_two_stage_buttons(btype)
+        ok = [b for b in s2_pool if game.special_ball_left(b)] or s2_pool
+        b = random.choice(ok)
+        return random.choice(s1_pool), b, DELIVERY_BUTTON_MAP.get(b, b)
+    ok = [b for b in get_spin_buttons(btype) if game.special_ball_left(b)] or get_spin_buttons(btype)
+    b = random.choice(ok)
+    return "", b, resolve_delivery(b, btype)
+
+
+def _bot_pick_delivery_raw(game: GameState) -> tuple[str, str, str]:
     """
     CPU picks a delivery based on difficulty.
     - Easy:   mostly weak/easy deliveries (full, good length)
@@ -203,6 +223,13 @@ async def _practice_process_delivery(
             pass
 
 
+async def _send_practice_commentary(channel, commentary, embed, anim=None):
+    """Commentary + scoreboard; plays the rare suspense animation first when there is one."""
+    if anim and await _comm.play_animated(channel, commentary, embed, anim):
+        return
+    await channel.send(content=commentary, embed=embed)
+
+
 async def _practice_process_delivery_inner(
     interaction: discord.Interaction,
     game: GameState,
@@ -228,6 +255,9 @@ async def _practice_process_delivery_inner(
 
     bname = _pname(bowler)
     sname = _pname(striker)
+
+    # Toe Crusher / Mystery Turn: count this ball for the 2-per-over limit.
+    game.count_special_ball(delivery_button)
 
     speed_range  = get_delivery_speed(delivery_button, (game.current_bowler or {}).get("bowling_type"))
     speed        = random.uniform(*speed_range)
@@ -263,7 +293,7 @@ async def _practice_process_delivery_inner(
     if this_ball_is_free_hit and outcome == "W":
         outcome  = "0"
         is_extra = False
-        commentary_suffix = "  *(Free Hit — NOT OUT!)*"
+        commentary_suffix = "That would have been out, but it is a FREE HIT. He survives."
     else:
         commentary_suffix = ""
 
@@ -279,7 +309,12 @@ async def _practice_process_delivery_inner(
         outcome          = outcome,
         bowling_type     = bowler.get("bowling_type", "Fast"),
         stage1_choice    = stage1_choice,
-    ) + commentary_suffix
+        game             = game,
+        shot_quality     = "good" if is_recommended_shot else None,
+    )
+    if commentary_suffix:
+        commentary = _comm.add_lines(commentary, commentary_suffix)
+    _anim = _comm.pop_animation(game)   # rare suspense frames for this ball ([] usually)
 
     striker_runs_before   = game.batsman_stats.get(sname, {}).get("runs", 0)
     bowler_wickets_before = game.bowler_stats.get(bname, {}).get("wickets", 0)
@@ -353,7 +388,7 @@ async def _practice_process_delivery_inner(
         over_index=current_over, bowler_balls_before=_bowler_balls_before,
     )
     if _mom["style"]:
-        commentary = f"{commentary}\n{_mom['style']}"
+        commentary = _comm.add_lines(commentary, _mom["style"])
     gif_urls += _mom["items"]
 
     if outcome in ("1", "2", "3", "4", "6"):
@@ -361,16 +396,15 @@ async def _practice_process_delivery_inner(
         for milestone in (50, 100, 150, 200, 250, 300):
             if striker_runs_before < milestone <= runs_after:
                 if milestone in (50, 100):
-                    _m_emoji = emojis.CENTURY if milestone == 100 else emojis.HALFCENTURY
                     _m_word = "CENTURY" if milestone == 100 else "HALF-CENTURY"
-                    commentary = f"{commentary}\n{_m_emoji} **{sname}** reaches a {_m_word}! ({runs_after})"
+                    commentary = _comm.add_lines(commentary, f"{_m_word} for {sname}! {runs_after} runs.")
                 gif = get_milestone_gif(sname, str(milestone)) or get_player_media(sname, str(milestone))
                 if gif:
                     gif_urls.append(gif)
                 break
 
     if _mom["pressure"]:
-        commentary = f"{commentary}\n{_mom['pressure']}"
+        commentary = _comm.add_lines(commentary, _mom["pressure"])
 
     # Ack the interaction
     try:
@@ -384,7 +418,7 @@ async def _practice_process_delivery_inner(
 
     # ── Wicket (not last) ─────────────────────────────────────────────────
     if outcome == "W" and not innings_over:
-        await channel.send(content=commentary, embed=embed)
+        await _send_practice_commentary(channel, commentary, embed, _anim)
         await _send_gifs(channel, gif_urls)
         game.timeline.append(_timeline_emoji("W"))
         await _practice_handle_wicket(channel, game)
@@ -395,7 +429,7 @@ async def _practice_process_delivery_inner(
         if outcome == "W":
             game.timeline.append(_timeline_emoji("W"))
         gif_urls += _moments.last_over_items(game)   # maiden in the innings' final over
-        await channel.send(content=commentary, embed=embed)
+        await _send_practice_commentary(channel, commentary, embed, _anim)
         await _send_gifs(channel, gif_urls)
         if game.innings == 1:
             await _practice_start_second_innings(channel, game)
@@ -413,20 +447,20 @@ async def _practice_process_delivery_inner(
         game.rotate_strike()
         game.timeline.append("|")
         game.end_over()
-        await channel.send(content=commentary, embed=embed)
+        await _send_practice_commentary(channel, commentary, embed, _anim)
         await _send_gifs(channel, gif_urls)
         await _practice_next_over(channel, game)
         return
 
     # ── Extras — re-bowl ─────────────────────────────────────────────────
     if is_extra:
-        await channel.send(content=commentary, embed=embed)
+        await _send_practice_commentary(channel, commentary, embed, _anim)
         await _send_gifs(channel, gif_urls)
         await _practice_send_bowling(channel, game)
         return
 
     # ── Normal continue ───────────────────────────────────────────────────
-    await channel.send(content=commentary, embed=embed)
+    await _send_practice_commentary(channel, commentary, embed, _anim)
     await _send_gifs(channel, gif_urls)
     await _practice_send_bowling(channel, game)
 
@@ -530,7 +564,7 @@ async def _bot_bowl_and_wait(
 
     speed      = random.uniform(*get_delivery_speed(delivery_btn, (game.current_bowler or {}).get("bowling_type")))
     bname      = _pname(game.current_bowler)
-    combined   = f"{stage1} {delivery_btn}".strip() if stage1 else delivery_btn
+    combined   = delivery_label((game.current_bowler or {}).get("bowling_type", "Fast"), stage1, delivery_btn)
     free_prefix= "🟡 **FREE HIT!**  " if is_free_hit else ""
 
     batting_view = PracticeBattingView(game, stage1_choice=stage1, is_free_hit=is_free_hit)
@@ -1163,8 +1197,12 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
                 b.disabled = True
                 b.style    = discord.ButtonStyle.secondary
             for b, key in zip(self._stage2_btns, self._stage2_keys):
-                b.disabled = False
-                b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
+                if self.game.special_ball_left(key):      # Toe Crusher: max 2 per over
+                    b.disabled = False
+                    b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
+                else:
+                    b.disabled = True
+                    b.style    = discord.ButtonStyle.secondary
             try:
                 await interaction.response.edit_message(view=self)
             except Exception as e:
@@ -1179,6 +1217,9 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
             if not self.stage1_choice:
                 await interaction.response.send_message("Pehle swing/speed choose karo.", ephemeral=True)
                 return
+            if not self.game.special_ball_left(delivery_button):
+                await interaction.response.send_message("Is over mein is ball ki limit poori ho gayi.", ephemeral=True)
+                return
             self.stop()
             delivery_internal = DELIVERY_BUTTON_MAP.get(delivery_button, delivery_button)
             self.game.pending_delivery          = delivery_button
@@ -1186,7 +1227,7 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
             self.game.phase = "bat_select"
 
             speed    = random.uniform(*get_delivery_speed(delivery_button, self.btype))
-            combined = f"{self.stage1_choice} {delivery_button}"
+            combined = delivery_label(self.btype, self.stage1_choice, delivery_button)
 
             # Bot picks shot automatically
             shot_button, is_rec = _bot_pick_shot(delivery_button, self.stage1_choice, self.game)
@@ -1194,7 +1235,7 @@ class PracticeFastBowlStage1View(_PracticeTimeoutMixin, ui.View):
             await interaction.response.edit_message(
                 content=(
                     f"{free_prefix}**{_pname(self.game.current_bowler)}** : **{combined}** at {speed:.1f} km/h  ·  "
-                    f"🤖 CPU plays **{shot_button}**"
+                    f"🤖 CPU plays **{bat_label(shot_button)}**"
                 ),
                 view=None,
                 embed=None,
@@ -1229,7 +1270,10 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
                             "Doosra": discord.ButtonStyle.success, "Carrom": discord.ButtonStyle.primary,
                             "Slider": discord.ButtonStyle.success})
         for i, label in enumerate(buttons):
-            btn          = ui.Button(label=button_label(btype, label), style=_STYLES.get(label, discord.ButtonStyle.secondary), row=i // 3)
+            left         = self.game.special_ball_left(label)   # Mystery Turn: max 2 per over
+            btn          = ui.Button(label=button_label(btype, label),
+                                     style=_STYLES.get(label, discord.ButtonStyle.secondary) if left else discord.ButtonStyle.secondary,
+                                     row=i // 3, disabled=not left)
             btn.callback = self._make_callback(label)
             self.add_item(btn)
 
@@ -1237,6 +1281,9 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
         async def callback(interaction: discord.Interaction):
             if interaction.user.id != self.game.bowling_user_id:
                 await interaction.response.send_message("Only you bowl!", ephemeral=True)
+                return
+            if not self.game.special_ball_left(delivery_button):
+                await interaction.response.send_message("Is over mein is ball ki limit poori ho gayi.", ephemeral=True)
                 return
             self.stop()
             btype             = self.game.current_bowler.get("bowling_type", "Off Spin")
@@ -1250,8 +1297,8 @@ class PracticeBowlingView(_PracticeTimeoutMixin, ui.View):
             free_prefix = "🟡 **FREE HIT!**  " if self.is_free_hit else ""
             await interaction.response.edit_message(
                 content=(
-                    f"{free_prefix}**{_pname(self.game.current_bowler)}** : **{delivery_button}** at {speed:.1f} km/h  ·  "
-                    f"🤖 CPU plays **{shot_button}**"
+                    f"{free_prefix}**{_pname(self.game.current_bowler)}** : **{button_label(btype, delivery_button)}** at {speed:.1f} km/h  ·  "
+                    f"🤖 CPU plays **{bat_label(shot_button)}**"
                 ),
                 view=None,
                 embed=None,
@@ -1299,7 +1346,8 @@ class PracticeBattingView(_PracticeTimeoutMixin, ui.View):
             "Sweep": 1, "Scoop": 1, "Defend": 1, "Leave": 1,
         }
         for label in BATTING_BUTTONS:
-            btn          = ui.Button(label=label, style=STYLES.get(label, discord.ButtonStyle.secondary), row=ROWS.get(label, 0))
+            btn          = ui.Button(label=bat_label(label), style=STYLES.get(label, discord.ButtonStyle.secondary),
+                                     row=ROWS.get(label, 0), custom_id=f"bat_{label}")
             btn.callback = self._make_callback(label, label in self.recommended)
             self.add_item(btn)
 
