@@ -9,6 +9,8 @@ Admin slash commands (main server only), all under /sigbox:
     /sigbox reward   change one of the 9 other tiles (pack, voucher, coins, player card, summary theme)
     /sigbox cost     change the RCP price of one spin (1-10)
     /sigbox chance   change the Signature chance of one spin (1-9; spin 10 is always guaranteed)
+    /sigbox slotchance  change how likely one reward slot (1-9) is to come up
+    /sigbox reset    reset one user's box: they can open it again from spin 1 (keeps what they won)
     /sigbox info     prices, chances and rewards of the open box (+ preview image)
     /sigbox end      close the box now
 RC Points: `admin rcp give | remove | check` (admin_cog.py).
@@ -267,9 +269,10 @@ def _theme_choices():
 def _info_text(box: dict, cards: dict) -> str:
     rows = [f"{box['name']}  ·  Signature: {_card_name(cards, box['player_key'])}",
             f"Closes <t:{int(box['end_ts'])}:R>", "", "Tiles:"]
+    pct = sigbox.slot_percents(box)
     for i, rw in enumerate(box["rewards"], 1):
         what = _card_name(cards, rw.player_key) if rw.kind == "player" else rw.label()
-        rows.append(f"  slot {i}: {what}")
+        rows.append(f"  slot {i}: {what}  ·  chance {box['weights'][i - 1]:g} (= {pct[i - 1]:g}% on a fresh box)")
     rows += ["", "Spins (price · Signature chance):"]
     for i in range(sigbox.SPINS):
         ch = "guaranteed" if i == sigbox.SPINS - 1 else f"{box['chances'][i]:g}%"
@@ -404,6 +407,44 @@ class SigBoxCog(commands.Cog, name="SigBox"):
             await interaction.response.send_message(res, ephemeral=True)
             return
         await interaction.response.send_message(f"Spin {spin} now has a {percent:g}% Signature chance.", ephemeral=True)
+
+    @group.command(name="slotchance", description="Change how likely one reward slot (1-9) is to come up")
+    @app_commands.describe(slot="Reward slot 1-9 (see /sigbox info)",
+                           chance="Chance number 0-100. Higher = comes earlier. 0 = only when nothing else is left")
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def slotchance(self, interaction: discord.Interaction,
+                         slot: app_commands.Range[int, 1, sigbox.OTHER_SLOTS],
+                         chance: app_commands.Range[float, 0.0, 100.0]):
+        res = await asyncio.to_thread(sigbox.set_slot_chance, slot, chance)
+        if isinstance(res, str):
+            await interaction.response.send_message(res, ephemeral=True)
+            return
+        cards = await _cards_for(res)
+        rw = res["rewards"][slot - 1]
+        what = _card_name(cards, rw.player_key) if rw.kind == "player" else rw.label()
+        pct = sigbox.slot_percents(res)
+        lines = [f"Slot {i}: {res['weights'][i - 1]:g}  ({pct[i - 1]:g}%)" for i in range(1, sigbox.OTHER_SLOTS + 1)]
+        await interaction.response.send_message(
+            f"Slot {slot} ({esc(what)}) now has chance **{chance:g}**.\n"
+            "Chance of every slot on a fresh box (when the spin is not the Signature card):\n"
+            + "\n".join(lines), ephemeral=True)
+
+    @group.command(name="reset", description="Reset a user's Signature Box so they can open it again from spin 1")
+    @app_commands.describe(user="Whose box to reset (they keep everything they already won)")
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def reset(self, interaction: discord.Interaction, user: discord.Member):
+        res = await asyncio.to_thread(sigbox.reset_user, user.id)
+        if isinstance(res, str):
+            await interaction.response.send_message(res, ephemeral=True)
+            return
+        if res["removed"] == 0:
+            await interaction.response.send_message(
+                f"{esc(user.display_name)} has not spun this box yet, nothing to reset.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"Reset **{esc(user.display_name)}**'s {esc(res['box']['name'])}: {res['removed']} spin(s) cleared. "
+            "They can open it again from spin 1 (free spins too). What they already won stays with them.",
+            ephemeral=True)
 
     @group.command(name="info", description="Prices, chances and tiles of the open box")
     @app_commands.check(lambda i: is_staff(i.user))

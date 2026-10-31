@@ -315,3 +315,28 @@ SIGNATURE BOX + RC POINTS (naya: sigbox.py, sigbox_image.py, sigbox_cog.py
 
   Tables apne aap bante hain: sigbox_box, sigbox_reward, sigbox_draw, rcp_wallet, rcp_log
   Default rewards / prices / chances: sigbox.py ke upar (DEFAULT_...)
+
+
+SIGNATURE BOX: HAR SLOT KA CHANCE (sigbox.py, sigbox_cog.py)
+============================================================
+
+  /sigbox slotchance  slot:1-9  chance:0-100
+    * Har reward slot ka apna chance number. Default sab 10 (barabar).
+    * Number relative hai: 40 wala slot 10 wale se 4 guna jaldi aata hai,
+      1 wala bahut der se. 0 = tab hi aata hai jab aur kuch na bacha ho.
+    * Har reward phir bhi sirf ek baar milta hai aur 10 spin mein sab khul jaate hain,
+      isliye kam chance = wo reward zyada tar AAKHRI (mehnge) spins mein aata hai.
+    * Reply mein saare slots ka % dikhta hai. /sigbox info mein bhi.
+    * Signature card ka chance alag hai: /sigbox chance (har spin ka).
+    * Purana chalu box bhi kaam karega (sab slot 10 se shuru), database apne aap update.
+
+
+SIGNATURE BOX: USER RESET (sigbox.py, sigbox_cog.py)
+====================================================
+
+  /sigbox reset user:@user
+    * Us user ke is box ke saare spins saaf. Wo phir se spin 1 se box khol sakta hai
+      (2 free spins bhi wapas).
+    * Jo pehle jeeta (Signature card, packs, coins...) wo uske paas hi rehta hai.
+    * Signature card dobara mila to duplicate -> card ki keemat ke coins.
+    * RCP wapas nahi milte; dene ho to admin rcp give.

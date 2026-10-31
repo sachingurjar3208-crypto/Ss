@@ -13,8 +13,9 @@ How it works
   remaining other tiles is picked at random. So by spin 10 only the Signature tile is
   left and it is GUARANTEED. After the Signature is won, the rest of the spins give
   the remaining tiles.
-- Admins change rewards (`/sigbox reward`), prices (`/sigbox cost`) and chances
-  (`/sigbox chance`) at any time. Players who already drew keep what they got.
+- Admins change rewards (`/sigbox reward`), prices (`/sigbox cost`), Signature chances
+  per spin (`/sigbox chance`) and the chance of every reward slot (`/sigbox slotchance`)
+  at any time. Players who already drew keep what they got.
 - A draw is ONE database transaction: RC Points, the draw row and the reward are saved
   together or not at all. (box, user, spin) and (box, user, tile) are unique, so pressing
   the button many times can never pay twice or give a tile twice.
@@ -49,6 +50,7 @@ DEFAULT_REWARDS = [                                                 # slot 1 .. 
     ("coins", 5_000), ("bronze", 1), ("coins", 10_000), ("voucher", 1), ("silver", 1),
     ("coins", 25_000), ("voucher", 2), ("gold", 1), ("legendary", 1),
 ]
+DEFAULT_WEIGHTS = [10] * 9                                          # chance of slot 1 .. 9 (relative, see draw())
 DEFAULT_NAME = "Signature Box"
 MAX_DAYS = 90
 MAX_RCP = 1_000_000_000
@@ -67,6 +69,8 @@ def _ensure(conn) -> None:
         "start_ts REAL NOT NULL, end_ts REAL NOT NULL, active INTEGER NOT NULL DEFAULT 1, "
         "costs TEXT NOT NULL, chances TEXT NOT NULL, created_by INTEGER)"
     )
+    if "weights" not in {r[1] for r in conn.execute("PRAGMA table_info(sigbox_box)")}:
+        conn.execute("ALTER TABLE sigbox_box ADD COLUMN weights TEXT")    # older boxes: every slot equal
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sigbox_reward ("
         "box_id INTEGER NOT NULL, slot INTEGER NOT NULL, kind TEXT NOT NULL, "
@@ -161,11 +165,13 @@ def _rewards(conn, box_id: int) -> list[Reward]:
 def _box_dict(conn, row) -> dict:
     costs = json.loads(row["costs"])
     chances = json.loads(row["chances"])
+    weights = json.loads(row["weights"]) if "weights" in row.keys() and row["weights"] else []
     return {
         "id": int(row["id"]), "name": row["name"], "player_key": row["player_key"],
         "start_ts": float(row["start_ts"]), "end_ts": float(row["end_ts"]),
         "costs": [int(c) for c in costs][:SPINS] + DEFAULT_COSTS[len(costs):],
         "chances": [float(c) for c in chances][:OTHER_SLOTS] + DEFAULT_CHANCES[len(chances):],
+        "weights": [float(w) for w in weights][:OTHER_SLOTS] + DEFAULT_WEIGHTS[len(weights):],
         "rewards": _rewards(conn, int(row["id"])),
     }
 
@@ -183,10 +189,10 @@ def create_box(player_key: str, days: int, name: str | None = None, admin_id: in
         _ensure(conn)
         conn.execute("UPDATE sigbox_box SET active = 0 WHERE active = 1")
         cur = conn.execute(
-            "INSERT INTO sigbox_box (name, player_key, start_ts, end_ts, active, costs, chances, created_by) "
-            "VALUES (?, ?, ?, ?, 1, ?, ?, ?)",
+            "INSERT INTO sigbox_box (name, player_key, start_ts, end_ts, active, costs, chances, weights, created_by) "
+            "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
             ((name or "").strip()[:40] or DEFAULT_NAME, player_key, now, now + int(days) * DAY,
-             json.dumps(DEFAULT_COSTS), json.dumps(DEFAULT_CHANCES), int(admin_id)))
+             json.dumps(DEFAULT_COSTS), json.dumps(DEFAULT_CHANCES), json.dumps(DEFAULT_WEIGHTS), int(admin_id)))
         row = conn.execute("SELECT * FROM sigbox_box WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _box_dict(conn, row)
 
@@ -228,7 +234,7 @@ def _set_list(column: str, index: int, value, length: int, default: list) -> dic
         row = _active(conn)
         if row is None:
             return "No Signature Box is open. Start one with /sigbox create first."
-        vals = json.loads(row[column])
+        vals = json.loads(row[column] or "[]")
         vals = (vals + default[len(vals):])[:length]
         vals[index] = value
         conn.execute(f"UPDATE sigbox_box SET {column} = ? WHERE id = ?", (json.dumps(vals), row["id"]))
@@ -249,7 +255,36 @@ def set_chance(spin: int, percent: float) -> dict | str:
         return f"Spin must be 1 to {OTHER_SLOTS} (spin {SPINS} is always the Signature card if not won yet)."
     if not 0 <= float(percent) <= 100:
         return "Chance must be 0 to 100."
-    return _set_list("chances", int(spin) - 1, round(float(percent), 2), OTHER_SLOTS, DEFAULT_CHANCES)
+    return _set_list("chances", int(spin) - 1, round(float(percent), 3), OTHER_SLOTS, DEFAULT_CHANCES)
+
+
+def set_slot_chance(slot: int, chance: float) -> dict | str:
+    """How likely reward slot 1-9 is to come up (relative: 20 is twice as likely as 10, 0 = only
+    when nothing else is left, because every tile still drops once in 10 spins)."""
+    if not 1 <= int(slot) <= OTHER_SLOTS:
+        return f"Slot must be 1 to {OTHER_SLOTS}."
+    if not 0 <= float(chance) <= 100:
+        return "Chance must be 0 to 100."
+    return _set_list("weights", int(slot) - 1, round(float(chance), 3), OTHER_SLOTS, DEFAULT_WEIGHTS)
+
+
+def slot_percents(box: dict) -> list[float]:
+    """The chance (%) of every slot on the FIRST spin that is not the Signature card."""
+    w = box["weights"]
+    total = sum(w)
+    return [round(100 * x / total, 2) if total else round(100 / len(w), 2) for x in w]
+
+
+def reset_user(user_id) -> dict | str:
+    """Admin: wipe one user's spins in the open box, so they can open it again from spin 1
+    (free spins too). Everything they already won stays with them."""
+    uid = int(user_id)
+    with economy._tx() as conn:
+        row = _active(conn)
+        if row is None:
+            return "No Signature Box is open."
+        n = conn.execute("DELETE FROM sigbox_draw WHERE box_id = ? AND user_id = ?", (row["id"], uid)).rowcount
+        return {"box": _box_dict(conn, row), "removed": int(n)}
 
 
 def player_keys(box: dict) -> list[str]:
@@ -328,7 +363,7 @@ def draw(user_id, player_values: dict[str, int] | None = None, expect_spin: int 
         if not b["sig_won"] and (not others or _rng.random() * 100 < float(b["next_chance"] or 0)):
             slot = SIGNATURE_SLOT
         else:
-            slot = _rng.choice(others)
+            slot = _pick(others, box["weights"])
 
         cur = conn.execute(
             "INSERT OR IGNORE INTO sigbox_draw (box_id, user_id, spin, slot, cost, ts) VALUES (?, ?, ?, ?, ?, ?)",
@@ -342,6 +377,20 @@ def draw(user_id, player_values: dict[str, int] | None = None, expect_spin: int 
         status, refund = _pay(conn, uid, reward, f"{box['name']} spin {n}", values)
         return {"spin": n, "slot": slot, "reward": reward, "cost": cost, "status": status,
                 "refund": refund, "board": _board(conn, row, uid)}
+
+
+def _pick(slots: list[int], weights: list[float]) -> int:
+    """Weighted pick among the slots still closed. If all of them have chance 0, any of them."""
+    ws = [max(0.0, float(weights[s - 1])) for s in slots]
+    total = sum(ws)
+    if total <= 0:
+        return _rng.choice(slots)
+    r = _rng.random() * total
+    for s, w in zip(slots, ws):
+        r -= w
+        if r < 0:
+            return s
+    return slots[-1]
 
 
 def _pay(conn, uid: int, rw: Reward, reason: str, values: dict) -> tuple[str, int]:
