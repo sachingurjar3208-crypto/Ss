@@ -134,7 +134,7 @@ def _shade(img, rect, radius):
     img.alpha_composite(sh, (x0, y0))
 
 
-def _draw_tile(img: Image.Image, slot: int, board: dict, cards: dict, opened: dict) -> None:
+def _draw_tile(img: Image.Image, slot: int, board: dict, cards: dict) -> None:
     d = ImageDraw.Draw(img)
     x0, y0, x1, y1 = RECTS[slot]
     d.rounded_rectangle((x0, y0, x1, y1), 16, fill=TILE, outline=TILE_LINE, width=2)
@@ -145,17 +145,19 @@ def _draw_tile(img: Image.Image, slot: int, board: dict, cards: dict, opened: di
         img.alpha_composite(icon, (int((x0 + x1 - icon.width) / 2), y0 + 12))
     label = _label(rw, cards)
     d = ImageDraw.Draw(img)
-    if slot not in opened:
+    if slot not in board["wins"]:
         d.text(((x0 + x1) / 2, y1 - 22), label, font=_fit(d, label, _LAB, 21, TW - 16), fill=WHITE, anchor="mm")
         return
-    _shade(img, (x0, y0, x1, y1), 16)
+    _shade(img, (x0, y0, x1, y1), 16)                 # already won (every reward only once)
     d = ImageDraw.Draw(img)
     _check(d, (x0 + x1) / 2, y0 + 64, 26)
     d.text(((x0 + x1) / 2, y1 - 22), label, font=_fit(d, label, _LAB, 21, TW - 16), fill=(150, 140, 175), anchor="mm")
-    d.text((x1 - 10, y0 + 9), f"SPIN {opened[slot]}", font=_f(_LAB, 14), fill=DIM, anchor="rt")
+    spin = next((sp for sp, sl in board["history"] if sl == slot), None)
+    if spin is not None:
+        d.text((x1 - 10, y0 + 9), f"SPIN {spin}", font=_f(_LAB, 14), fill=DIM, anchor="rt")
 
 
-def _draw_card(img: Image.Image, board: dict, cards: dict, opened: dict) -> None:
+def _draw_card(img: Image.Image, board: dict, cards: dict) -> None:
     box = board["box"]
     x0, y0, x1, y1 = RECTS[sigbox.SIGNATURE_SLOT]
     card = _card_img(cards.get(box["player_key"]), CARD_H)
@@ -169,11 +171,12 @@ def _draw_card(img: Image.Image, board: dict, cards: dict, opened: dict) -> None
         sh.putalpha(card.split()[3].point(lambda a: int(a * 0.6)))
         img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(18)), (cx + 8, y0 + 16))
         img.alpha_composite(card, (cx, y0))
-    if sigbox.SIGNATURE_SLOT in opened:
+    won_on = next((sp for sp, sl in board["history"] if sl == sigbox.SIGNATURE_SLOT), None)
+    if won_on is not None:
         d = ImageDraw.Draw(img)
         mx, my = (x0 + x1) / 2, y1 - 40
         d.rounded_rectangle((mx - 130, my - 24, mx + 130, my + 24), 24, fill=(20, 60, 40), outline=GREEN, width=2)
-        d.text((mx, my), f"WON ON SPIN {opened[sigbox.SIGNATURE_SLOT]}", font=_f(_NUM, 24), fill=(220, 255, 230), anchor="mm")
+        d.text((mx, my), f"WON ON SPIN {won_on}", font=_f(_NUM, 24), fill=(220, 255, 230), anchor="mm")
 
 
 def _ends_text(end_ts: float) -> str:
@@ -184,7 +187,7 @@ def _ends_text(end_ts: float) -> str:
     return f"Closes in {max(1, hours)} hour{'s' if hours != 1 else ''}"
 
 
-def _base(board: dict, cards: dict, opened: dict) -> Image.Image:
+def _base(board: dict, cards: dict) -> Image.Image:
     img = _background()
     box = board["box"]
     sig_card = cards.get(box["player_key"])
@@ -206,9 +209,9 @@ def _base(board: dict, cards: dict, opened: dict) -> Image.Image:
     d.polygon([(gx, gy - 13), (gx + 11, gy - 3), (gx, gy + 13), (gx - 11, gy - 3)], fill=(70, 200, 220))
     d.text((gx + 20, gy), bal, font=f, fill=WHITE, anchor="lm")
 
-    _draw_card(img, board, cards, opened)
+    _draw_card(img, board, cards)
     for slot in range(1, sigbox.OTHER_SLOTS + 1):
-        _draw_tile(img, slot, board, cards, opened)
+        _draw_tile(img, slot, board, cards)
     d = ImageDraw.Draw(img)
 
     # info panel: progress + next spin
@@ -217,7 +220,7 @@ def _base(board: dict, cards: dict, opened: dict) -> Image.Image:
     d.text((px0 + 24, PANEL_Y + 24), "Every reward drops once  ·  Signature card guaranteed by spin 10",
            font=_f(_LAB, 20), fill=WHITE, anchor="lm")
     bx0, bx1_, by = px0 + 24, px0 + 640, PANEL_Y + 56
-    spins = len(opened)
+    spins = board["spins"]
     d.rounded_rectangle((bx0, by - 7, bx1_, by + 7), 7, fill=(50, 40, 80))
     if spins:
         d.rounded_rectangle((bx0, by - 7, bx0 + (bx1_ - bx0) * spins / sigbox.SPINS, by + 7), 7, fill=GOLD)
@@ -252,7 +255,7 @@ def _base(board: dict, cards: dict, opened: dict) -> Image.Image:
 
 
 def board_png(board: dict, cards: dict) -> bytes:
-    img = _base(board, cards, board["drawn"]).convert("RGB")
+    img = _base(board, cards).convert("RGB")
     buf = io.BytesIO()
     img.save(buf, "PNG", optimize=True)
     return buf.getvalue()
@@ -277,10 +280,11 @@ def _glow(img: Image.Image, slot: int, strong: bool) -> Image.Image:
 
 
 def draw_gif(board_before: dict, slot: int, cards: dict) -> tuple[bytes, float]:
-    """The light runs over the still-closed rewards (and the card), slows down and stops on the prize."""
-    opened = board_before["drawn"]
-    base = _base(board_before, cards, opened)
-    closed = [s for s in range(sigbox.SPINS) if s not in opened]
+    """The light runs over the rewards (and the card), slows down and stops on the prize."""
+    base = _base(board_before, cards)
+    closed = [x for x in range(1, sigbox.SPINS) if x not in board_before["wins"]]
+    if not board_before["sig_won"]:
+        closed.append(sigbox.SIGNATURE_SLOT)
     steps = 15 if len(closed) > 1 else 3
     seq, last = [], None
     for _ in range(steps - 1):

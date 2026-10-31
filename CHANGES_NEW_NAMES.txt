@@ -340,3 +340,39 @@ SIGNATURE BOX: USER RESET (sigbox.py, sigbox_cog.py)
     * Jo pehle jeeta (Signature card, packs, coins...) wo uske paas hi rehta hai.
     * Signature card dobara mila to duplicate -> card ki keemat ke coins.
     * RCP wapas nahi milte; dene ho to admin rcp give.
+
+
+SIGNATURE BOX: NAYE DEFAULT SLOT CHANCE (sigbox.py)
+===================================================
+
+  Naye box mein slots ab barabar nahi:
+    slot 1  5,000 coins   30      slot 6  25,000 coins  8
+    slot 2  Bronze pack   25      slot 7  2 vouchers    6
+    slot 3  10,000 coins  20      slot 8  Gold pack     2
+    slot 4  1 voucher     15      slot 9  Legend pack   0.5
+    slot 5  Silver pack   12
+  Sasti cheezein pehle, Gold / Legend pack zyada tar aakhri mehnge spins mein.
+  Signature: har spin 0.1%, spin 10 pakka (agar pehle na mila).
+  Chalu box par lagane ke liye: /sigbox slotchance (ya VPS wala command).
+
+
+SIGNATURE BOX: NAYE REWARDS + ACCHE REWARDS HARD (sigbox.py, sigbox_image.py, sigbox_cog.py)
+============================================================================================
+
+  * Rule wahi: har reward sirf EK baar milta hai.
+  * Naye default rewards aur chance (naya box):
+        slot 1  50,000 coins  95      slot 6  Gold pack      3
+        slot 2  Bronze pack   80      slot 7  10 voucher     1
+        slot 3  Silver pack   60      slot 8  25 voucher     0.6
+        slot 4  1 voucher     10      slot 9  Legend pack    0.5
+        slot 5  5 voucher     5
+    (1 voucher = 1 draft)
+  * Chance sirf BACHE hue rewards mein compare hota hai, isliye kam chance wale rewards
+    zyada tar aakhri mehnge spins mein aate hain:
+        50k / Bronze / Silver   spin 1-4
+        10 voucher              zyada tar spin 7-9
+        25 voucher              zyada tar spin 8-9
+        Legend pack             zyada tar spin 8-9 (44% spin 9 par)
+        Signature card          0.1% har spin, 99% ko spin 10 par (sabse hard)
+  * Aur hard karna ho: /sigbox slotchance se number aur kam karo (jaise Legend 0.05).
+  * Database: spins ab sigbox_spin table mein (purane apne aap copy).

@@ -5,20 +5,21 @@ How it works
   days it stays open, and an optional name. Only ONE box runs at a time. When its time is
   up it simply disappears (every function below treats an expired box as "no box").
 - A box has 10 tiles: the Signature card + 9 other rewards (packs, vouchers, coins,
-  player cards, summary themes). Every tile can be won only ONCE per user.
+  player cards, summary themes).
 - Each user has 10 spins per box. The price of every spin is set per box
   (default: free, free, 30, 60, 120, 240, 480, 900, 1800, 3600 RC Points).
-- Every spin has a chance to hit the Signature card (default 1% for spins 1-5,
-  2% for spins 6-8, 10% for spin 9). If the Signature card is not hit, one of the
-  remaining other tiles is picked at random. So by spin 10 only the Signature tile is
-  left and it is GUARANTEED. After the Signature is won, the rest of the spins give
-  the remaining tiles.
+- Every reward can be won only ONCE per user.
+- Every spin first rolls the Signature chance of that spin (default 0.1%). Spin 10 ALWAYS
+  gives the Signature card if it has not come yet. Otherwise one of the rewards NOT won yet
+  is picked by its chance (`weights`). Low chance = it is (almost) always one of the LAST,
+  most expensive spins: cheap rewards come first, the 10 / 25 vouchers and the Legend Pack
+  come late, and the Signature card is the hardest of all (spin 10).
 - Admins change rewards (`/sigbox reward`), prices (`/sigbox cost`), Signature chances
   per spin (`/sigbox chance`) and the chance of every reward slot (`/sigbox slotchance`)
   at any time. Players who already drew keep what they got.
 - A draw is ONE database transaction: RC Points, the draw row and the reward are saved
-  together or not at all. (box, user, spin) and (box, user, tile) are unique, so pressing
-  the button many times can never pay twice or give a tile twice.
+  together or not at all. (box, user, spin) is unique, so pressing the button many times
+  can never pay twice.
 
 RC Points (RCP)
 - Only admins add / remove them (`admin rcp give | remove | check`). Users see their
@@ -27,7 +28,8 @@ RC Points (RCP)
 Tables (created automatically):
     sigbox_box     one row per box (player, end time, prices, chances)
     sigbox_reward  the 9 other tiles of a box: (box, slot 1-9) -> reward
-    sigbox_draw    what every user drew: (box, user, spin) -> slot (0 = Signature card)
+    sigbox_spin    what every user drew: (box, user, spin) -> slot (0 = Signature card)
+                   (sigbox_draw = the old table, copied into sigbox_spin once)
     rcp_wallet     RC Points per user
     rcp_log        every RC Points change
 """
@@ -46,11 +48,13 @@ OTHER_SLOTS = SPINS - 1
 SIGNATURE_SLOT = 0
 DEFAULT_COSTS = [0, 0, 30, 60, 120, 240, 480, 900, 1800, 3600]     # RCP for spin 1 .. 10
 DEFAULT_CHANCES = [0.1] * 9                                        # % Signature on spin 1 .. 9 (10 = guaranteed)
-DEFAULT_REWARDS = [                                                 # slot 1 .. 9
-    ("coins", 5_000), ("bronze", 1), ("coins", 10_000), ("voucher", 1), ("silver", 1),
-    ("coins", 25_000), ("voucher", 2), ("gold", 1), ("legendary", 1),
+# slot 1 .. 9: (reward, quantity) and its chance. Chances are compared with the rewards
+# still left, so a low number pushes that reward to the end (1 voucher = 1 draft).
+DEFAULT_REWARDS = [
+    ("coins", 50_000), ("bronze", 1), ("silver", 1), ("voucher", 1), ("voucher", 5),
+    ("gold", 1), ("voucher", 10), ("voucher", 25), ("legendary", 1),
 ]
-DEFAULT_WEIGHTS = [10] * 9                                          # chance of slot 1 .. 9 (relative, see draw())
+DEFAULT_WEIGHTS = [95, 80, 60, 10, 5, 3, 1, 0.6, 0.5]
 DEFAULT_NAME = "Signature Box"
 MAX_DAYS = 90
 MAX_RCP = 1_000_000_000
@@ -82,6 +86,15 @@ def _ensure(conn) -> None:
         "slot INTEGER NOT NULL, cost INTEGER NOT NULL DEFAULT 0, ts REAL NOT NULL, "
         "PRIMARY KEY (box_id, user_id, spin), UNIQUE (box_id, user_id, slot))"
     )
+    # Rewards can repeat now, so the spins live in a table WITHOUT the one-per-tile rule.
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sigbox_spin'").fetchone() is None:
+        conn.execute(
+            "CREATE TABLE sigbox_spin ("
+            "box_id INTEGER NOT NULL, user_id INTEGER NOT NULL, spin INTEGER NOT NULL, "
+            "slot INTEGER NOT NULL, cost INTEGER NOT NULL DEFAULT 0, ts REAL NOT NULL, "
+            "PRIMARY KEY (box_id, user_id, spin))"
+        )
+        conn.execute("INSERT OR IGNORE INTO sigbox_spin SELECT box_id, user_id, spin, slot, cost, ts FROM sigbox_draw")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS rcp_wallet ("
         "user_id INTEGER PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0 CHECK (amount >= 0))"
@@ -259,8 +272,8 @@ def set_chance(spin: int, percent: float) -> dict | str:
 
 
 def set_slot_chance(slot: int, chance: float) -> dict | str:
-    """How likely reward slot 1-9 is to come up (relative: 20 is twice as likely as 10, 0 = only
-    when nothing else is left, because every tile still drops once in 10 spins)."""
+    """How likely reward slot 1-9 is to come up, compared with the rewards still left
+    (20 = twice as likely as 10). Low = comes late. 0 = only when nothing else is left."""
     if not 1 <= int(slot) <= OTHER_SLOTS:
         return f"Slot must be 1 to {OTHER_SLOTS}."
     if not 0 <= float(chance) <= 100:
@@ -269,7 +282,7 @@ def set_slot_chance(slot: int, chance: float) -> dict | str:
 
 
 def slot_percents(box: dict) -> list[float]:
-    """The chance (%) of every slot on the FIRST spin that is not the Signature card."""
+    """The chance (%) of every slot on the FIRST spin (later spins: only the rewards left)."""
     w = box["weights"]
     total = sum(w)
     return [round(100 * x / total, 2) if total else round(100 / len(w), 2) for x in w]
@@ -283,7 +296,7 @@ def reset_user(user_id) -> dict | str:
         row = _active(conn)
         if row is None:
             return "No Signature Box is open."
-        n = conn.execute("DELETE FROM sigbox_draw WHERE box_id = ? AND user_id = ?", (row["id"], uid)).rowcount
+        n = conn.execute("DELETE FROM sigbox_spin WHERE box_id = ? AND user_id = ?", (row["id"], uid)).rowcount
         return {"box": _box_dict(conn, row), "removed": int(n)}
 
 
@@ -295,19 +308,22 @@ def player_keys(box: dict) -> list[str]:
 
 # ── A user's board ───────────────────────────────────────────────────────────
 
-def _drawn(conn, box_id: int, uid: int) -> dict[int, int]:
-    """slot -> spin number it was won on."""
-    return {int(r["slot"]): int(r["spin"]) for r in conn.execute(
-        "SELECT slot, spin FROM sigbox_draw WHERE box_id = ? AND user_id = ?", (box_id, uid))}
+def _spins(conn, box_id: int, uid: int) -> list[tuple[int, int]]:
+    """[(spin, slot), ...] in spin order."""
+    return [(int(r["spin"]), int(r["slot"])) for r in conn.execute(
+        "SELECT spin, slot FROM sigbox_spin WHERE box_id = ? AND user_id = ? ORDER BY spin", (box_id, uid))]
 
 
 def _board(conn, row, uid: int) -> dict:
     box = _box_dict(conn, row)
-    drawn = _drawn(conn, box["id"], uid)
-    spins = len(drawn)
+    history = _spins(conn, box["id"], uid)
+    wins: dict[int, int] = {}                     # slot -> how many times won
+    for _, sl in history:
+        wins[sl] = wins.get(sl, 0) + 1
+    spins = len(history)
     nxt = spins + 1
     done = spins >= SPINS
-    sig_won = SIGNATURE_SLOT in drawn
+    sig_won = SIGNATURE_SLOT in wins
     if done or sig_won:
         chance = None
     elif nxt >= SPINS:
@@ -315,7 +331,7 @@ def _board(conn, row, uid: int) -> dict:
     else:
         chance = box["chances"][nxt - 1]
     return {
-        "box": box, "drawn": drawn, "spins": spins, "done": done, "sig_won": sig_won,
+        "box": box, "wins": wins, "history": history, "spins": spins, "done": done, "sig_won": sig_won,
         "next_spin": None if done else nxt,
         "next_cost": None if done else box["costs"][nxt - 1],
         "next_chance": chance,
@@ -346,7 +362,7 @@ def draw(user_id, player_values: dict[str, int] | None = None, expect_spin: int 
         b = _board(conn, row, uid)
         box = b["box"]
         if b["done"]:
-            return "You have opened every tile of this box."
+            return f"You have used all {SPINS} spins of this box."
         n = b["next_spin"]
         if expect_spin is not None and int(expect_spin) != n:
             return "That spin was already done. Here is your box."
@@ -358,15 +374,14 @@ def draw(user_id, player_values: dict[str, int] | None = None, expect_spin: int 
         if bal < cost:
             return f"You need **{cost:,} RCP** for this spin. You have **{bal:,} RCP**."
 
-        drawn = b["drawn"]
-        others = [s for s in range(1, OTHER_SLOTS + 1) if s not in drawn]
-        if not b["sig_won"] and (not others or _rng.random() * 100 < float(b["next_chance"] or 0)):
+        left = [s for s in range(1, OTHER_SLOTS + 1) if s not in b["wins"]]      # every reward only once
+        if not b["sig_won"] and (n >= SPINS or not left or _rng.random() * 100 < float(b["next_chance"] or 0)):
             slot = SIGNATURE_SLOT
         else:
-            slot = _pick(others, box["weights"])
+            slot = _pick(left, box["weights"])
 
         cur = conn.execute(
-            "INSERT OR IGNORE INTO sigbox_draw (box_id, user_id, spin, slot, cost, ts) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO sigbox_spin (box_id, user_id, spin, slot, cost, ts) VALUES (?, ?, ?, ?, ?, ?)",
             (box["id"], uid, n, slot, cost, time.time()))
         if cur.rowcount != 1:
             return "That spin was already done. Here is your box."
@@ -380,7 +395,7 @@ def draw(user_id, player_values: dict[str, int] | None = None, expect_spin: int 
 
 
 def _pick(slots: list[int], weights: list[float]) -> int:
-    """Weighted pick among the slots still closed. If all of them have chance 0, any of them."""
+    """Weighted pick. If every slot has chance 0, any of them."""
     ws = [max(0.0, float(weights[s - 1])) for s in slots]
     total = sum(ws)
     if total <= 0:

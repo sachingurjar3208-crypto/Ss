@@ -272,7 +272,7 @@ def _info_text(box: dict, cards: dict) -> str:
     pct = sigbox.slot_percents(box)
     for i, rw in enumerate(box["rewards"], 1):
         what = _card_name(cards, rw.player_key) if rw.kind == "player" else rw.label()
-        rows.append(f"  slot {i}: {what}  ·  chance {box['weights'][i - 1]:g} (= {pct[i - 1]:g}% on a fresh box)")
+        rows.append(f"  slot {i}: {what}  ·  chance {box['weights'][i - 1]:g} (= {pct[i - 1]:g}% on spin 1)")
     rows += ["", "Spins (price · Signature chance):"]
     for i in range(sigbox.SPINS):
         ch = "guaranteed" if i == sigbox.SPINS - 1 else f"{box['chances'][i]:g}%"
@@ -410,7 +410,7 @@ class SigBoxCog(commands.Cog, name="SigBox"):
 
     @group.command(name="slotchance", description="Change how likely one reward slot (1-9) is to come up")
     @app_commands.describe(slot="Reward slot 1-9 (see /sigbox info)",
-                           chance="Chance number 0-100. Higher = comes earlier. 0 = only when nothing else is left")
+                           chance="Chance 0-100, compared with the rewards still left. Low = comes in the last spins. 0 = last")
     @app_commands.check(lambda i: is_staff(i.user))
     async def slotchance(self, interaction: discord.Interaction,
                          slot: app_commands.Range[int, 1, sigbox.OTHER_SLOTS],
@@ -426,7 +426,7 @@ class SigBoxCog(commands.Cog, name="SigBox"):
         lines = [f"Slot {i}: {res['weights'][i - 1]:g}  ({pct[i - 1]:g}%)" for i in range(1, sigbox.OTHER_SLOTS + 1)]
         await interaction.response.send_message(
             f"Slot {slot} ({esc(what)}) now has chance **{chance:g}**.\n"
-            "Chance of every slot on a fresh box (when the spin is not the Signature card):\n"
+            "Chance of every slot on spin 1 (later spins: only the rewards left):\n"
             + "\n".join(lines), ephemeral=True)
 
     @group.command(name="reset", description="Reset a user's Signature Box so they can open it again from spin 1")
