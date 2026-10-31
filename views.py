@@ -23,7 +23,7 @@ def _toss_result_file(result: str) -> tuple[discord.File, str]:
     return discord.File(_TOSS_IMG_PATH, filename="toss_image.png"), "toss_image.png"
 
 from game import GameState, _pname
-from logic import calculate_outcome, player_attributes
+from logic import calculate_outcome, player_attributes, player_attr_levels
 from commentary import build_ball_commentary
 import commentary as _comm
 import drs_text as _drs
@@ -233,6 +233,7 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
                 if _u is not None:
                     print(f"[quest] uid={_u} match finished through the 'Tap to continue' recovery path - "
                           f"quest tracking only counted if the lines for this match appeared earlier")
+            _start_match_summary(game)
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
             await _send_match_summary(channel, game)
@@ -1021,11 +1022,47 @@ def _drs_overturn_chance(delivery_internal: str, shot_internal: str) -> float:
     return 0.40
 
 
-async def _send_match_summary(channel, game) -> None:
-    """Last message of a finished match: the Rush Cricket SUMMARY card (never breaks the match end)."""
+SUMMARY_JPEG_OVER = 900_000   # a static PNG summary bigger than this is sent as a sharp JPEG (much faster upload)
+
+
+def _build_summary_payload(game):
+    """(bytes, filename) of the summary card. Runs in a worker thread."""
+    from match_summary import build_summary_file
+    data, filename = build_summary_file(game)
+    if filename.lower().endswith(".png") and len(data) > SUMMARY_JPEG_OVER:
+        try:
+            from PIL import Image
+            im = Image.open(io.BytesIO(data)).convert("RGB")
+            out = io.BytesIO()
+            im.save(out, "JPEG", quality=92, optimize=True, subsampling=0)   # 4:4:4 keeps text crisp
+            if out.tell() < len(data):
+                return out.getvalue(), filename[:-4] + ".jpg"
+        except Exception as e:
+            print(f"[summary] jpeg skipped ({type(e).__name__}: {e})")
+    return data, filename
+
+
+def _start_match_summary(game):
+    """Start building the summary card right away (in the background) so it is ready
+    by the time the result has been posted. Returns a task (or None)."""
     try:
-        from match_summary import build_summary_file
-        data, filename = await asyncio.to_thread(build_summary_file, game)
+        task = asyncio.get_running_loop().create_task(asyncio.to_thread(_build_summary_payload, game))
+        game.__dict__["_summary_task"] = task
+        return task
+    except Exception as e:
+        print(f"[summary] early start skipped ({type(e).__name__}: {e})")
+        return None
+
+
+async def _send_match_summary(channel, game) -> None:
+    """The Rush Cricket SUMMARY card (never breaks the match end). Uses the card that
+    _start_match_summary() began building, if there is one."""
+    try:
+        task = game.__dict__.pop("_summary_task", None)
+        if task is not None:
+            data, filename = await task
+        else:
+            data, filename = await asyncio.to_thread(_build_summary_payload, game)
         await channel.send(file=discord.File(io.BytesIO(data), filename=filename))
     except Exception as e:
         print(f"[summary] card failed: {type(e).__name__}: {e}")
@@ -1337,6 +1374,8 @@ async def _process_delivery(
             prev_delivery=getattr(game, "last_delivery_internal", None),
             bowler_balls_done=game.bowler_ball_count.get(bname, 0),
             bowler_max_balls=game.max_bowler_balls(),
+            bowler_levels=player_attr_levels(bowler),
+            batsman_levels=player_attr_levels(striker),
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1597,12 +1636,13 @@ async def _process_delivery(
             else:
                 save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
                 _save_match_record(game)
+                _start_match_summary(game)          # card renders while the messages below go out
                 await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, wheel=wheel, anim=_anim)
                 result_embed = build_result_embed(game)
                 await channel.send(embed=result_embed)
+                await _send_match_summary(channel, game)   # right after the result, not at the very end
                 await _ranked_announce(channel, game)
                 await _ranked_credits_announce(channel, game)
-                await _send_match_summary(channel, game)
                 await _flush_quest_notes(channel, game)
                 active_games.pop(channel.id, None)
             return
@@ -1668,8 +1708,10 @@ async def _handle_wicket_fall(channel, game: GameState):
         else:
             save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
             _save_match_record(game)
+            _start_match_summary(game)
             result_embed = build_result_embed(game)
             await channel.send(embed=result_embed)
+            await _send_match_summary(channel, game)   # (this path used to send no summary at all)
             await _ranked_announce(channel, game)
             await _ranked_credits_announce(channel, game)
             await _flush_quest_notes(channel, game)

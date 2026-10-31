@@ -157,10 +157,10 @@ COMMENTARY KA NAYA LOOK + SAHI JAGAH (commentary.py, views.py, practice_views.py
 
   * Code block (```) hata diya. Ab normal Discord text:
         ### That's huge! **SIX**
-        `0.3` **Holder** to **Rathore**
+        0.3  **Holder** to **Rathore**
         Gets under it and upper-cuts it for six.
         -# Rathore moves to 47. 3 runs away from fifty.
-    - monospace sirf chhote chips: ball number aur result (`0.5` ... `1 RUN`)
+    - koi code/monospace chip nahi, sab normal text: 0.5  **Holder** to **Rathore**  ·  **1 RUN**
     - FOUR / SIX / OUT par badi heading (### ...), result word bold
     - wicket word bold: **CAUGHT** / **LBW** / **BOWLED** / **STUMPED**
     - situation, playstyle, milestone, chase lines: chhoti grey "-#" line
@@ -172,3 +172,92 @@ COMMENTARY KA NAYA LOOK + SAHI JAGAH (commentary.py, views.py, practice_views.py
         4. "Choose delivery @..." + bowling buttons (bina dobara scoreboard)
     Naye over, wicket ke baad aur DRS not-out par bowling prompt ke saath
     scoreboard pehle jaisa aata hai.
+
+
+FIX: MATCH SUMMARY DER SE AATA THA (views.py)
+=============================================
+
+  * Pehle: summary sabse aakhri mein aata tha, aur uski image tabhi banna
+    shuru hoti thi jab result, ranked stars, Star Pass sab bhej diye jaate the.
+    Phir ~2 sec render + 1.7 MB upload.
+  * Ab:
+      - match khatam hote hi summary image background mein banni shuru ho jaati hai
+      - result embed ke turant baad summary aata hai (ranked / Star Pass / quests uske baad)
+      - static summary PNG ko sharp JPEG mein bhejte hain: ~1.7 MB -> ~650 KB
+        (Halloween animated GIF waisa hi rehta hai)
+  * Bug fix: doosri innings mein team all-out (XI poori na ho) wale raaste mein
+    summary aata hi nahi tha - ab aata hai.
+  * Setting: views.py -> SUMMARY_JPEG_OVER (isse badi PNG JPEG ban jaati hai)
+
+
+HALLOWEEN SUMMARY GIF CHHOTA (summary_anim.py)
+==============================================
+
+  * Pehle: 20 frames, 1536px, 7.4 MB tak -> upload mein der.
+  * Ab: 14 frames, 1152px, max 3 MB (zaroorat ho to 12/1024 -> 10/960 -> 8/896).
+    Frames kam hone par bhi animation ki speed same (loop 1.8 sec).
+  * Test: mushkil (noisy) photo ~2 MB, normal artwork ~0.9 MB, banne mein ~1.2 sec.
+  * Settings: summary_anim.py -> MAX_BYTES, _LADDER, _LOOP_MS
+
+
+SIGNATURE EDITION CARD (card_signature.py naya + card_style2.py, card_db.py, cardmaker_cog.py)
+==============================================================================================
+
+  * Naya card theme "Signature Edition" (Style 2 par):
+      - upar normal purple card: OVR, role, country, player
+      - player neeche ivory "kaagaz" mein ghul jaata hai
+      - us par AAPKA signature PNG bada lagta hai
+      - neeche: NAAM | ROLE, 6 stats, aur "SIGNATURE EDITION"
+  * Theme lagana: /cardmaker, /eventplayermaker ya /editcard -> theme: Signature Edition
+  * Signature add karna (owner only):
+      /signatureadd playername:<card> image:<PNG>  [make_signature_card: True]
+        - transparent PNG best; white/light background apne aap hat jaata hai
+        - khaali kinare kat jaate hain, signature box mein fit + centre hota hai
+        - safed/sunehra (bahut halka) signature kaale ink mein badal jaata hai
+        - card ki image turant dobara banti hai aur preview aata hai
+      /signatureremove playername:<card>
+  * Ya seedha folder mein daalo: signatures/<playername lowercase, space ki jagah _>.png
+      jaise signatures/virat_kohli.png  (phir card ko /editcard se ek baar refresh karo)
+  * Signature file na ho to us jagah player ka naam bade aksharon mein aata hai.
+  * Settings: card_signature.py ke upar (rang, SIG_BOX, fade).
+
+
+PLAYSTYLE LEVELS + NAYE BADGES (playstyle_badges.py naya, playstyle_badges/ folder naya,
+logic.py, card_db.py, card_image.py, card_style2.py, cardmaker_cog.py, views.py, practice_views.py)
+=================================================================================================
+
+  * Har playstyle ke 3 level:
+        L1 SILVER       -> playstyle ka aadha fayda (0.5x)
+        L2 GOLD         -> abhi jitna fayda hai utna hi (1x)   <- purane saare cards isi par
+        L3 GOLDEN PINK  -> 1.5x fayda
+    Sirf FAYDA level se badalta hai. Nuksaan wala hissa (jaise Lethal Pace ke extra six,
+    Power Hitter ka extra risk) har level par same rehta hai.
+    Low Batting Quality / Low Bowling Quality / Balanced par level ka asar nahi.
+    Setting: logic.py -> PLAYSTYLE_LEVEL_POWER = {1: 0.5, 2: 1.0, 3: 1.5}
+  * Logo: har playstyle ka apna metal hexagon badge, teeno level (silver / gold / golden pink
+    sparkles ke saath). 18 playstyles x 3 = 54 badges, playstyle_badges/ folder mein (zip mein hai).
+    Card par level ke hisaab se apne aap lagta hai. URL wale purane logo ab card par NAHI dikhte.
+  * Commands (owner):
+      /playstyle add playername key1 level1 [key2 level2]
+          key = Swing Master, Aggressive, ... ; level = L1 Silver / L2 Gold / L3 Golden Pink
+          key2 dena optional; na do to slot 2 jaisa hai waisa rehta hai
+      /playstyle remove playername slot (Slot 1 / Slot 2 / Both)
+    Har baar card dobara banta hai aur preview + dono slots ka level dikhata hai.
+  * Hataye gaye commands: /logoadderofplaystyle, /playstylelogoremover, /setplaystylelogo
+    (/logofixer reh gaya - badge ki jagah/size ke liye).
+  * /cardmaker aur /editcard se playstyle lagao to woh L2 Gold se shuru hota hai.
+  * Database: cards table mein playstyle1_level, playstyle2_level apne aap jud jaate hain.
+  * Badge design badalna ho: playstyle_badges.py mein icon edit karo, phir
+    playstyle_badges/ folder delete karo - bot naye bana lega.
+
+
+PLAYSTYLE INFO COMMAND (playstyle_info_cog.py naya, main.py, help_menu.py)
+==========================================================================
+
+  * rcplaystyles          -> saare playstyle badges unke NAAM ke saath ek image mein
+                             (neeche badge colours: Silver / Gold / Golden Pink - sirf naam)
+  * rcplaystyles <naam>   -> ek playstyle teeno colours mein (Silver, Gold, Golden Pink)
+                             naam adhoora / space ke saath bhi chalta hai (mr 360, yorker)
+                             milte-julte naam ho to "Did you mean: ..." batata hai
+  * Aliases: rcplaystyle, rcps.  Cooldown 10 sec.  Koi power / % nahi dikhaya jata.
+  * main.py: cog list mein "playstyle_info_cog" joda.  help_menu.py: "Other" page mein entry.

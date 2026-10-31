@@ -86,6 +86,7 @@ async def load_cogs():
         "cooldown_cog",
         "ranked_cog",
         "announce_cog",
+        "playstyle_info_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:

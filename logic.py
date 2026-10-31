@@ -238,6 +238,50 @@ ATTR_EFFECTS = {
 # Names a card can carry that the engine knows under another name.
 _ATTR_ALIASES: dict[str, str] = {}   # (Swing King used to alias Swing Master; they are separate now)
 
+# ── Playstyle levels ─────────────────────────────────────────────────────────
+# The numbers in ATTR_EFFECTS are the GOLD level (L2). Silver (L1) gets half of the
+# benefit, Golden Pink (L3) 1.5x. Only the GOOD side of a playstyle scales; its
+# drawback (e.g. Lethal Pace's extra sixes, Power Hitter's extra risk) stays the same.
+PLAYSTYLE_LEVEL_POWER = {1: 0.5, 2: 1.0, 3: 1.5}
+_NO_LEVELS = {"Low Batting Quality", "Low Bowling Quality", "Balanced"}   # negative / neutral: never scaled
+
+
+def _beneficial(key: str, value: float, side: str) -> bool:
+    """Is this multiplier GOOD for the player who owns the playstyle?
+    Batter: fewer wickets / dots, more runs.  Bowler: more wickets, fewer runs."""
+    if side == "bat":
+        lower_is_good = ("wkt" in key) or ("dot" in key)
+    else:
+        lower_is_good = "wkt" not in key
+    return value < 1 if lower_is_good else value > 1
+
+
+def _scaled_effects(levels: dict | None, side: str) -> dict:
+    """ATTR_EFFECTS with every levelled playstyle's benefit scaled by its level."""
+    if not levels:
+        return ATTR_EFFECTS
+    out = dict(ATTR_EFFECTS)
+    for name, lvl in levels.items():
+        name = _ATTR_ALIASES.get(name, name)
+        factor = PLAYSTYLE_LEVEL_POWER.get(lvl, 1.0)
+        if factor == 1.0 or name in _NO_LEVELS or name not in ATTR_EFFECTS:
+            continue
+        out[name] = {k: (1 + (v - 1) * factor if _beneficial(k, v, side) else v)
+                     for k, v in ATTR_EFFECTS[name].items()}
+    return out
+
+
+def player_attr_levels(player) -> dict:
+    """{playstyle: level} from the player's card (empty = everything at Gold)."""
+    name = player.get("name") if isinstance(player, dict) else None
+    if not name:
+        return {}
+    try:
+        from card_db import get_player_playstyle_levels
+        return get_player_playstyle_levels(name)
+    except Exception:
+        return {}
+
 # Delivery types classified as spin
 _SPIN_DELIVERIES = {
     "Off Break", "Doosra", "Carrom Ball", "Arm Ball", "Top Spin",
@@ -294,6 +338,8 @@ def calculate_outcome(
     prev_delivery: str | None = None,
     bowler_balls_done: int = 0,
     bowler_max_balls: int = 0,
+    bowler_levels: dict | None = None,
+    batsman_levels: dict | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -311,6 +357,9 @@ def calculate_outcome(
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
+    # playstyle levels (Silver / Gold / Golden Pink): batter and bowler each get their own numbers
+    AE_BAT  = _scaled_effects(batsman_levels, "bat")
+    AE_BOWL = _scaled_effects(bowler_levels, "bowl")
 
     m = MATCHUP_MATRIX.get((delivery_internal, shot_internal), {"bat": 1.0, "wkt": 1.0})
 
@@ -393,35 +442,35 @@ def calculate_outcome(
 
     # FINISHER: +scoring in death overs
     if "Finisher" in batsman_attrs and current_over >= _death_start:
-        mult = ATTR_EFFECTS["Finisher"]["death_bat_mult"]
+        mult = AE_BAT["Finisher"]["death_bat_mult"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * mult
 
     # AGGRESSIVE: +boundaries, -dots
     if "Aggressive" in batsman_attrs:
-        bm = ATTR_EFFECTS["Aggressive"]["boundary_mult"]
+        bm = AE_BAT["Aggressive"]["boundary_mult"]
         w["4"] = w["4"] * bm; w["6"] = w["6"] * bm
-        w["0"] = w["0"] * ATTR_EFFECTS["Aggressive"]["dot_reduce"]
+        w["0"] = w["0"] * AE_BAT["Aggressive"]["dot_reduce"]
 
     # ANCHOR: -wicket chance
     if "Anchor" in batsman_attrs:
-        w["W"] = w["W"] * ATTR_EFFECTS["Anchor"]["wkt_reduce"]
+        w["W"] = w["W"] * AE_BAT["Anchor"]["wkt_reduce"]
 
     # OPENER: +scoring in powerplay
     if "Opener" in batsman_attrs and phase == "powerplay":
-        mult = ATTR_EFFECTS["Opener"]["pp_bat_mult"]
+        mult = AE_BAT["Opener"]["pp_bat_mult"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * mult
 
     # POWER HITTER: +boundaries, +sixes, slightly higher risk
     if "Power Hitter" in batsman_attrs:
-        bm = ATTR_EFFECTS["Power Hitter"]["boundary_mult"]
+        bm = AE_BAT["Power Hitter"]["boundary_mult"]
         w["4"] = w["4"] * bm
-        w["6"] = w["6"] * bm * ATTR_EFFECTS["Power Hitter"]["six_mult"]
-        w["W"] = w["W"] * ATTR_EFFECTS["Power Hitter"]["wkt_increase"]
+        w["6"] = w["6"] * bm * AE_BAT["Power Hitter"]["six_mult"]
+        w["W"] = w["W"] * AE_BAT["Power Hitter"]["wkt_increase"]
 
     # CLINICAL: -dots, +singles/rotation
     if "Clinical" in batsman_attrs:
-        w["0"] = w["0"] * ATTR_EFFECTS["Clinical"]["dot_reduce"]
-        sm = ATTR_EFFECTS["Clinical"]["single_mult"]
+        w["0"] = w["0"] * AE_BAT["Clinical"]["dot_reduce"]
+        sm = AE_BAT["Clinical"]["single_mult"]
         w["1"] = w["1"] * sm; w["2"] = w["2"] * sm
 
     # CHASE MASTER / CHASER: +scoring when chasing (innings 2).
@@ -430,54 +479,54 @@ def calculate_outcome(
     # "Chase Master" multiplier is applied so they never stack (x1.38).
     if innings == 2:
         if "Chase Master" in batsman_attrs:
-            mult = ATTR_EFFECTS["Chase Master"]["chase_bat_mult"]
+            mult = AE_BAT["Chase Master"]["chase_bat_mult"]
             for k in ("1","2","3","4","6"): w[k] = w[k] * mult
         elif (
             "Chaser" in batsman_attrs
             and (rrr > 7 or current_over >= max(1, round(total_overs * 0.50)))
         ):
             # Legacy attribute — only fires when "Chase Master" is absent.
-            mult = ATTR_EFFECTS["Chaser"]["chase_bat_mult"]
+            mult = AE_BAT["Chaser"]["chase_bat_mult"]
             for k in ("1","2","3","4","6"): w[k] = w[k] * mult
 
     # CENTURION: +scoring after 50 runs (track via balls_since_wicket as proxy for set batsman)
     if "Centurion" in batsman_attrs and balls_since_wicket >= 30:
-        mult = ATTR_EFFECTS["Centurion"]["fifty_bat_mult"]
+        mult = AE_BAT["Centurion"]["fifty_bat_mult"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * mult
 
     # PINCH HITTER: +boundaries, higher risk
     if "Pinch Hitter" in batsman_attrs:
-        bm = ATTR_EFFECTS["Pinch Hitter"]["boundary_mult"]
+        bm = AE_BAT["Pinch Hitter"]["boundary_mult"]
         w["4"] = w["4"] * bm; w["6"] = w["6"] * bm
-        w["W"] = w["W"] * ATTR_EFFECTS["Pinch Hitter"]["wkt_increase"]
+        w["W"] = w["W"] * AE_BAT["Pinch Hitter"]["wkt_increase"]
 
     # CLUTCH: big boost in final overs of a chase
     _clutch_over = max(_death_start, round(total_overs * 0.85))
     if "Clutch" in batsman_attrs and innings == 2 and current_over >= _clutch_over:
-        mult = ATTR_EFFECTS["Clutch"]["clutch_bat_mult"]
+        mult = AE_BAT["Clutch"]["clutch_bat_mult"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * mult
 
     # MATCH WINNER: +batting in last 5 overs
     if "Match Winner" in batsman_attrs and current_over >= _death_start:
-        mult = ATTR_EFFECTS["Match Winner"]["death_bat_mult"]
+        mult = AE_BAT["Match Winner"]["death_bat_mult"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * mult
 
     # COVER DRIVE SPECIALIST: better outcomes whenever the drive is played
     if "Cover Drive Specialist" in batsman_attrs and shot_internal == "Drive":
-        cd = ATTR_EFFECTS["Cover Drive Specialist"]
+        cd = AE_BAT["Cover Drive Specialist"]
         w["4"] = w["4"] * cd["drive_four_mult"]
         for k in ("1", "2", "3"): w[k] = w[k] * cd["drive_run_mult"]
 
     # LOW BATTING QUALITY: almost no fours/sixes, mostly 1-2-3 runs
     if "Low Batting Quality" in batsman_attrs:
-        lb = ATTR_EFFECTS["Low Batting Quality"]
+        lb = AE_BAT["Low Batting Quality"]
         w["4"] = w["4"] * lb["four_mult"]
         w["6"] = w["6"] * lb["six_mult"]
         for k in ("1", "2", "3"): w[k] = w[k] * lb["rotate_mult"]
 
     # BREAKTHROUGH: game changer. More sixes + a finishing push in a chase, but a bit riskier.
     if "Breakthrough" in batsman_attrs:
-        bt = ATTR_EFFECTS["Breakthrough"]
+        bt = AE_BAT["Breakthrough"]
         w["W"] = w["W"] * bt["wkt_increase"]
         if innings == 2:
             w["6"] = w["6"] * bt["chase_six_mult"]
@@ -486,7 +535,7 @@ def calculate_outcome(
 
     # MR360: better outcomes on Sweep / Reverse-Sweep / Flick / Lofted shots
     if "Mr360" in batsman_attrs and shot_internal in _SHOTS_360:
-        m360 = ATTR_EFFECTS["Mr360"]
+        m360 = AE_BAT["Mr360"]
         w["4"] = w["4"] * m360["four_mult"]
         w["6"] = w["6"] * m360["six_mult"]
 
@@ -494,51 +543,51 @@ def calculate_outcome(
 
     # WICKET HUNTER: +wickets always
     if "Wicket Hunter" in bowler_attrs:
-        w["W"] = w["W"] * ATTR_EFFECTS["Wicket Hunter"]["wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Wicket Hunter"]["wkt_mult"]
 
     # SPIN WIZARD: +wickets on spin deliveries
     if "Spin Wizard" in bowler_attrs and delivery_internal in _SPIN_DELIVERIES:
-        w["W"] = w["W"] * ATTR_EFFECTS["Spin Wizard"]["spin_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Spin Wizard"]["spin_wkt_mult"]
 
     # DEATH BOWLER: +wickets and -runs in death overs
     if "Death Bowler" in bowler_attrs and current_over >= _death_start:
-        w["W"] = w["W"] * ATTR_EFFECTS["Death Bowler"]["death_wkt_mult"]
-        rr = ATTR_EFFECTS["Death Bowler"]["death_run_reduce"]
+        w["W"] = w["W"] * AE_BOWL["Death Bowler"]["death_wkt_mult"]
+        rr = AE_BOWL["Death Bowler"]["death_run_reduce"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * rr
 
     # POWERPLAY BOWLER: +wickets in powerplay
     if "Powerplay Bowler" in bowler_attrs and phase == "powerplay":
-        w["W"] = w["W"] * ATTR_EFFECTS["Powerplay Bowler"]["pp_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Powerplay Bowler"]["pp_wkt_mult"]
 
     # YORKER KING: +wickets on yorker deliveries
     if "Yorker King" in bowler_attrs and delivery_internal in _YORKER_DELIVERIES:
-        w["W"] = w["W"] * ATTR_EFFECTS["Yorker King"]["yorker_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Yorker King"]["yorker_wkt_mult"]
 
     # SWING MASTER: +wickets on swing deliveries
     if "Swing Master" in bowler_attrs and delivery_internal in _SWING_DELIVERIES:
-        w["W"] = w["W"] * ATTR_EFFECTS["Swing Master"]["swing_wkt_mult"]
-        w["6"] = max(0.02, w["6"] * ATTR_EFFECTS["Swing Master"]["swing_six_mult"])
+        w["W"] = w["W"] * AE_BOWL["Swing Master"]["swing_wkt_mult"]
+        w["6"] = max(0.02, w["6"] * AE_BOWL["Swing Master"]["swing_six_mult"])
 
     # SWING KING: +wickets on swing deliveries
     if "Swing King" in bowler_attrs and delivery_internal in _SWING_DELIVERIES:
-        w["W"] = w["W"] * ATTR_EFFECTS["Swing King"]["swing_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Swing King"]["swing_wkt_mult"]
 
     # BOUNCER SPECIALIST: +wickets on bouncers
     if "Bouncer Specialist" in bowler_attrs and delivery_internal in _BOUNCER_DELIVERIES:
-        w["W"] = w["W"] * ATTR_EFFECTS["Bouncer Specialist"]["bouncer_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Bouncer Specialist"]["bouncer_wkt_mult"]
 
     # ECONOMICAL: -runs given per over
     if "Economical" in bowler_attrs:
-        rr = ATTR_EFFECTS["Economical"]["run_reduce"]
+        rr = AE_BOWL["Economical"]["run_reduce"]
         for k in ("1","2","3","4","6"): w[k] = w[k] * rr
 
     # MATCH WINNER: +wickets in death overs
     if "Match Winner" in bowler_attrs and current_over >= _death_start:
-        w["W"] = w["W"] * ATTR_EFFECTS["Match Winner"]["death_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Match Winner"]["death_wkt_mult"]
 
     # LETHAL PACE: more wickets and fewer runs off pace deliveries
     if "Lethal Pace" in bowler_attrs and delivery_internal in _PACE_DELIVERIES:
-        lp = ATTR_EFFECTS["Lethal Pace"]
+        lp = AE_BOWL["Lethal Pace"]
         w["W"] = w["W"] * lp["pace_wkt_mult"]
         for k in ("1", "2", "3", "4"): w[k] = w[k] * lp["pace_run_reduce"]
         w["6"] = w["6"] * lp["pace_six_mult"]
@@ -547,15 +596,15 @@ def calculate_outcome(
     # (first 3 overs of a 20-over game; scaled down for shorter matches)
     _early_end = max(1, min(3, round(total_overs * 0.15)))
     if "Early Breaker" in bowler_attrs and current_over < _early_end:
-        w["W"] = w["W"] * ATTR_EFFECTS["Early Breaker"]["early_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Early Breaker"]["early_wkt_mult"]
 
     # GOOGLY MASTER: +wickets on Googly and Leg Break
     if "Googly Master" in bowler_attrs and delivery_internal in _GOOGLY_DELIVERIES:
-        w["W"] = w["W"] * ATTR_EFFECTS["Googly Master"]["googly_wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Googly Master"]["googly_wkt_mult"]
 
     # MYSTERY: +wickets (and slightly fewer boundaries) when the Mystery button is used
     if "Mystery" in bowler_attrs and delivery_button == "Mystery":
-        my = ATTR_EFFECTS["Mystery"]
+        my = AE_BOWL["Mystery"]
         w["W"] = w["W"] * my["wkt_mult"]
         w["4"] = w["4"] * my["boundary_reduce"]
         w["6"] = w["6"] * my["boundary_reduce"]
@@ -566,7 +615,7 @@ def calculate_outcome(
         and prev_delivery
         and delivery_internal != prev_delivery
     ):
-        w["W"] = w["W"] * ATTR_EFFECTS["Mind Games"]["wkt_mult"]
+        w["W"] = w["W"] * AE_BOWL["Mind Games"]["wkt_mult"]
 
     # SPELL FINISHER: better bowling in the bowler's own last over(s).
     #   max 1 over  -> that over | max 2 overs -> last 1 | max 3 overs -> last 1
@@ -576,14 +625,14 @@ def calculate_outcome(
         _final_overs = 2 if _quota_overs >= 4 else 1
         _bowler_over = bowler_balls_done // 6          # 0-based over of this spell
         if _bowler_over >= _quota_overs - _final_overs:
-            sf = ATTR_EFFECTS["Spell Finisher"]
+            sf = AE_BOWL["Spell Finisher"]
             w["W"] = w["W"] * sf["wkt_mult"]
             for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * sf["run_reduce"]
 
     # LOW BOWLING QUALITY: sixes/fours are easy, wickets very unlikely
     _six_cap_mult = 2.0
     if "Low Bowling Quality" in bowler_attrs:
-        lq = ATTR_EFFECTS["Low Bowling Quality"]
+        lq = AE_BOWL["Low Bowling Quality"]
         w["6"] = w["6"] * lq["six_mult"]
         w["4"] = w["4"] * lq["four_mult"]
         w["W"] = max(0.15, w["W"] * lq["wkt_reduce"])
@@ -592,7 +641,7 @@ def calculate_outcome(
     # Breakthrough in a chase: lift the six cap by the same 30% so the bonus isn't swallowed
     # when the death-over / chase-pressure multipliers are already stacked.
     if "Breakthrough" in batsman_attrs and innings == 2:
-        _six_cap_mult = _six_cap_mult * ATTR_EFFECTS["Breakthrough"]["chase_six_mult"]
+        _six_cap_mult = _six_cap_mult * AE_BAT["Breakthrough"]["chase_six_mult"]
 
     # ── Hard cap on stacked six weight ───────────────────────────────────────
     # Even with every multiplier firing, six weight can't exceed 2× its

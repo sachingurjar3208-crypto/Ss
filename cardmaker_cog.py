@@ -87,13 +87,23 @@ NARRATIVE_CHOICES = [app_commands.Choice(name=n, value=n) for n in NARRATIVE_NAM
 # /editcard only: lets you clear a narrative slot.
 NARRATIVE_CHOICES_EDIT = NARRATIVE_CHOICES + [app_commands.Choice(name="None (remove)", value="NONE")]
 
+# Playstyle levels: 1 Silver (half power), 2 Gold (normal power), 3 Golden Pink (1.5x power)
+LEVEL_CHOICES = [
+    app_commands.Choice(name="L1 Silver", value=1),
+    app_commands.Choice(name="L2 Gold", value=2),
+    app_commands.Choice(name="L3 Golden Pink", value=3),
+]
+LEVEL_LABELS = {1: "L1 Silver", 2: "L2 Gold", 3: "L3 Golden Pink"}
+
 # Card theme (Style 2). Halloween = Halloween frame + orange / bone-white text. It always uses the
 # Style 2 design. The `background` you pick (add the Halloween frame image with /bgadder) is used as its frame.
 THEME_CHOICES = [
     app_commands.Choice(name="Normal", value="default"),
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
+    app_commands.Choice(name="Signature Edition", value="signature"),
 ]
-THEME_HELP = "Card theme. Halloween = background used as frame + orange text (Style 2)"
+THEME_HELP = ("Card theme. Halloween = background used as frame + orange text. "
+              "Signature Edition = autograph card (add the PNG with /signatureadd)")
 
 
 def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
@@ -107,6 +117,10 @@ def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
             set_style2_options(playername, theme="halloween", bg=frame_bg)
         else:
             set_style2_options(playername, theme="halloween")
+    elif theme.value == "signature":
+        # Signature Edition always uses the Style 2 design; the signature PNG comes from /signatureadd
+        set_card_style(playername, "style2")
+        set_style2_options(playername, theme="signature")
     else:
         set_style2_options(playername, theme=None)
 
@@ -232,14 +246,11 @@ async def _regenerate_and_send(interaction: discord.Interaction, playername: str
 
 
 def _missing_logo_note(names) -> str:
-    """Note to append when a chosen narrative has no logo in the logo list yet."""
-    missing = [n for n in names if n and not playstyle_logo_exists(n)]
-    if not missing:
-        return ""
-    return (
-        "\nℹ️ No logo yet for: " + ", ".join(f"**{m}**" for m in missing)
-        + " — add one with `/logoadderofplaystyle` using exactly that name as `pathname`."
-    )
+    """Every playstyle now has a built-in badge, so nothing is ever missing. Playstyles set
+    here start at Gold; change the level with /playstyle add."""
+    if any(names):
+        return "\nℹ️ Playstyles start at **L2 Gold**. Change the level with `/playstyle add`."
+    return ""
 
 
 def _event_note(event_row, obtainable: bool) -> str:
@@ -1264,6 +1275,71 @@ class CardMakerCog(commands.Cog):
             f"covers it, whatever position/size you set."
         )
 
+    # ── /signatureadd  /signatureremove ─────────────────────────────
+    @app_commands.command(
+        name="signatureadd",
+        description="Add (or replace) the autograph PNG of a player for Signature Edition cards",
+    )
+    @app_commands.describe(
+        playername="Card to add the signature to",
+        image="Signature PNG (transparent works best; a white background is removed automatically)",
+        make_signature_card="Also switch this card to the Signature Edition theme now",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def signatureadd(self, interaction: discord.Interaction, playername: str,
+                           image: discord.Attachment, make_signature_card: bool = True):
+        await interaction.response.defer()
+        import card_signature
+        card = get_card(playername)
+        if card is None:
+            await interaction.followup.send(f"❌ No card named `{playername}`. Pick one from the list.")
+            return
+        if image.size > 8 * 1024 * 1024:
+            await interaction.followup.send("❌ That file is too big (max 8 MB).")
+            return
+        try:
+            data = await image.read()
+            await asyncio.to_thread(card_signature.save_signature, card["playername"], data)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Couldn't use that file as a signature: `{e}`")
+            return
+        if make_signature_card:
+            set_card_style(card["playername"], "style2")
+            set_style2_options(card["playername"], theme="signature")
+        ok = await _regenerate_silently(card["playername"])
+        card = get_card(card["playername"])
+        is_sig = str(card["s2_theme"] or "").lower() == "signature" if "s2_theme" in card.keys() else False
+        msg = f"✅ Signature saved for **{card['playername']}**."
+        if is_sig:
+            msg += " The card is a Signature Edition card." + ("" if ok else " (image will refresh on the next edit)")
+        else:
+            msg += " Turn it into a Signature Edition card with `/editcard theme:Signature Edition`."
+        file = None
+        if ok and card["image_path"] and os.path.exists(card["image_path"]):
+            file = discord.File(card["image_path"], filename="signature_card.png")
+        await interaction.followup.send(msg, file=file) if file else await interaction.followup.send(msg)
+
+    @app_commands.command(name="signatureremove", description="Remove the autograph PNG of a player")
+    @app_commands.describe(playername="Card to remove the signature from")
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def signatureremove(self, interaction: discord.Interaction, playername: str):
+        await interaction.response.defer()
+        import card_signature
+        card = get_card(playername)
+        if card is None:
+            await interaction.followup.send(f"❌ No card named `{playername}`.")
+            return
+        removed = await asyncio.to_thread(card_signature.remove_signature, card["playername"])
+        if not removed:
+            await interaction.followup.send(f"❌ **{card['playername']}** has no signature file.")
+            return
+        await _regenerate_silently(card["playername"])
+        await interaction.followup.send(
+            f"🗑️ Signature removed for **{card['playername']}**. A Signature Edition card now shows "
+            f"the player's name in its place (change the theme with `/editcard theme:Normal`).")
+
     # ── /panelremover ────────────────────────────────────────────────
     @app_commands.command(name="panelremover", description="Remove a stats panel overlay from the panel list")
     @app_commands.describe(pathname="Which panel to remove")
@@ -1354,137 +1430,92 @@ class CardMakerCog(commands.Cog):
         except Exception as e:
             await interaction.followup.send(f"⚠️ Offset/size saved, but image regeneration failed: `{e}`")
 
-    # ── /logoadderofplaystyle ────────────────────────────────────────
-    @app_commands.command(name="logoadderofplaystyle", description="Add a playstyle logo to the logo list")
+    # ── /playstyle add  /playstyle remove ────────────────────────────
+    # The old link-logo commands (/logoadderofplaystyle, /playstylelogoremover, /setplaystylelogo)
+    # are gone: every playstyle now has its own built-in badge in 3 levels (playstyle_badges.py).
+    playstyle = app_commands.Group(name="playstyle", description="Put playstyles (with a level) on a player card")
+
+    @playstyle.command(name="add", description="Put 1 or 2 playstyles on a card, each with a level (Silver / Gold / Golden Pink)")
     @app_commands.describe(
-        url="Direct link to the logo image (transparent PNG works best)",
-        pathname="Name of this logo, e.g. Swing King. Use the narrative's exact name to link it automatically",
+        playername="Card to change",
+        key1="Playstyle for slot 1",
+        level1="Level of playstyle 1",
+        key2="Playstyle for slot 2 (optional)",
+        level2="Level of playstyle 2 (optional, default Gold)",
     )
-    @app_commands.autocomplete(pathname=narrative_name_autocomplete)
+    @app_commands.choices(key1=NARRATIVE_CHOICES, key2=NARRATIVE_CHOICES,
+                          level1=LEVEL_CHOICES, level2=LEVEL_CHOICES)
+    @app_commands.autocomplete(playername=playername_autocomplete)
     @is_owner()
-    async def logoadderofplaystyle(self, interaction: discord.Interaction, url: str, pathname: str):
+    async def playstyle_add(self, interaction: discord.Interaction, playername: str,
+                            key1: app_commands.Choice[str], level1: app_commands.Choice[int],
+                            key2: app_commands.Choice[str] | None = None,
+                            level2: app_commands.Choice[int] | None = None):
         await interaction.response.defer()
-
-        if playstyle_logo_exists(pathname):
-            await interaction.followup.send(f"❌ A logo named `{pathname}` already exists — pick a different name.")
+        card = get_card(playername)
+        if card is None:
+            await interaction.followup.send(f"❌ No card named `{playername}`. Pick one from the list.")
             return
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                    resp.raise_for_status()
-                    data = await resp.read()
-            # Decode it now so a link that isn't a real image fails here, not later on a card.
-            logo = Image.open(io.BytesIO(data)).convert("RGBA")
-        except Exception as e:
-            await interaction.followup.send(f"❌ Couldn't download that link as an image: `{e}`")
+        if key2 is not None and key2.value == key1.value:
+            await interaction.followup.send("❌ Slot 1 and slot 2 can't be the same playstyle.")
             return
+        if key2 is None and level2 is not None:
+            await interaction.followup.send("❌ Pick `key2` too, or leave `level2` empty.")
+            return
+        name = card["playername"]
+        kwargs = {"playstyle1": key1.value, "level1": level1.value}
+        if key2 is not None:
+            kwargs.update(playstyle2=key2.value, level2=(level2.value if level2 else 2))
+        else:
+            # slot 2 stays as it is, but it may not repeat slot 1
+            old2 = card["playstyle2"] if "playstyle2" in card.keys() else None
+            if old2 and str(old2).strip().lower() == key1.value.lower():
+                kwargs.update(playstyle2=None)
+        set_playstyles(name, **kwargs)
+        await self._send_playstyle_card(interaction, name)
 
-        local_path = LOGOS_DIR / f"{pathname.strip().lower().replace(' ', '_')}.png"
-        logo.save(local_path, format="PNG")
-
-        add_playstyle_logo(pathname, url, str(local_path), interaction.user.id)
-        await interaction.followup.send(
-            f"✅ Playstyle logo **{pathname}** added. Pick it with `/setplaystylelogo`."
-        )
-
-    # ── /playstylelogoremover ────────────────────────────────────────
-    @app_commands.command(
-        name="playstylelogoremover",
-        description="Remove a playstyle logo from the logo list (add it again with /logoadderofplaystyle)",
-    )
-    @app_commands.describe(pathname="Which playstyle logo to remove")
-    @app_commands.autocomplete(pathname=logo_autocomplete)
+    @playstyle.command(name="remove", description="Remove a playstyle from a card")
+    @app_commands.describe(playername="Card to change", slot="Which playstyle to remove")
+    @app_commands.choices(slot=[
+        app_commands.Choice(name="Slot 1", value="1"),
+        app_commands.Choice(name="Slot 2", value="2"),
+        app_commands.Choice(name="Both", value="both"),
+    ])
+    @app_commands.autocomplete(playername=playername_autocomplete)
     @is_owner()
-    async def playstylelogoremover(self, interaction: discord.Interaction, pathname: str):
+    async def playstyle_remove(self, interaction: discord.Interaction, playername: str,
+                               slot: app_commands.Choice[str]):
         await interaction.response.defer()
-
-        # Cards that carry this logo right now (read BEFORE removing, for the refresh below).
-        affected = cards_using_playstyle_logo(pathname)
-
-        removed = remove_playstyle_logo(pathname)
-        if removed is None:
-            names = list_playstyle_logos()
-            hint = ", ".join(names) if names else "(none added yet)"
-            await interaction.followup.send(f"❌ No playstyle logo found named `{pathname}`.\nAvailable: {hint}")
+        card = get_card(playername)
+        if card is None:
+            await interaction.followup.send(f"❌ No card named `{playername}`.")
             return
+        kwargs = {}
+        if slot.value in ("1", "both"):
+            kwargs["playstyle1"] = None
+        if slot.value in ("2", "both"):
+            kwargs["playstyle2"] = None
+        set_playstyles(card["playername"], **kwargs)
+        await self._send_playstyle_card(interaction, card["playername"])
 
-        # Best-effort cleanup of the local file — the DB row is already gone either way.
-        try:
-            os.remove(removed["local_path"])
-        except OSError:
-            pass
-
-        # Redraw the cards that used it so they stop showing the old logo right away.
-        refreshed = 0
-        for name in affected:
-            if await _regenerate_silently(name):
-                refreshed += 1
-
-        msg = f"🗑️ Removed playstyle logo **{removed['pathname']}**."
-        if affected:
-            msg += (
-                f"\n🔄 Redrew {refreshed}/{len(affected)} card(s) that used it: "
-                + ", ".join(f"**{n}**" for n in affected[:15])
-                + (" …" if len(affected) > 15 else "")
-                + "\nℹ️ These cards keep the playstyle itself (its match effect stays); only the logo is gone."
-            )
-        msg += (
-            f"\n➕ To put a new logo, run `/logoadderofplaystyle` with the name `{removed['pathname']}`. "
-            f"To take the playstyle off a card completely, use `/editcard` and pick **None (remove)**."
-        )
-        await interaction.followup.send(msg)
-
-    # ── /setplaystylelogo ────────────────────────────────────────────
-    @app_commands.command(name="setplaystylelogo", description="Put up to 2 playstyle logos on a player card")
-    @app_commands.describe(
-        playername="Which card to put the logo(s) on",
-        logo1="First playstyle logo",
-        logo2="Second playstyle logo (optional — leave empty for just one logo)",
-    )
-    @app_commands.autocomplete(
-        playername=playername_autocomplete, logo1=logo_autocomplete, logo2=logo_autocomplete,
-    )
-    @is_owner()
-    async def setplaystylelogo(
-        self,
-        interaction: discord.Interaction,
-        playername: str,
-        logo1: str,
-        logo2: str | None = None,
-    ):
-        await interaction.response.defer()
-
-        if not card_exists(playername):
-            names = list_playernames()
-            hint = ", ".join(names) if names else "(no cards yet)"
-            await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
-            return
-
-        chosen = []
-        for name in (logo1, logo2):
-            if name is None:
-                chosen.append(None)
-                continue
-            row = get_playstyle_logo(name)
-            if row is None:
-                names = list_playstyle_logos()
-                hint = ", ".join(names) if names else "(none added yet — use `/logoadderofplaystyle` first)"
-                await interaction.followup.send(f"❌ Unknown logo `{name}`.\nAvailable: {hint}")
-                return
-            chosen.append(row["pathname"])
-
-        if chosen[0] and chosen[1] and chosen[0].lower() == chosen[1].lower():
-            await interaction.followup.send("❌ logo1 and logo2 can't be the same logo.")
-            return
-
-        # Replaces both slots: leaving logo2 empty removes any second logo.
-        set_playstyles(playername, chosen[0], chosen[1])
-
-        try:
-            await _regenerate_and_send(interaction, playername, "🎯 Playstyle logo(s) set")
-        except Exception as e:
-            await interaction.followup.send(f"⚠️ Logos saved, but image regeneration failed: `{e}`")
+    async def _send_playstyle_card(self, interaction: discord.Interaction, name: str) -> None:
+        """Redraw the card and show what it carries now."""
+        card = get_card(name)
+        lines = []
+        for slot in (1, 2):
+            ps = card[f"playstyle{slot}"] if f"playstyle{slot}" in card.keys() else None
+            if ps:
+                lv = card[f"playstyle{slot}_level"] if f"playstyle{slot}_level" in card.keys() else None
+                lines.append(f"Slot {slot}: **{ps}** · {LEVEL_LABELS.get(lv if lv in (1, 2, 3) else 2)}")
+            else:
+                lines.append(f"Slot {slot}: (empty)")
+        ok = await _regenerate_silently(name)
+        msg = f"✅ **{name}**\n" + "\n".join(lines)
+        card = get_card(name)
+        if ok and card["image_path"] and os.path.exists(card["image_path"]):
+            await interaction.followup.send(msg, file=discord.File(card["image_path"], filename="card.png"))
+        else:
+            await interaction.followup.send(msg + "\n⚠️ Saved, but the card image could not be redrawn now.")
 
     # ── /logofixer ───────────────────────────────────────────────────
     @app_commands.command(name="logofixer", description="Move and/or resize a card's playstyle logos")

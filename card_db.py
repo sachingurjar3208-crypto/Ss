@@ -102,6 +102,10 @@ _NEW_CARD_COLUMNS = [
     # Same real player, many cards: all versions share one player_group (e.g. "virat kohli").
     # NULL = the card is its own group (old cards keep working unchanged).
     ("player_group", "TEXT"),
+    # Playstyle level per slot: 1 = Silver (half power), 2 = Gold (normal power), 3 = Golden Pink (1.5x).
+    # NULL = Gold, so every card made before levels existed keeps exactly the same power.
+    ("playstyle1_level", "INTEGER"),
+    ("playstyle2_level", "INTEGER"),
 ]
 
 
@@ -323,7 +327,7 @@ def clone_card(
             "player_group": src["player_group"] or src["playername_key"],
             "image_path": None, "extra_stats": None,
             "s2_theme": theme if theme in CARD_THEMES else None,   # never inherited from the source card
-            **({"s2_bg": background.strip()} if theme in CARD_THEMES else {}),   # themed card: the picked background IS the frame
+            **({"s2_bg": background.strip()} if theme == "halloween" else {}),   # Halloween: the picked background IS the frame
             "created_by": created_by, "created_at": now, "updated_at": now,
         })
         names = [n for n in values if n in cols]
@@ -642,7 +646,7 @@ def set_card_obtainable(playername: str, obtainable: bool) -> bool:
 # ── Style 2 card design: style switch + extra stats ──────────────────────
 
 CARD_STYLES = ("classic", "style2")
-CARD_THEMES = ("halloween",)      # Style 2 themes (NULL in the database = normal card)
+CARD_THEMES = ("halloween", "signature")   # Style 2 themes (NULL in the database = normal card)
 
 
 def set_card_style(playername: str, style: str) -> bool:
@@ -801,16 +805,25 @@ def find_cards(query: str, limit: int = 10) -> list[sqlite3.Row]:
     return list(exact) + list(like)
 
 
-def set_playstyles(playername: str, playstyle1=_UNSET, playstyle2=_UNSET) -> bool:
-    """Set the card's playstyle logo slots. Pass a logo pathname to fill a
-    slot, None to clear it, or leave the argument out to keep it unchanged."""
+def set_playstyles(playername: str, playstyle1=_UNSET, playstyle2=_UNSET,
+                   level1=_UNSET, level2=_UNSET) -> bool:
+    """Set the card's playstyle slots. Pass a playstyle name to fill a slot, None to
+    clear it, or leave the argument out to keep it unchanged. level1/level2: 1 / 2 / 3
+    (Silver / Gold / Golden Pink), None = Gold. Clearing a slot also clears its level."""
     if get_card(playername) is None:
         return False
     updates: dict = {}
+    # A slot that gets a new playstyle (or is cleared) starts again at Gold unless a level is given.
     if playstyle1 is not _UNSET:
         updates["playstyle1"] = playstyle1
+        updates["playstyle1_level"] = None
     if playstyle2 is not _UNSET:
         updates["playstyle2"] = playstyle2
+        updates["playstyle2_level"] = None
+    if level1 is not _UNSET:
+        updates["playstyle1_level"] = level1 if level1 in (1, 2, 3) else None
+    if level2 is not _UNSET:
+        updates["playstyle2_level"] = level2 if level2 in (1, 2, 3) else None
     if not updates:
         return True
     updates["updated_at"] = time.time()
@@ -822,6 +835,7 @@ def set_playstyles(playername: str, playstyle1=_UNSET, playstyle2=_UNSET) -> boo
         )
         conn.commit()
     _NARRATIVE_CACHE.clear()
+    _CACHE_GEN[0] += 1
     return True
 
 
@@ -921,6 +935,39 @@ def get_player_narratives(playername: str) -> list[str]:
     return list(names)
 
 
+_LEVEL_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def get_player_playstyle_levels(playername: str) -> dict[str, int]:
+    """{playstyle name: level} for a player's card (1 Silver, 2 Gold, 3 Golden Pink).
+    A slot without a level counts as Gold (2). Cached like get_player_narratives."""
+    from card_narratives import NARRATIVE_NAMES
+    key = playername.strip().lower()
+    now = time.time()
+    hit = _LEVEL_CACHE.get(key)
+    if hit and now - hit[0] < _NARRATIVE_TTL and not _NARRATIVE_CACHE_GEN_CHANGED(hit):
+        return dict(hit[1])
+    canon = {n.lower(): n for n in NARRATIVE_NAMES}
+    out: dict[str, int] = {}
+    row = get_card(playername)
+    if row is not None:
+        keys = row.keys()
+        for slot in (1, 2):
+            value = row[f"playstyle{slot}"] if f"playstyle{slot}" in keys else None
+            if value and value.strip().lower() in canon:
+                lvl = row[f"playstyle{slot}_level"] if f"playstyle{slot}_level" in keys else None
+                out[canon[value.strip().lower()]] = int(lvl) if lvl in (1, 2, 3) else 2
+    _LEVEL_CACHE[key] = (now, out, _CACHE_GEN[0])
+    return dict(out)
+
+
+_CACHE_GEN = [0]
+
+
+def _NARRATIVE_CACHE_GEN_CHANGED(hit) -> bool:
+    return len(hit) < 3 or hit[2] != _CACHE_GEN[0]
+
+
 def set_card_image_path(playername: str, image_path: str) -> None:
     with _conn() as conn:
         conn.execute(
@@ -950,6 +997,7 @@ def delete_card(playername: str) -> sqlite3.Row | None:
         )
         conn.commit()
     _NARRATIVE_CACHE.clear()
+    _CACHE_GEN[0] += 1
     return row
 
 

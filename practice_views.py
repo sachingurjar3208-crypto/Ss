@@ -12,7 +12,7 @@ import discord
 from discord import ui
 
 from game import GameState, _pname
-from logic import calculate_outcome, player_attributes
+from logic import calculate_outcome, player_attributes, player_attr_levels
 from commentary import build_ball_commentary
 import commentary as _comm
 import moments as _moments
@@ -287,6 +287,8 @@ async def _practice_process_delivery_inner(
         prev_delivery      = getattr(game, "last_delivery_internal", None),
         bowler_balls_done  = game.bowler_ball_count.get(bname, 0),
         bowler_max_balls   = game.max_bowler_balls(),
+        bowler_levels      = player_attr_levels(bowler),
+        batsman_levels     = player_attr_levels(striker),
     )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal

@@ -26,12 +26,14 @@ from PIL import Image, ImageChops, ImageDraw
 import summary_image
 
 W, H = summary_image.SIZE
-MAX_BYTES = 7_400_000            # Discord allows 10 MB on a normal server; keep a safe margin below it
+MAX_BYTES = 3_000_000            # small file = fast upload at match end (Discord allows 10 MB)
 FILENAME = "match_summary.gif"
 
 # (frames, width) tries from the best to the lightest. Height keeps the 3:2 shape.
-_LADDER = [(20, 1536), (16, 1536), (14, 1280), (12, 1152), (10, 1024)]
+# Lighter than before (was 20 frames at 1536px, up to 7.4 MB) so the summary arrives quickly.
+_LADDER = [(14, 1152), (12, 1024), (10, 960), (8, 896)]
 _DELAY_MS = 90
+_LOOP_MS = 1800                  # one animation loop; fewer frames -> longer delay, same speed
 
 _EMBER = [(255, 120, 20), (255, 168, 40), (255, 205, 90), (255, 236, 160)]
 
@@ -340,7 +342,8 @@ def build_animated_summary(data: dict, bg_bytes: bytes | None, style: str = "hal
     for n, width in _LADDER:
         frames = _build_frames(layers, n, width)
         pal = _palette_image(frames)
-        gif = _encode(_to_index_frames(frames, pal), _DELAY_MS)
+        delay = max(_DELAY_MS, round(_LOOP_MS / n))
+        gif = _encode(_to_index_frames(frames, pal), delay)
         if len(gif) <= max_bytes:
             return gif, FILENAME
     return None

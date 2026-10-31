@@ -4,11 +4,11 @@ Ball-by-ball commentary.
 Look (normal Discord text, no emoji, its OWN message right under the scoreboard):
 
     ### That's huge! **SIX**
-    `0.3` **Holder** to **Rathore**
+    0.3  **Holder** to **Rathore**
     Gets under it and upper-cuts it for six.
     -# Rathore moves to 47. 3 runs away from fifty.
 
-  * small monospace chips only for the ball number and the result (`0.5` ... `1 RUN`)
+  * plain text only, no code chips: 0.5  **Holder** to **Rathore**  ·  **1 RUN**
   * a big heading line only for FOUR / SIX / OUT
   * the situation / playstyle / milestone / chase lines are small grey "-#" subtext
 
@@ -346,13 +346,14 @@ def _ball_no(game) -> str:
 
 
 def _header(game, bowler: str, batter: str, tag: str | None) -> str:
-    """`0.5` **Holder** to **Rathore**  `1 RUN`   (tag chip left out when a headline shows it)"""
+    """0.5  **Holder** to **Rathore**  ·  **1 RUN**   (plain text, no code chips;
+    the result is left out when the big headline already shows it)"""
     ball = _ball_no(game)
-    parts = [f"`{ball}`"] if ball else []
+    parts = [ball] if ball else []
     parts.append(f"**{_esc(clean(_short(bowler)))}** to **{_esc(clean(_short(batter)))}**")
-    line = " ".join(parts)
+    line = "  ".join(parts)
     if tag:
-        line += f"  `{tag}`"
+        line += f"  ·  **{tag}**"
     return line
 
 

@@ -257,6 +257,20 @@ def _load_logo(pathname) -> Image.Image | None:
         return None
 
 
+def _load_playstyle_badge(card_row, slot: int) -> Image.Image | None:
+    """The card's playstyle badge for slot 1/2: the bot's own metal badge for that playstyle
+    and level (Silver / Gold / Golden Pink). The old logos added by link are NOT used any more."""
+    name = _col(card_row, f"playstyle{slot}")
+    if not name:
+        return None
+    try:
+        import playstyle_badges
+        return playstyle_badges.get_badge(name, _col(card_row, f"playstyle{slot}_level"))
+    except Exception as e:
+        print(f"[card] playstyle badge skipped ({type(e).__name__}: {e})")
+        return None
+
+
 def _load_panel(pathname) -> Image.Image | None:
     """Load a stats-panel overlay image by name; None if unset, unknown or
     unreadable (card just renders without the overlay in that case)."""
@@ -486,7 +500,7 @@ def _build_card_image_sync(card_row, background_local_path: str, fg: Image.Image
     # ── Playstyle logos (max 2): Narrative 1 left spot, Narrative 2 right spot ──
     slots = []
     for slot in (1, 2):
-        logo = _load_logo(_col(card_row, f"playstyle{slot}"))
+        logo = _load_playstyle_badge(card_row, slot)
         if logo is not None:
             slots.append((slot, logo))
     # Slot 1 always sits at LOGO_CENTER_1, slot 2 always at LOGO_CENTER_2.

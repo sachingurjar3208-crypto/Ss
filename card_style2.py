@@ -438,7 +438,7 @@ def _draw_left_column(canvas: Image.Image, draw: ImageDraw.ImageDraw, card_row, 
     logos = []
     for slot in (1, 2):
         try:
-            logo = ci._load_logo(ci._col(card_row, f"playstyle{slot}"))
+            logo = ci._load_playstyle_badge(card_row, slot)
         except Exception:
             logo = None
         if logo is not None:
@@ -542,6 +542,16 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
 
     static = _static()
     role = effective_role(card_row)
+
+    # Signature Edition: the normal card without a name, then the ivory paper + signature look.
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "signature":
+        import card_signature
+        plain = build_card_style2(card_signature._NoName(card_row), fg_image)
+        out = card_signature.apply_signature_look(Image.open(plain), card_row, role)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
 
     theme_key = _card_theme(card_row)
     if theme_key:
