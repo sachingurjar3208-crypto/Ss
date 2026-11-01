@@ -376,3 +376,16 @@ SIGNATURE BOX: NAYE REWARDS + ACCHE REWARDS HARD (sigbox.py, sigbox_image.py, si
         Signature card          0.1% har spin, 99% ko spin 10 par (sabse hard)
   * Aur hard karna ho: /sigbox slotchance se number aur kam karo (jaise Legend 0.05).
   * Database: spins ab sigbox_spin table mein (purane apne aap copy).
+
+
+NAYA XI IMAGE (squad_image.py, squad_cog.py)  - rcovr / rcstarterpack
+=====================================================================
+
+  * Background ab code se banta hai (stadium night): floodlights, halka cricket ground,
+    har row ke neeche light, vignette. Header glass bar: team naam left, OVR gold right,
+    logo beech mein.
+  * Har card ke neeche batting order number (1-11).
+  * Captain par gold "C" badge (rccaptain wala), keeper par neela "WK".
+  * Neeche patti: Batting / All-round / Keeper / Bowling ka average OVR + Chemistry.
+  * Background ek baar banta hai (~2 sec, sirf pehli baar), phir har image ~0.2 sec.
+  * starter_bg.png abhi bhi chahiye (logo usi se, aur debut_image.py bhi use karta hai).

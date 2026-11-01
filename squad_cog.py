@@ -792,7 +792,8 @@ class SquadCog(commands.Cog, name="Squad"):
         embed.set_footer(text=(f"⚠️ {problem}" if problem else "✅ Ready to play") + " • Edit XI: rcswap • rcautoxi")
         buf = None
         try:
-            buf = await asyncio.to_thread(build_team_image, cards, user["team_name"], team_ovr)
+            buf = await asyncio.to_thread(build_team_image, cards, user["team_name"], team_ovr,
+                                        user["captain_key"])
         except Exception as e:
             print(f"[rcovr] collage failed: {e}")
         if buf is not None:
