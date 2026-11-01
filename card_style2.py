@@ -89,6 +89,21 @@ THEMES = {
         "stat_line": (1130, 1395),
         "bottom_line": False,                    # the frame has a gem where the small bottom line would be
     },
+    "diwali": {
+        "frame": "diwali_frame.png",             # built-in: gold Diwali border (diya, rangoli, beads) + festive art
+        "inner": [(8.5, 17.1), (43.4, 9.2), (46.7, 9.8), (50.0, 5.5), (53.3, 9.8), (56.6, 9.2), (60.0, 7.0),
+                  (91.6, 16.8), (91.6, 81.4), (88.6, 85.5), (50.0, 95.7), (11.5, 85.5), (8.5, 81.4)],
+        "num":     (255, 196, 70, 255),          # ovr + stat numbers: diya gold
+        "label":   (255, 240, 205, 255),         # role word, stat labels, country: warm ivory
+        "name":    (255, 240, 205, 255),
+        "line":    (255, 196, 70, 255),
+        "outline": (48, 10, 24),                 # dark maroon outline round all text
+        "glow":    (255, 120, 20),               # warm diya glow behind ovr + name
+        "stat_ys": [1190, 1302, 1415],           # same places as the normal card (same shield shape)
+        "stat_size": 112,
+        "stat_line": (1143, 1448),
+        "bottom_line": True,
+    },
 }
 
 

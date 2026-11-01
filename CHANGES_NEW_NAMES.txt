@@ -389,3 +389,21 @@ NAYA XI IMAGE (squad_image.py, squad_cog.py)  - rcovr / rcstarterpack
   * Neeche patti: Batting / All-round / Keeper / Bowling ka average OVR + Chemistry.
   * Background ek baar banta hai (~2 sec, sirf pehli baar), phir har image ~0.2 sec.
   * starter_bg.png abhi bhi chahiye (logo usi se, aur debut_image.py bhi use karta hai).
+
+
+DIWALI CARD THEME (naya: diwali_frame.png | badla: card_style2.py, card_db.py,
+                   cardmaker_cog.py, cardstats_cog.py)
+==============================================================================
+
+  * Naya theme "Diwali": gold metallic border, moti (beads) ki line, upar spike par
+    jalta diya, kandhon aur sides par phool, neeche rangoli. Andar Diwali background
+    (fireworks, diye, rangoli). OVR + stat numbers diya-gold, naam/labels ivory,
+    peeche halki narangi chamak.
+  * Frame file diwali_frame.png repo mein hai (built-in), /bgadder ki zaroorat NAHI.
+  * Kaise lagaye:
+        /cardmaker ... theme: Diwali
+        /editcard  ... theme: Diwali        (purane card par)
+        /eventplayermaker ... theme: Diwali (event card)
+        /cardstats ... theme: Diwali
+  * Fix: /eventplayermaker mein Signature Edition theme pehle lagta hi nahi tha
+    (sirf Halloween chalta tha). Ab Halloween / Diwali / Signature teeno lagte hain.

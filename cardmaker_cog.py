@@ -101,9 +101,11 @@ THEME_CHOICES = [
     app_commands.Choice(name="Normal", value="default"),
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
     app_commands.Choice(name="Signature Edition", value="signature"),
+    app_commands.Choice(name="Diwali", value="diwali"),
 ]
 THEME_HELP = ("Card theme. Halloween = background used as frame + orange text. "
-              "Signature Edition = autograph card (add the PNG with /signatureadd)")
+              "Signature Edition = autograph card (add the PNG with /signatureadd). "
+              "Diwali = gold Diwali frame with diyas + gold text")
 
 
 def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
@@ -117,6 +119,10 @@ def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
             set_style2_options(playername, theme="halloween", bg=frame_bg)
         else:
             set_style2_options(playername, theme="halloween")
+    elif theme.value == "diwali":
+        # Diwali uses its built-in frame (diwali_frame.png); the background option is not needed
+        set_card_style(playername, "style2")
+        set_style2_options(playername, theme="diwali")
     elif theme.value == "signature":
         # Signature Edition always uses the Style 2 design; the signature PNG comes from /signatureadd
         set_card_style(playername, "style2")
@@ -678,14 +684,14 @@ class CardMakerCog(commands.Cog):
             await interaction.followup.send(f"❌ Unknown background `{background}`.\nAvailable: {hint}")
             return
 
-        halloween = theme is not None and theme.value == "halloween"
+        themed = theme.value if theme is not None and theme.value != "default" else None
         err = await asyncio.to_thread(
             clone_card, src["playername"], playername,
             ovr=ovr, bat=bat, bowl=bowl, background=bg["pathname"],
-            style="style2" if halloween else design,          # Halloween is always Style 2
+            style="style2" if themed else design,             # Halloween / Diwali / Signature are always Style 2
             event_key=event_row["event_key"], obtainable=obtainable,
             created_by=interaction.user.id, displayname=displayname,
-            theme="halloween" if halloween else None,
+            theme=themed,
         )
         if err:
             reason = {

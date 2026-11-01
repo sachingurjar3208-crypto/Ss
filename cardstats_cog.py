@@ -29,6 +29,7 @@ from cardmaker_cog import (
 THEME_CHOICES = [
     app_commands.Choice(name="Normal (purple)", value="default"),
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
+    app_commands.Choice(name="Diwali", value="diwali"),
 ]
 
 STYLE_CHOICES = [
@@ -208,8 +209,8 @@ class CardStatsCog(commands.Cog):
         if to_save:
             set_extra_stats(player, to_save)
         chosen_style = style.value if style is not None else "style2"
-        if theme is not None and theme.value == "halloween":
-            chosen_style = "style2"                      # Halloween only exists in Style 2
+        if theme is not None and theme.value in ("halloween", "diwali"):
+            chosen_style = "style2"                      # Halloween / Diwali only exist in Style 2
         set_card_style(player, chosen_style)
 
         # Redraw the card and post it.
