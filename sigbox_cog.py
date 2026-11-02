@@ -84,7 +84,7 @@ def _result_embed(user, res: dict, cards: dict, box: dict) -> discord.Embed:
         e = discord.Embed(color=COLOR, description=f"Spin {res['spin']}: **{what}**")
     notes = []
     if res["status"] == "pending":
-        notes.append("Your squad is full, decide with `rcpending`.")
+        notes.append("Waiting: keep, sell or replace it (rcpending).")
     elif res["status"] == "dupe" and rw.kind == "player":
         notes.append(f"Already owned" + (f", refunded **{res['refund']:,}** coins." if res["refund"] else "."))
     elif res["status"] == "dupe" and rw.kind == "theme":

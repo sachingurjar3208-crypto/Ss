@@ -406,7 +406,7 @@ class DraftView(OwnedView):
         for r, it in zip(rows, items):
             if it["card"] is None:
                 continue
-            tag = {"added": "  🆕", "pending": "  ⚠️ squad full", "dupe": "  ♻️ duplicate"}[r["status"]]
+            tag = {"added": "  🆕", "pending": "  ⏳ keep / sell?", "dupe": "  ♻️ duplicate"}[r["status"]]
             lines.append(f"**Pool {r['pool']}** · {_card_line(it['card'], tag)}")
         label = event["name"] if event else "Draft"
         embed = discord.Embed(

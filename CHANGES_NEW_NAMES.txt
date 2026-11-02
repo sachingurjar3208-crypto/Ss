@@ -407,3 +407,25 @@ DIWALI CARD THEME (naya: diwali_frame.png | badla: card_style2.py, card_db.py,
         /cardstats ... theme: Diwali
   * Fix: /eventplayermaker mein Signature Edition theme pehle lagta hi nahi tha
     (sirf Halloween chalta tha). Ab Halloween / Diwali / Signature teeno lagte hain.
+
+
+SQUAD 35 / PREMIUM 60 + DUPLICATE CARDS (economy.py, economy_cog.py, squad_cog.py, ranked.py,
+  draft_cog.py, starpass_cog.py, sigbox_cog.py, admin_cog.py, help_menu.py, stats_cog.py)
+==============================================================================================
+
+  * Squad limit: 35 cards, Premium role: 60. Premium list bot start par role se banti hai
+    aur role milte / hat-te hi update hoti hai (table premium_users).
+  * Duplicate ab AUTO-SELL NAHI hota. Jab bhi duplicate mile (pack, draft, rcclaim, daily,
+    Star Pass, Signature Box, ranked) message aata hai:
+        Keep in squad | Sell it (+coins) | Replace a player | Decide later
+    "Keep" sirf tab dikhta hai jab squad mein jagah ho. Baad mein: rcpending.
+  * Squad mein ek card ki kitni bhi copies ho sakti hain (squad limit tak).
+    TEAM (XI) mein ek player sirf EK baar - copy hamesha bench par rehti hai.
+  * rcsquad: har copy alag number par ("♻️ copy"), title mein 12/35.
+  * rcms: XI ke players bhi bik sakte hain (khaali jagah best bench player leta hai),
+    copies bhi. "rcms 1 11" = rcsquad ke 1 se 11 number. Koi minimum nahi: user chahe to
+    poori team / saare cards bech sakta hai (economy.py -> MIN_SQUAD = 0).
+  * rcsell: ek copy bikti hai; jab tak doosri copy hai, XI wahi rehta hai.
+  * rcbuy: jo card pehle se hai uski copy bhi khareed sakte ho.
+  * Trade: aane wala card agar pehle se hai to copy ban jata hai.
+  * Database: owned.qty aur pending_cards.qty apne aap jud jaate hain (purana data safe).

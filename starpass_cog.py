@@ -248,7 +248,7 @@ async def _summary_embed(user, result: dict, season: dict | None = None) -> disc
     for k in result["new"]:
         lines.append(f"Player card: {name(k)} (added to your squad)")
     for k in result["pending"]:
-        lines.append(f"Player card: {name(k)} (your squad is full, decide with rcpending)")
+        lines.append(f"Player card: {name(k)} (waiting: keep, sell or replace with rcpending)")
     for k in result["dupes"]:
         lines.append(f"Player card: {name(k)} (already owned)")
     if result["refund"]:

@@ -43,8 +43,9 @@ LOSS_REWARD_PER_OVER = 150       # loser gets overs x this, but only in matches 
 LOSS_MIN_OVERS       = 10        # (10 overs = 1,500 ... 20 overs = 3,000; under 10 overs = nothing)
 MATCH_REWARD_DAILY_CAP   = 10   # rewarded matches per player per 24h
 MATCH_REWARD_PER_OPP_CAP = 3    # ... and against the same opponent per 24h (stops alt-account farming)
-MIN_SQUAD     = 11               # you can never sell below this many players
-SQUAD_MAX     = 25               # a squad can never hold more than this many players
+MIN_SQUAD     = 0                # cards a user must keep (0 = they may sell everything, XI too)
+SQUAD_MAX     = 35               # a squad can hold this many cards (copies of the same card count too)
+SQUAD_MAX_PREMIUM = 60           # ... and this many for Premium members (premium_users table)
 TRADE_FEE     = 5_000            # coins EACH of the two players pays for every completed trade
 WIN_REWARD_PER_OVER = 1_000      # match win = overs x this (1 over = 1,000 ... 20 overs = 20,000)
 XI_SIZE       = 11
@@ -81,7 +82,32 @@ def _conn() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA busy_timeout = 15000")
+    if not _MIGRATED:
+        _migrate(conn)
     return conn
+
+
+_MIGRATED = False
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """One-time upgrades of old databases (run on the first connection):
+    owned.qty / pending_cards.qty = copies of the same card (duplicates are kept now),
+    premium_users = who gets the bigger squad limit."""
+    global _MIGRATED
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(owned)")}
+        if not cols:
+            return                                   # fresh database: init_economy_db creates everything
+        if "qty" not in cols:
+            conn.execute("ALTER TABLE owned ADD COLUMN qty INTEGER NOT NULL DEFAULT 1")
+        pcols = {r[1] for r in conn.execute("PRAGMA table_info(pending_cards)")}
+        if pcols and "qty" not in pcols:
+            conn.execute("ALTER TABLE pending_cards ADD COLUMN qty INTEGER NOT NULL DEFAULT 1")
+        conn.execute("CREATE TABLE IF NOT EXISTS premium_users (user_id INTEGER PRIMARY KEY, ts REAL NOT NULL)")
+        _MIGRATED = True
+    except sqlite3.Error as e:
+        print(f"[economy] migration skipped for now: {e}")
 
 
 @contextmanager
@@ -130,6 +156,7 @@ def init_economy_db() -> None:
                 user_id     INTEGER NOT NULL,
                 player_key  TEXT    NOT NULL,
                 acquired_at REAL    NOT NULL,
+                qty         INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (user_id, player_key)
             );
             CREATE TABLE IF NOT EXISTS xi (
@@ -177,7 +204,12 @@ def init_economy_db() -> None:
                 player_key TEXT    NOT NULL,
                 source     TEXT,
                 ts         REAL    NOT NULL,
+                qty        INTEGER NOT NULL DEFAULT 1,
                 PRIMARY KEY (user_id, player_key)
+            );
+            CREATE TABLE IF NOT EXISTS premium_users (
+                user_id INTEGER PRIMARY KEY,
+                ts      REAL    NOT NULL
             );
             CREATE TABLE IF NOT EXISTS vouchers (
                 user_id INTEGER PRIMARY KEY,
@@ -198,6 +230,9 @@ def init_economy_db() -> None:
             );
             """
         )
+        global _MIGRATED
+        _MIGRATED = False
+        _migrate(conn)
     finally:
         conn.close()
 
@@ -349,10 +384,13 @@ def reward_match_winner(winner_id, loser_id, overs: int = 0) -> None:
         conn.execute("DELETE FROM reward_log WHERE ts < ?", (time.time() - 3 * DAY,))
 
 
-# ── Squad limit: max SQUAD_MAX players ──────────────────────────────────────
-# A card that arrives while the squad is full is NOT added. It waits in
-# `pending_cards` until the player chooses: sell it, or replace one of their
-# players with it (see resolve_pending). Nothing is ever lost or auto-sold.
+# ── Squad limit + duplicates ────────────────────────────────────────────────
+# A squad holds up to SQUAD_MAX cards (SQUAD_MAX_PREMIUM for Premium). The SAME card can be
+# owned more than once (owned.qty = copies), but the XI can never hold two cards of the same
+# real player (see _xi_has_group), so a copy always waits on the bench.
+# A card that is a DUPLICATE, or that arrives while the squad is full, is NOT added straight
+# away: it waits in `pending_cards` until the player chooses keep / sell / replace
+# (see resolve_pending). Nothing is ever lost or auto-sold.
 
 def _ensure_pending_table(conn: sqlite3.Connection) -> None:
     conn.execute(
@@ -361,23 +399,125 @@ def _ensure_pending_table(conn: sqlite3.Connection) -> None:
             player_key TEXT    NOT NULL,
             source     TEXT,
             ts         REAL    NOT NULL,
+            qty        INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (user_id, player_key)
         )"""
     )
 
 
 def _squad_count(conn: sqlite3.Connection, uid: int) -> int:
-    return int(conn.execute("SELECT COUNT(*) AS n FROM owned WHERE user_id = ?", (uid,)).fetchone()["n"])
+    return int(conn.execute("SELECT COALESCE(SUM(qty), 0) AS n FROM owned WHERE user_id = ?", (uid,)).fetchone()["n"])
+
+
+def _limit(conn: sqlite3.Connection, uid: int) -> int:
+    """Squad limit of this user: SQUAD_MAX_PREMIUM for Premium members, else SQUAD_MAX."""
+    try:
+        row = conn.execute("SELECT 1 FROM premium_users WHERE user_id = ?", (uid,)).fetchone()
+    except sqlite3.Error:
+        row = None
+    return SQUAD_MAX_PREMIUM if row is not None else SQUAD_MAX
+
+
+def squad_limit(user_id) -> int:
+    conn = _conn()
+    try:
+        return _limit(conn, _uid(user_id))
+    finally:
+        conn.close()
+
+
+def set_premium(user_id, premium: bool) -> None:
+    """Called by the bot when the Premium role is given / taken (and at start-up)."""
+    with _tx() as conn:
+        if premium:
+            conn.execute("INSERT OR IGNORE INTO premium_users (user_id, ts) VALUES (?, ?)", (_uid(user_id), time.time()))
+        else:
+            conn.execute("DELETE FROM premium_users WHERE user_id = ?", (_uid(user_id),))
+
+
+def sync_premium(user_ids) -> int:
+    """Replace the whole Premium list (start-up scan of the role). Returns how many."""
+    ids = {int(u) for u in user_ids}
+    with _tx() as conn:
+        conn.execute("DELETE FROM premium_users")
+        now = time.time()
+        for u in ids:
+            conn.execute("INSERT INTO premium_users (user_id, ts) VALUES (?, ?)", (u, now))
+    return len(ids)
+
+
+def _own_qty(conn: sqlite3.Connection, uid: int, key: str) -> int:
+    row = conn.execute("SELECT qty FROM owned WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
+    return int(row["qty"]) if row else 0
+
+
+def _pending_qty(conn: sqlite3.Connection, uid: int, key: str) -> int:
+    _ensure_pending_table(conn)
+    row = conn.execute("SELECT qty FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
+    return int(row["qty"]) if row else 0
+
+
+def _pending_total(conn: sqlite3.Connection, uid: int) -> int:
+    _ensure_pending_table(conn)
+    return int(conn.execute("SELECT COALESCE(SUM(qty), 0) AS n FROM pending_cards WHERE user_id = ?",
+                            (uid,)).fetchone()["n"])
 
 
 def _holds(conn: sqlite3.Connection, uid: int, key: str) -> bool:
     """Owns the card, or it is waiting in their pending list."""
+    return _own_qty(conn, uid, key) > 0 or _pending_qty(conn, uid, key) > 0
+
+
+def _pending_add(conn: sqlite3.Connection, uid: int, key: str, source: str) -> None:
     _ensure_pending_table(conn)
-    return (
-        conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone() is not None
-        or conn.execute("SELECT 1 FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
-        is not None
+    conn.execute(
+        "INSERT INTO pending_cards (user_id, player_key, source, ts, qty) VALUES (?, ?, ?, ?, 1) "
+        "ON CONFLICT(user_id, player_key) DO UPDATE SET qty = qty + 1",
+        (uid, key, source, time.time()),
     )
+
+
+def _pending_take(conn: sqlite3.Connection, uid: int, key: str) -> bool:
+    """Remove ONE waiting copy. False if none is waiting."""
+    q = _pending_qty(conn, uid, key)
+    if q <= 0:
+        return False
+    if q > 1:
+        conn.execute("UPDATE pending_cards SET qty = qty - 1 WHERE user_id = ? AND player_key = ?", (uid, key))
+    else:
+        conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, key))
+    return True
+
+
+def _add_copy(conn: sqlite3.Connection, uid: int, key: str, fill_xi: bool = True) -> bool:
+    """Add one card to the squad. A copy of a card already owned just raises qty (and stays on the
+    bench). Returns True if it was a NEW card (a new owned row)."""
+    if _own_qty(conn, uid, key) > 0:
+        conn.execute("UPDATE owned SET qty = qty + 1 WHERE user_id = ? AND player_key = ?", (uid, key))
+        return False
+    conn.execute("INSERT INTO owned (user_id, player_key, acquired_at, qty) VALUES (?, ?, ?, 1)",
+                 (uid, key, time.time()))
+    if fill_xi:
+        _fill_empty_slots(conn, uid, [key])
+    return True
+
+
+def _remove_copies(conn: sqlite3.Connection, uid: int, key: str, n: int = 1) -> int | None:
+    """Remove `n` copies of a card. Only when the LAST copy goes is the card taken out of the XI,
+    the captaincy and the impact subs. Returns the XI slot that became free, or None."""
+    q = _own_qty(conn, uid, key)
+    if q <= 0:
+        return None
+    if q > n:
+        conn.execute("UPDATE owned SET qty = qty - ? WHERE user_id = ? AND player_key = ?", (int(n), uid, key))
+        return None
+    slot_row = conn.execute("SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
+    conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, key))
+    conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, key))
+    conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, key))
+    _ensure_impact_subs_table(conn)
+    conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, key))
+    return int(slot_row["slot"]) if slot_row is not None else None
 
 
 def _event_disabled(key: str) -> bool:
@@ -408,21 +548,15 @@ def _not_for_sale(key: str) -> str | None:
 
 
 def _grant(conn: sqlite3.Connection, uid: int, key: str, source: str, allow_disabled: bool = False) -> str:
-    """Give one card. Returns "added", "pending" (squad full), "dupe", or "blocked"
-    (the card belongs to a disabled event, so nobody gets it)."""
+    """Give one card. Returns "added", "pending" or "blocked" (disabled event: nobody gets it).
+    "pending" = the card waits for the player's choice (keep / sell / replace): it is a
+    DUPLICATE of a card they already have, or their squad is full. Never auto-sold."""
     if not allow_disabled and _event_disabled(key):
         return "blocked"
-    if _holds(conn, uid, key):
-        return "dupe"
-    now = time.time()
-    if _squad_count(conn, uid) >= SQUAD_MAX:
-        conn.execute(
-            "INSERT OR IGNORE INTO pending_cards (user_id, player_key, source, ts) VALUES (?, ?, ?, ?)",
-            (uid, key, source, now),
-        )
+    if _holds(conn, uid, key) or _squad_count(conn, uid) >= _limit(conn, uid):
+        _pending_add(conn, uid, key, source)
         return "pending"
-    conn.execute("INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, key, now))
-    _fill_empty_slots(conn, uid, [key])
+    _add_copy(conn, uid, key)
     return "added"
 
 
@@ -430,6 +564,19 @@ def squad_count(user_id) -> int:
     conn = _conn()
     try:
         return _squad_count(conn, _uid(user_id))
+    finally:
+        conn.close()
+
+
+def pending_info(user_id, key: str) -> dict:
+    """For the keep / sell / replace prompt: {"owned": copies already owned, "waiting": copies
+    waiting, "count": squad size, "limit": squad limit, "room": True if one more fits}."""
+    uid = _uid(user_id)
+    conn = _conn()
+    try:
+        n, lim = _squad_count(conn, uid), _limit(conn, uid)
+        return {"owned": _own_qty(conn, uid, key), "waiting": _pending_qty(conn, uid, key),
+                "count": n, "limit": lim, "room": n < lim}
     finally:
         conn.close()
 
@@ -449,54 +596,36 @@ def get_pending(user_id) -> list[str]:
 
 def resolve_pending(user_id, new_key: str, action: str, replace_key: str | None = None,
                     new_value: int = 0, old_value: int = 0) -> str | None:
-    """Decide what happens to a waiting card. None on success, else an error text.
+    """Decide what happens to ONE waiting copy of a card. None on success, else an error text.
 
     action "sell":    the waiting card is sold for `new_value` coins.
-    action "replace": `replace_key` (one of the user's players) is sold for `old_value`
-                      coins and the waiting card takes its place (and its XI spot).
-    action "keep":    only if the squad has room again (e.g. after selling someone).
+    action "keep":    it joins the squad (a duplicate stays on the bench) if the squad has room.
+    action "replace": ONE copy of `replace_key` (one of the user's cards) is sold for `old_value`
+                      coins and the waiting card takes its place (and its XI spot, if that freed up).
     """
     uid = _uid(user_id)
     with _tx() as conn:
-        _ensure_pending_table(conn)
-        if conn.execute(
-            "SELECT 1 FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key)
-        ).fetchone() is None:
+        if _pending_qty(conn, uid, new_key) <= 0:
             return "That card is no longer waiting."
         if action == "sell":
-            conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key))
-            _apply_coins(conn, uid, int(new_value), f"Sold {new_key} (squad full)")
+            _pending_take(conn, uid, new_key)
+            _apply_coins(conn, uid, int(new_value), f"Sold {new_key} (waiting card)")
             return None
         if action == "keep":
-            if _squad_count(conn, uid) >= SQUAD_MAX:
-                return f"Your squad is full ({SQUAD_MAX}/{SQUAD_MAX})."
-            conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key))
-            conn.execute(
-                "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, new_key, time.time())
-            )
-            _fill_empty_slots(conn, uid, [new_key])
+            lim = _limit(conn, uid)
+            if _squad_count(conn, uid) >= lim:
+                return f"Your squad is full ({lim}/{lim}). Sell it or replace a player."
+            _pending_take(conn, uid, new_key)
+            _add_copy(conn, uid, new_key)
             return None
         if action == "replace":
-            if not replace_key or conn.execute(
-                "SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, replace_key)
-            ).fetchone() is None:
+            if not replace_key or _own_qty(conn, uid, replace_key) <= 0:
                 return "You don't own the player you picked to replace."
-            slot_row = conn.execute(
-                "SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (uid, replace_key)
-            ).fetchone()
-            conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, replace_key))
-            conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, replace_key))
-            conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, replace_key))
-            _ensure_impact_subs_table(conn)
-            conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, replace_key))
-            conn.execute("DELETE FROM pending_cards WHERE user_id = ? AND player_key = ?", (uid, new_key))
-            conn.execute(
-                "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, new_key, time.time())
-            )
-            if slot_row is not None and not _xi_has_group(conn, uid, new_key):
-                conn.execute(
-                    "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot_row["slot"], new_key)
-                )
+            freed = _remove_copies(conn, uid, replace_key, 1)
+            _pending_take(conn, uid, new_key)
+            if _add_copy(conn, uid, new_key, fill_xi=False) and freed is not None \
+                    and not _xi_has_group(conn, uid, new_key):
+                conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, freed, new_key))
             _apply_coins(conn, uid, int(old_value), f"Sold {replace_key} (replaced)")
             return None
         return "Unknown choice."
@@ -563,11 +692,9 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
             if fresh:
                 card_key = _rng.choice(fresh)
                 pending = _grant(conn, uid, card_key, f"{kind} reward") == "pending"
-            else:
-                card_key, dupe = _rng.choice(pool), True
-                refund = int((dupe_values or {}).get(card_key, 0))
-                if refund:
-                    balance = _apply_coins(conn, uid, refund, f"Duplicate refund ({kind} reward)")
+            else:   # every card of the range is owned already: a duplicate, the player decides
+                card_key = _rng.choice(pool)
+                pending = _grant(conn, uid, card_key, f"{kind} reward") == "pending"
         return {"ok": True, "coins": coins, "base": base, "bonus": bonus, "balance": balance,
                 "streak": streak, "card": card_key, "dupe": dupe, "refund": refund, "pending": pending,
                 "vouchers": vouchers}
@@ -651,11 +778,9 @@ def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
         if fresh:
             key = _rng.choice(fresh)
             pending = _grant(conn, uid, key, "rcclaim") == "pending"
-        else:
-            key, dupe = _rng.choice(pool), True
-            refund = int((dupe_values or {}).get(key, 0))
-            if refund:
-                balance = _apply_coins(conn, uid, refund, "Duplicate refund (rcclaim)")
+        else:   # all owned already: a duplicate, the player decides (keep / sell / replace)
+            key = _rng.choice(pool)
+            pending = _grant(conn, uid, key, "rcclaim") == "pending"
         conn.execute("UPDATE users SET last_claim = ? WHERE user_id = ?", (now, uid))
         return {"ok": True, "card": key, "dupe": dupe, "refund": refund, "pending": pending, "balance": balance}
 
@@ -704,6 +829,16 @@ def owned_keys(user_id) -> list[str]:
             "SELECT player_key FROM owned WHERE user_id = ? ORDER BY acquired_at", (_uid(user_id),)
         ).fetchall()
         return [r["player_key"] for r in rows]
+    finally:
+        conn.close()
+
+
+def owned_counts(user_id) -> dict[str, int]:
+    """{player_key: copies} of everything the user owns."""
+    conn = _conn()
+    try:
+        return {r["player_key"]: int(r["qty"]) for r in conn.execute(
+            "SELECT player_key, qty FROM owned WHERE user_id = ?", (_uid(user_id),))}
     finally:
         conn.close()
 
@@ -864,102 +999,78 @@ def buy_card(user_id, player_key: str, price: int) -> str | None:
         row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
         if row is None:
             return "You haven't debuted yet."
-        if _holds(conn, uid, player_key):
-            return "You already own this player (or it is waiting in your pending cards)."
-        if _squad_count(conn, uid) >= SQUAD_MAX:
-            return f"Your squad is full ({SQUAD_MAX}/{SQUAD_MAX}). Sell a player first."
+        lim = _limit(conn, uid)
+        if _squad_count(conn, uid) >= lim:
+            return f"Your squad is full ({lim}/{lim}). Sell a player first."
         if int(row["purse"]) < price:
             return "Not enough coins."
         _apply_coins(conn, uid, -price, f"Bought {player_key}")
-        conn.execute(
-            "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, player_key, time.time())
-        )
-        _fill_empty_slots(conn, uid, [player_key])
+        _add_copy(conn, uid, player_key)          # buying a card you own = one more copy (bench)
         return None
 
 
 def sell_card(user_id, player_key: str, value: int, replacement_key: str | None) -> str | None:
-    """Sell one card for `value` coins. If the player was in the XI, the
-    `replacement_key` (a bench player) takes their batting spot."""
+    """Sell ONE copy of a card for `value` coins. If that was the last copy and the card was in
+    the XI, the `replacement_key` (a bench player) takes its batting spot."""
     uid = _uid(user_id)
     with _tx() as conn:
-        if conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, player_key)).fetchone() is None:
+        if _own_qty(conn, uid, player_key) <= 0:
             return "You don't own that player."
-        count = conn.execute("SELECT COUNT(*) AS n FROM owned WHERE user_id = ?", (uid,)).fetchone()["n"]
-        if count <= MIN_SQUAD:
+        if _squad_count(conn, uid) <= MIN_SQUAD:
             return f"You must keep at least {MIN_SQUAD} players."
-        slot_row = conn.execute("SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (uid, player_key)).fetchone()
-        conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, player_key))
-        conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, player_key))
-        conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, player_key))
-        _ensure_impact_subs_table(conn)
-        conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, player_key))
-        if slot_row is not None and replacement_key:
-            ok = conn.execute(
-                "SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, replacement_key)
-            ).fetchone()
+        freed = _remove_copies(conn, uid, player_key, 1)
+        if freed is not None and replacement_key and replacement_key != player_key:
+            ok = _own_qty(conn, uid, replacement_key) > 0
             in_xi = conn.execute(
                 "SELECT 1 FROM xi WHERE user_id = ? AND player_key = ?", (uid, replacement_key)
             ).fetchone()
             if ok and not in_xi and not _xi_has_group(conn, uid, replacement_key):
-                conn.execute(
-                    "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)",
-                    (uid, slot_row["slot"], replacement_key),
-                )
+                conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)",
+                             (uid, freed, replacement_key))
         _apply_coins(conn, uid, value, f"Sold {player_key}")
         return None
 
 
 def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) -> tuple[str | None, int]:
-    """Sell many cards in ONE transaction (all or nothing).
+    """Sell many cards in ONE transaction (all or nothing). XI players can be sold too.
 
-    items       -> [(player_key, coins), ...]
+    items       -> [(player_key, coins), ...]  (the same key twice = sell 2 copies)
     bench_order -> the user's remaining cards, best OVR first. Slots that open
                    up in the XI are refilled from this list.
     Returns (error, total_coins). error is None on success.
     """
     uid = _uid(user_id)
-    keys = [k for k, _ in items]
-    if not keys or len(set(keys)) != len(keys):
+    if not items:
         return "Nothing to sell.", 0
+    want: dict[str, int] = {}
+    for k, _ in items:
+        want[k] = want.get(k, 0) + 1
     with _tx() as conn:
-        marks = ",".join("?" * len(keys))
-        have = conn.execute(
-            f"SELECT COUNT(*) AS n FROM owned WHERE user_id = ? AND player_key IN ({marks})", (uid, *keys)
-        ).fetchone()["n"]
-        if have != len(keys):
-            return "Your squad changed. Please run the command again.", 0
-        count = conn.execute("SELECT COUNT(*) AS n FROM owned WHERE user_id = ?", (uid,)).fetchone()["n"]
-        if count - len(keys) < MIN_SQUAD:
+        for k, n in want.items():
+            if _own_qty(conn, uid, k) < n:
+                return "Your squad changed. Please run the command again.", 0
+        if _squad_count(conn, uid) - len(items) < MIN_SQUAD:
             return f"You must keep at least {MIN_SQUAD} players.", 0
-        _ensure_impact_subs_table(conn)
         freed_slots: list[int] = []
-        for key in keys:
-            row = conn.execute("SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (uid, key)).fetchone()
-            if row is not None:
-                freed_slots.append(int(row["slot"]))
-            conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (uid, key))
-            conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (uid, key))
-            conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (uid, key))
-            conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (uid, key))
+        for k, n in want.items():
+            slot = _remove_copies(conn, uid, k, n)
+            if slot is not None:
+                freed_slots.append(slot)
         # best remaining bench players take the vacated XI spots
         for slot in sorted(freed_slots):
             for cand in bench_order:
-                if cand in keys:
+                if _own_qty(conn, uid, cand) <= 0:
                     continue
-                owned_ok = conn.execute(
-                    "SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (uid, cand)
-                ).fetchone()
                 in_xi = conn.execute(
                     "SELECT 1 FROM xi WHERE user_id = ? AND player_key = ?", (uid, cand)
                 ).fetchone()
-                if owned_ok and not in_xi and not _xi_has_group(conn, uid, cand):
+                if not in_xi and not _xi_has_group(conn, uid, cand):
                     conn.execute(
                         "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (uid, slot, cand)
                     )
                     break
         total = sum(int(v) for _, v in items)
-        _apply_coins(conn, uid, total, f"Multi sell ({len(keys)} players)")
+        _apply_coins(conn, uid, total, f"Multi sell ({len(items)} cards)")
         return None, total
 
 
@@ -1054,8 +1165,8 @@ def buy_pack(user_id, pack_type: str, price: int) -> str | None:
 
 
 def open_pack(user_id, pack_type: str, keys: list[str], dupe_values: dict[str, int]) -> dict | str:
-    """Use up one pack and hand over `keys`. Cards the user already owns are
-    turned into coins using `dupe_values`. Returns {"new": [...], "pending": [...] (squad
+    """Use up one pack and hand over `keys`. Duplicates (and cards that don't fit) wait in
+    pending_cards for the player's choice (`dupe_values` is no longer used). Returns {"new": [...], "pending": [...] (squad
     was full: waiting for sell/replace), "dupes": [...], "refund": n} or an error message."""
     uid = _uid(user_id)
     with _tx() as conn:
@@ -1067,20 +1178,12 @@ def open_pack(user_id, pack_type: str, keys: list[str], dupe_values: dict[str, i
             return "You don't have that pack."
         new, pending, dupes, refund = [], [], [], 0
         for k in keys:
-            if k in new or k in pending:
-                dupes.append(k)
-                refund += dupe_values.get(k, 0)
-                continue
+            # duplicates are no longer sold automatically: they wait for keep / sell / replace
             status = _grant(conn, uid, k, f"{pack_type} pack")
             if status == "added":
                 new.append(k)
             elif status == "pending":
                 pending.append(k)
-            else:
-                dupes.append(k)
-                refund += dupe_values.get(k, 0)
-        if refund:
-            _apply_coins(conn, uid, refund, f"Duplicate refund ({pack_type} pack)")
         return {"new": new, "pending": pending, "dupes": dupes, "refund": refund}
 
 
@@ -1303,15 +1406,13 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
             tag = f" [{erow['event_key']}]"
         # Squad limit: every pack can add one card, so the squad (owned + cards already
         # waiting) must have room for ALL packs. Checked before anything is charged.
-        _ensure_pending_table(conn)
-        held = _squad_count(conn, uid) + int(
-            conn.execute("SELECT COUNT(*) AS n FROM pending_cards WHERE user_id = ?", (uid,)).fetchone()["n"]
-        )
-        if held + count > SQUAD_MAX:
-            need = held + count - SQUAD_MAX
+        lim = _limit(conn, uid)
+        held = _squad_count(conn, uid) + _pending_total(conn, uid)
+        if held + count > lim:
+            need = held + count - lim
             return (
-                f"Your squad limit is {SQUAD_MAX}. You have {held} card(s) and this opens {count} pack(s). "
-                f"You need to sell at least {need} card(s) first (`rcsell`)."
+                f"Your squad limit is {lim}. You have {held} card(s) (with waiting cards) and this opens "
+                f"{count} pack(s). You need to sell at least {need} card(s) first (`rcsell` / `rcpending`)."
             )
         row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
         have = int(row["amount"]) if row else 0
@@ -1343,16 +1444,10 @@ def draft_spin(user_id, count: int, cost_each: int, pity_at: int, roll_fn, dupe_
                 since = 0
             elif pool == "B":
                 since_b = 0
-            if key in seen:
-                status = "dupe"
-            else:
-                status = _grant(conn, uid, key, f"Draft pool {pool}{tag}",
-                                allow_disabled=pool in ("A", "B"))
-                seen.add(key)
+            # a duplicate waits for keep / sell / replace (never sold automatically)
+            status = _grant(conn, uid, key, f"Draft pool {pool}{tag}", allow_disabled=pool in ("A", "B"))
+            seen.add(key)
             refund = 0
-            if status == "dupe":
-                refund = int(dupe_value_fn(key))
-                total_refund += refund
             results.append({"pool": pool, "key": key, "status": status, "refund": refund})
         if total_refund:
             _apply_coins(conn, uid, total_refund, f"Duplicate refund (draft x{count}{tag})")
@@ -1382,10 +1477,12 @@ def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
             return "You already claimed your starter pack."
         have = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
         incoming = [k for k in dict.fromkeys(keys) if k not in have]
-        if len(have) + len(incoming) > SQUAD_MAX:
+        lim = _limit(conn, uid)
+        held = _squad_count(conn, uid)
+        if held + len(incoming) > lim:
             return (
-                f"Your squad would go over {SQUAD_MAX} players. "
-                f"Sell {len(have) + len(incoming) - SQUAD_MAX} player(s) first, then try again."
+                f"Your squad would go over {lim} players. "
+                f"Sell {held + len(incoming) - lim} player(s) first, then try again."
             )
         now = time.time()
         for k in keys:
@@ -1450,13 +1547,8 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
     if _event_disabled(a_key) or _event_disabled(b_key):
         return "A card of a disabled event can't be traded right now."
     with _tx() as conn:
-        def has(u, k):
-            return conn.execute("SELECT 1 FROM owned WHERE user_id = ? AND player_key = ?", (u, k)).fetchone() is not None
-
-        if not has(a, a_key) or not has(b, b_key):
+        if _own_qty(conn, a, a_key) <= 0 or _own_qty(conn, b, b_key) <= 0:
             return "One of the players is no longer available."
-        if has(a, b_key) or has(b, a_key):
-            return "One of you already owns the player you'd receive."
         for u in (a, b):
             row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (u,)).fetchone()
             if row is None or int(row["purse"]) < fee:
@@ -1464,19 +1556,10 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
         for u in (a, b):
             _apply_coins(conn, u, -fee, "Trade fee")
         for u, out_k, in_k in ((a, a_key, b_key), (b, b_key, a_key)):
-            slot_row = conn.execute("SELECT slot FROM xi WHERE user_id = ? AND player_key = ?", (u, out_k)).fetchone()
-            conn.execute("DELETE FROM xi WHERE user_id = ? AND player_key = ?", (u, out_k))
-            conn.execute("DELETE FROM owned WHERE user_id = ? AND player_key = ?", (u, out_k))
-            conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ? AND captain_key = ?", (u, out_k))
-            _ensure_impact_subs_table(conn)
-            conn.execute("DELETE FROM impact_subs WHERE user_id = ? AND player_key = ?", (u, out_k))
-            conn.execute(
-                "INSERT INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (u, in_k, time.time())
-            )
-            if slot_row is not None and not _xi_has_group(conn, u, in_k):
-                conn.execute(
-                    "INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (u, slot_row["slot"], in_k)
-                )
+            freed = _remove_copies(conn, u, out_k, 1)       # one copy leaves
+            # the card that comes in: one more copy if they already have it (stays on the bench)
+            if _add_copy(conn, u, in_k, fill_xi=False) and freed is not None and not _xi_has_group(conn, u, in_k):
+                conn.execute("INSERT INTO xi (user_id, slot, player_key) VALUES (?, ?, ?)", (u, freed, in_k))
         return None
 
 
@@ -1511,15 +1594,10 @@ def give_card(user_id, player_key: str) -> bool:
     with _tx() as conn:
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
             return False
-        if _squad_count(conn, uid) >= SQUAD_MAX:
-            return False   # squad is full (25/25)
-        got = conn.execute(
-            "INSERT OR IGNORE INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)",
-            (uid, player_key, time.time()),
-        )
-        if got.rowcount:
-            _fill_empty_slots(conn, uid, [player_key])
-        return bool(got.rowcount)
+        if _squad_count(conn, uid) >= _limit(conn, uid):
+            return False   # squad is full
+        _add_copy(conn, uid, player_key)    # already owned = one more copy on the bench
+        return True
 
 
 def reset_all_cards(user_id) -> int:
@@ -1527,7 +1605,7 @@ def reset_all_cards(user_id) -> int:
     Coins and team name are kept. Returns how many cards were removed."""
     uid = _uid(user_id)
     with _tx() as conn:
-        n = conn.execute("SELECT COUNT(*) FROM owned WHERE user_id = ?", (uid,)).fetchone()[0]
+        n = _squad_count(conn, uid)
         conn.execute("DELETE FROM owned WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
         conn.execute("UPDATE users SET captain_key = NULL WHERE user_id = ?", (uid,))
@@ -1546,7 +1624,7 @@ def reset_everything(user_id) -> dict:
     with _tx() as conn:
         row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
         old = int(row["purse"]) if row else 0
-        n = conn.execute("SELECT COUNT(*) FROM owned WHERE user_id = ?", (uid,)).fetchone()[0]
+        n = _squad_count(conn, uid)
         conn.execute("DELETE FROM owned WHERE user_id = ?", (uid,))
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
         _ensure_impact_subs_table(conn)
@@ -1575,7 +1653,7 @@ def top_users(limit: int = 20, by: str = "coins") -> list[dict]:
     try:
         rows = conn.execute(
             "SELECT u.user_id, u.team_name, u.purse, "
-            "(SELECT COUNT(*) FROM owned o WHERE o.user_id = u.user_id) AS cards "
+            "(SELECT COALESCE(SUM(o.qty), 0) FROM owned o WHERE o.user_id = u.user_id) AS cards "
             f"FROM users u ORDER BY {order} LIMIT ?",
             (int(limit),),
         ).fetchall()

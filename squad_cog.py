@@ -89,6 +89,16 @@ def squad_order(cards: list) -> list:
     return sorted(cards, key=lambda c: (-int(c["ovr"]), c["playername_key"]))
 
 
+def squad_entries(user_id: int) -> list:
+    """Every card the user owns in squad order, a card owned twice appears twice (copies).
+    `rcsquad` numbers and `rcms` use THIS list, so `rcms 3 4` can sell one copy or both."""
+    counts = economy.owned_counts(user_id)
+    out = []
+    for c in squad_order(sl.owned_cards(user_id)):
+        out += [c] * max(1, counts.get(c["playername_key"], 1))
+    return out
+
+
 def _card_line(card, extra: str = "", emojis: bool = True) -> str:
     role = ROLES.get(card_db.effective_role(card), "?")
     if emojis:
@@ -129,8 +139,9 @@ def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
 # ── Squad list with page buttons ─────────────────────────────────────────────
 
 class SquadView(OwnedView):
-    def __init__(self, viewer_id: int, owner_name: str, cards: list, in_xi: set[str]):
+    def __init__(self, viewer_id: int, owner_name: str, cards: list, in_xi: set[str], limit: int = 0):
         super().__init__(viewer_id, timeout=120)
+        self.limit = limit
         self.owner_name = owner_name
         self.cards = cards
         self.in_xi = in_xi
@@ -141,12 +152,17 @@ class SquadView(OwnedView):
     def build(self) -> discord.Embed:
         start = self.page * PAGE_SIZE
         chunk = self.cards[start:start + PAGE_SIZE]
-        lines = [
-            f"`{start + i + 1}.` " + _card_line(c, "  ✅ XI" if c["playername_key"] in self.in_xi else "")
-            for i, c in enumerate(chunk)
-        ] or ["No players yet."]
+        lines = []
+        for i, c in enumerate(chunk):
+            idx = start + i
+            key = c["playername_key"]
+            first = idx == 0 or self.cards[idx - 1]["playername_key"] != key
+            tag = "  ✅ XI" if key in self.in_xi and first else ("  ♻️ copy" if not first else "")
+            lines.append(f"`{idx + 1}.` " + _card_line(c, tag))
+        lines = lines or ["No players yet."]
+        limit = f"/{self.limit}" if self.limit else ""
         embed = discord.Embed(
-            title=f"<:Squademoji:1558139700156571801> {esc(self.owner_name)} — Squad ({len(self.cards)} players)",
+            title=f"<:Squademoji:1558139700156571801> {esc(self.owner_name)} — Squad ({len(self.cards)}{limit} cards)",
             description="\n".join(lines),
             color=discord.Color.green(),
         )
@@ -337,6 +353,30 @@ class ViewPickerView(OwnedView):
 class SquadCog(commands.Cog, name="Squad"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+
+    # -- Premium squad limit (60 instead of 35): the economy keeps its own list of Premium
+    #    members, so the limit also works for rewards given outside Discord commands.
+    @commands.Cog.listener()
+    async def on_ready(self):
+        try:
+            from bot_guard import ADMIN_GUILD_ID
+            guild = self.bot.get_guild(ADMIN_GUILD_ID)
+            role = guild.get_role(PREMIUM_ROLE_ID) if guild else None
+            if role is None:
+                return
+            n = await asyncio.to_thread(economy.sync_premium, [m.id for m in role.members])
+            print(f"[squad] Premium squad limit: {n} member(s)")
+        except Exception as e:
+            print(f"[squad] premium sync failed: {type(e).__name__}: {e}")
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        had, has = _is_premium(before), _is_premium(after)
+        if had != has and not after.bot:
+            try:
+                await asyncio.to_thread(economy.set_premium, after.id, has)
+            except Exception as e:
+                print(f"[squad] premium update failed for {after.id}: {type(e).__name__}: {e}")
 
     # -- challenge a player (rcmp @user <overs>) ---------------------------
     # security.LOCKED_CHANNEL_IDS blocks this in 2 channels; also covers "rcmp ranked":
@@ -566,8 +606,9 @@ class SquadCog(commands.Cog, name="Squad"):
         if user is None:
             await ctx.send(f"**{esc(target.display_name)}** hasn't debuted yet.")
             return
-        cards = squad_order(sl.owned_cards(target.id))
-        view = SquadView(ctx.author.id, user["team_name"], cards, set(economy.get_xi(target.id).values()))
+        cards = squad_entries(target.id)
+        view = SquadView(ctx.author.id, user["team_name"], cards, set(economy.get_xi(target.id).values()),
+                         economy.squad_limit(target.id))
         view.message = await ctx.send(embed=view.build(), view=view)
 
     # -- show a player ---------------------------------------------------
@@ -1087,7 +1128,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if economy.give_card(member.id, card["playername_key"]):
             await ctx.send(f"✅ Gave **{esc(card['playername'])}** to {esc(member.display_name)}.")
         else:
-            await ctx.send("❌ They haven't debuted, already own that player, or their squad is full (25).")
+            await ctx.send("❌ They haven't debuted or their squad is full.")
 
 
 async def setup(bot: commands.Bot):

@@ -53,7 +53,7 @@ def _collect() -> dict:
     try:
         return {
             "cards_made": len(card_db.list_all_cards()),
-            "cards_owned": _scalar(conn, "SELECT COUNT(*) FROM owned"),
+            "cards_owned": _scalar(conn, "SELECT COALESCE(SUM(qty), 0) FROM owned"),
             "owners": _scalar(conn, "SELECT COUNT(DISTINCT user_id) FROM owned"),
             "debuted": _scalar(conn, "SELECT COUNT(*) FROM users"),
             "cmd_users": _scalar(conn, "SELECT COUNT(*) FROM command_usage"),

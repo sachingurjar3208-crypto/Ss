@@ -34,7 +34,7 @@ import squad_logic as sl
 import card_cache
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
-from squad_cog import _card_line, _in_match, _is_premium, _need_debut, squad_order
+from squad_cog import _card_line, _in_match, _is_premium, _need_debut, squad_order, squad_entries
 
 # ── One shared 5 second cooldown for ALL economy commands ────────────────────
 # Each command used to have its own timer, so spamming rcbal/rcopen/rcbuy one
@@ -480,10 +480,9 @@ class BuyBrowseView(OwnedView):
             result = "You can't buy players during a match."
         elif not card_db.is_obtainable(card):
             result = LOCKED_CARD_TEXT
-        elif economy.owns(uid, key):
-            result = "You already own this player."
-        elif economy.squad_count(uid) >= economy.SQUAD_MAX:
-            result = (f"❌ Your squad is full (**{economy.SQUAD_MAX}/{economy.SQUAD_MAX}**). "
+        elif economy.squad_count(uid) >= economy.squad_limit(uid):
+            lim = economy.squad_limit(uid)
+            result = (f"❌ Your squad is full (**{lim}/{lim}**). "
                       f"Sell a player first with `rcsell`.")
         else:
             price = sl.buy_price(card)
@@ -587,7 +586,7 @@ class MultiSellView(OwnedView):
         await super().on_timeout()
 
 
-# ── Squad full (25 players): sell the new card or replace one of your players ─
+# ── Waiting card (a duplicate, or the squad is full): keep / sell / replace ─────
 
 PENDING_TIMEOUT = 120.0
 
@@ -602,15 +601,22 @@ class ReplaceSelect(ui.Select):
 
 
 class PendingCardView(OwnedView):
-    """Shown when a card arrives while the squad is full (25/25)."""
+    """Shown when a card arrives that is a DUPLICATE, or while the squad is full.
+    Keep (only if the squad has room) / Sell / Replace a player / Decide later."""
 
-    def __init__(self, user_id: int, card):
+    def __init__(self, user_id: int, card, room: bool = False):
         super().__init__(user_id, timeout=PENDING_TIMEOUT)
         self.uid = user_id
         self.card = card
         self.key = card["playername_key"]
         self.used = False
         self.sell.label = f"Sell it (+{sl.sell_value(card):,})"
+        if not room:
+            self.remove_item(self.keep)
+
+    @ui.button(label="Keep in squad", style=discord.ButtonStyle.primary, emoji="📥")
+    async def keep(self, interaction: discord.Interaction, button: ui.Button):
+        await self.finish(interaction, "keep")
 
     @ui.button(label="Sell it", style=discord.ButtonStyle.success, emoji="💰")
     async def sell(self, interaction: discord.Interaction, button: ui.Button):
@@ -621,7 +627,7 @@ class PendingCardView(OwnedView):
         if self.used:
             await interaction.response.defer()
             return
-        cards = sorted(sl.owned_cards(self.uid), key=lambda c: (int(c["ovr"]), c["playername"]))[: economy.SQUAD_MAX]
+        cards = sorted(sl.owned_cards(self.uid), key=lambda c: (int(c["ovr"]), c["playername"]))[:25]   # a menu holds 25
         in_xi = set(economy.get_xi(self.uid).values())
         options = []
         for c in cards:
@@ -672,6 +678,9 @@ class PendingCardView(OwnedView):
             result = f"❌ {err}"
         elif action == "sell":
             result = f"💰 Sold **{esc(self.card['playername'])}** for **{_plain_coins(new_value)}**."
+        elif action == "keep":
+            result = (f"📥 **{esc(self.card['playername'])}** joined your squad. A copy of a card you already have "
+                      f"stays on the bench (the XI can't hold the same player twice).")
         else:
             result = (
                 f"🔁 **{esc(self.card['playername'])}** joined your squad and replaced "
@@ -689,16 +698,21 @@ async def send_next_pending(dest, user_id: int) -> bool:
         card = card_db.get_card(key)
         if card is None:
             continue
-        view = PendingCardView(user_id, card)
-        n = economy.squad_count(user_id)
-        embed = discord.Embed(
-            description=(
-                f"⚠️ **Your squad is full ({n}/{economy.SQUAD_MAX})!**\n"
-                f"New card: **{esc(card['playername'])}** ({card['ovr']} OVR)\n"
-                f"Sell it for **{_plain_coins(sl.sell_value(card))}**, or replace one of your players with it."
-            ),
-            color=discord.Color.orange(),
-        )
+        info = await asyncio.to_thread(economy.pending_info, user_id, key)
+        view = PendingCardView(user_id, card, room=info["room"])
+        n, lim = info["count"], info["limit"]
+        if info["owned"]:
+            head = (f"♻️ **Duplicate card!** You already have **{info['owned']}** "
+                    f"cop{'y' if info['owned'] == 1 else 'ies'} of **{esc(card['playername'])}** ({card['ovr']} OVR).")
+        else:
+            head = f"New card: **{esc(card['playername'])}** ({card['ovr']} OVR)"
+        if info["room"]:
+            choice = (f"Keep it in your squad ({n}/{lim}), sell it for **{_plain_coins(sl.sell_value(card))}**, "
+                      f"or replace one of your players with it.")
+        else:
+            choice = (f"⚠️ **Your squad is full ({n}/{lim})!** Sell it for **{_plain_coins(sl.sell_value(card))}**, "
+                      f"or replace one of your players with it.")
+        embed = discord.Embed(description=f"{head}\n{choice}", color=discord.Color.orange())
         embed.set_footer(text="Not now? It stays saved — use rcpending later.")
         view.message = await card_cache.send_embed(dest, embed, card["image_path"], view=view)
         return True
@@ -841,7 +855,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             if res["dupe"]:
                 lines.append(f"🎴 {_card_line(card, '  ♻️ duplicate')} → **+{economy.fmt_coins(res['refund'])}**")
             elif res.get("pending"):
-                lines.append(f"🎴 {_card_line(card, '  ⚠️ squad full')} — choose below: sell it or replace a player.")
+                lines.append(f"🎴 {_card_line(card, '  ⏳ waiting')} — choose below: keep, sell or replace.")
             else:
                 lines.append(f"🎴 New player: {_card_line(card, '  🆕')}")
         else:
@@ -913,7 +927,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if res["dupe"]:
             body = f"{_card_line(card, '  ♻️ duplicate')}\n💰 Sold automatically for **+{economy.fmt_coins(res['refund'])}**"
         elif res["pending"]:
-            body = f"{_card_line(card, '  ⚠️ squad full')}\nChoose below: sell it or replace a player."
+            body = f"{_card_line(card, '  ⏳ waiting')}\nChoose below: keep, sell or replace."
         else:
             body = _card_line(card, "  🆕")
         if ovr >= 84:
@@ -1058,7 +1072,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             return
         by_key = {c["playername_key"]: c for c in rolled}
         lines = [_card_line(by_key[k], "  🆕") for k in result["new"]]
-        lines += [_card_line(by_key[k], "  ⚠️ squad full") for k in result.get("pending", [])]
+        lines += [_card_line(by_key[k], "  ⏳ keep / sell?") for k in result.get("pending", [])]
         lines += [_card_line(by_key[k], "  ♻️ duplicate") for k in result["dupes"]]
         if key == "debut":
             embed = discord.Embed(description="`Debut Pack` opened!\n\n" + "\n".join(lines), color=discord.Color.gold())
@@ -1183,7 +1197,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if start < 1 or end < start:
             await refuse("Usage: `rcms <from> <to>`, for example `rcms 1 20`. Numbers are the ones shown in `rcsquad`.")
             return
-        cards = squad_order(await asyncio.to_thread(sl.owned_cards, uid))
+        cards = await asyncio.to_thread(squad_entries, uid)   # copies listed one by one, same numbers as rcsquad
         n = len(cards)
         if end > n:
             await refuse(f"Your squad has only {n} players. Check the numbers in `rcsquad`.")
@@ -1199,10 +1213,16 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         items = [(c["playername_key"], sl.sell_value(c)) for c in chosen]
         total = sum(v for _, v in items)
-        chosen_keys = {k for k, _ in items}
-        bench_order = [c["playername_key"] for c in cards if c["playername_key"] not in chosen_keys]
+        sold: dict[str, int] = {}
+        for k, _ in items:
+            sold[k] = sold.get(k, 0) + 1
+        have = {}
+        for c in cards:
+            have[c["playername_key"]] = have.get(c["playername_key"], 0) + 1
+        gone = {k for k, n_ in sold.items() if n_ >= have.get(k, 0)}          # every copy sold
+        bench_order = list(dict.fromkeys(c["playername_key"] for c in cards if c["playername_key"] not in gone))
         xi_keys = set(economy.get_xi(uid).values())
-        in_xi = sum(1 for k in chosen_keys if k in xi_keys)
+        in_xi = sum(1 for k in gone if k in xi_keys)
 
         lines = [
             f"{start + i}. {esc(c['playername'])} ({c['ovr']} OVR) - {_plain_coins(v)}"
@@ -1231,14 +1251,15 @@ class EconomyCog(commands.Cog, name="Economy"):
     @commands.command(name="rcpending")
     @economy_cooldown()
     async def rcpending(self, ctx: commands.Context):
-        """Cards that arrived while your squad was full (25): sell them or replace a player."""
+        """Waiting cards (duplicates, or cards that came while the squad was full): keep, sell or replace."""
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
             await ctx.send("❌ You can't change your squad during a match.")
             return
         if not await send_next_pending(ctx, ctx.author.id):
-            await ctx.send(f"✅ No cards are waiting. Squad: **{economy.squad_count(ctx.author.id)}/{economy.SQUAD_MAX}**.")
+            await ctx.send(f"✅ No cards are waiting. Squad: **{economy.squad_count(ctx.author.id)}/"
+                           f"{economy.squad_limit(ctx.author.id)}**.")
 
     # -- trade -----------------------------------------------------------
     @commands.command(name="rctrade")

@@ -238,14 +238,8 @@ def _grant_random_card(conn, uid: int, lo: int, hi: int, source: str, idx, weigh
     owned = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
     owned |= {r["player_key"] for r in conn.execute("SELECT player_key FROM pending_cards WHERE user_id = ?", (uid,))}
     fresh = [k for k in pool if k not in owned]
-    if fresh:
-        key = _rng.choice(fresh)
-        return {"key": key, "status": economy._grant(conn, uid, key, source), "refund": 0}
-    key = _rng.choice(pool)
-    refund = int(sl.sell_value(rows[key]))
-    if refund:
-        economy._apply_coins(conn, uid, refund, f"Duplicate refund ({source})")
-    return {"key": key, "status": "dupe", "refund": refund}
+    key = _rng.choice(fresh or pool)          # all owned already: a duplicate, the player decides
+    return {"key": key, "status": economy._grant(conn, uid, key, source), "refund": 0}
 
 
 def _grant_bundle(conn, uid: int, spec: dict, source: str, idx_cache: list) -> tuple[list[str], bool]:
@@ -279,7 +273,7 @@ def _grant_bundle(conn, uid: int, spec: dict, source: str, idx_cache: list) -> t
             if res["status"] == "dupe":
                 text += f" — you already had it, sold for **{res['refund']:,}** coins"
             elif res["status"] == "pending":
-                text += " — squad full, decide with `rcpending`"
+                text += " — waiting: keep, sell or replace with `rcpending`"
                 pending = True
             lines.append(text)
     return lines, pending
