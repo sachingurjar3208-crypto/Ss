@@ -438,3 +438,6 @@ Naya theme: "End of an Era" (retire hone wale players ke liye).
     (ribbon khaali = END OF AN ERA)
 Files: card_eoae.py (naya), card_db.py, card_style2.py, cardmaker_cog.py, cardstats_cog.py
 DB me 4 naye column apne aap ban jate hain (eoae_start, eoae_end, eoae_jersey, eoae_ribbon).
+EOAE v2 (sirf card_eoae.py badla): top ka sun hata, player ka asli rang, naya laurel,
+ribbon ke mude kinare, stadium stand + floodlights, saal ke dono taraf gold line,
+left column (OVR / role / flag) ke peeche kaali patti.
