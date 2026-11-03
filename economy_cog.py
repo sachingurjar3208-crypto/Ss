@@ -21,7 +21,10 @@ from typing import Awaitable, Callable, Optional
 
 import discord
 from discord import ui
+from discord import app_commands
 from discord.ext import commands
+
+from bot_guard import OWNER_ID, admin_only
 
 import card_db
 import economy
@@ -817,8 +820,16 @@ class EconomyCog(commands.Cog, name="Economy"):
         if kind == "weekly" and not _is_premium(ctx.author):
             await ctx.send("💎 The weekly reward is for **Premium members** only.")
             return
+        for who in (ctx.author.id, economy.OPEN_REWARD_USER):
+            forced = economy.get_forced_reward(who, kind)
+            if forced and card_db.get_card(forced) is None:      # that card was deleted meanwhile
+                economy.clear_forced_reward(who, kind)
+        allc = card_db.list_obtainable_cards()
         lo, hi = economy.REWARD_CARD_OVR[kind]
-        pool = [c for c in card_db.list_obtainable_cards() if lo <= int(c["ovr"]) <= hi]
+        band = economy.pick_reward_band(kind, [c["ovr"] for c in allc if lo <= int(c["ovr"]) <= hi])
+        if band:
+            lo, hi = band
+        pool = [c for c in allc if lo <= int(c["ovr"]) <= hi] if band else []
         res = economy.claim_reward(
             ctx.author.id, kind,
             [c["playername_key"] for c in pool],
@@ -881,20 +892,62 @@ class EconomyCog(commands.Cog, name="Economy"):
     @commands.command(name="rcdaily")
     @economy_cooldown()
     async def rcdaily(self, ctx: commands.Context):
-        """Claim daily coins + a random 60-78 player (streak bonus every 7th day)."""
+        """Claim daily coins + a random 50-99 player (rare OVRs are rare; streak bonus every 7th day)."""
         await self._claim(ctx, "daily")
 
     @commands.command(name="rcweekly")
     @economy_cooldown()
     async def rcweekly(self, ctx: commands.Context):
-        """(Premium) Claim weekly coins + a random 80-83 player."""
+        """(Premium) Claim weekly coins + a random 83-99 player."""
         await self._claim(ctx, "weekly")
 
     @commands.command(name="rcmonthly")
     @economy_cooldown()
     async def rcmonthly(self, ctx: commands.Context):
-        """Claim monthly coins + a random 85-88 player."""
+        """Claim monthly coins + a random 88-99 player."""
         await self._claim(ctx, "monthly")
+
+    # -- /rewardset: owner picks the card of a user's next daily/weekly/monthly (secret, once) --
+    async def _card_ac(self, interaction: discord.Interaction, current: str):
+        cur = current.lower()
+        out = []
+        for c in card_db.list_all_cards():
+            if cur in c["playername"].lower():
+                out.append(app_commands.Choice(name=f"{c['playername']} · {c['ovr']} OVR"[:100], value=c["playername"][:100]))
+                if len(out) >= 25:
+                    break
+        return out
+
+    @app_commands.command(name="rewardset", description="Owner: the next daily / weekly / monthly / rcclaim gives this card (once, secret)")
+    @app_commands.describe(pack="Which reward", playername="The card they will get",
+                           user="Who gets it. Empty = the FIRST person who claims this reward gets it",
+                           active="True = set it, False = cancel it")
+    @app_commands.choices(pack=[app_commands.Choice(name="Daily", value="daily"), app_commands.Choice(name="Weekly", value="weekly"),
+                                app_commands.Choice(name="Monthly", value="monthly"), app_commands.Choice(name="Claim (rcclaim)", value="claim")])
+    @app_commands.autocomplete(playername=_card_ac)
+    @admin_only()
+    async def rewardset(self, interaction: discord.Interaction, pack: app_commands.Choice[str], playername: str,
+                        user: Optional[discord.Member] = None, active: bool = True):
+        if interaction.user.id != OWNER_ID:
+            await interaction.response.send_message("Only the bot owner can use this.", ephemeral=True)
+            return
+        kind = pack.value
+        uid = user.id if user else economy.OPEN_REWARD_USER
+        who = user.mention if user else "the first person who claims it"
+        if not active:
+            gone = economy.clear_forced_reward(uid, kind)
+            await interaction.response.send_message(
+                f"Cancelled: the {kind} card for {who} is removed." if gone
+                else f"Nothing was set for {who} in {kind}.", ephemeral=True)
+            return
+        card = card_db.get_card(playername)
+        if card is None:
+            await interaction.response.send_message(f"No card named `{playername}`. Pick one from the list.", ephemeral=True)
+            return
+        economy.set_forced_reward(uid, kind, card["playername_key"], interaction.user.id)
+        await interaction.response.send_message(
+            f"Set. The next `rc{kind}` of {who} gives **{card['playername']}** ({card['ovr']} OVR). "
+            f"Works one time only. Nobody else can see this.", ephemeral=True)
 
     # -- rcclaim: free card every hour (Premium: every 35 min) -------------
     @commands.command(name="rcclaim")
@@ -906,6 +959,10 @@ class EconomyCog(commands.Cog, name="Economy"):
             return
         premium = _is_premium(ctx.author)
         cooldown = economy.CLAIM_COOLDOWN_PREMIUM if premium else economy.CLAIM_COOLDOWN
+        for who in (ctx.author.id, economy.OPEN_REWARD_USER):
+            forced = economy.get_forced_reward(who, "claim")
+            if forced and card_db.get_card(forced) is None:      # that card was deleted meanwhile
+                economy.clear_forced_reward(who, "claim")
         by_ovr: dict[int, list[str]] = {}
         values: dict[str, int] = {}
         for c in card_db.list_obtainable_cards():

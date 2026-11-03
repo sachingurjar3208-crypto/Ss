@@ -55,9 +55,49 @@ DAY = 86_400
 COOLDOWNS = {"daily": DAY, "weekly": 7 * DAY, "monthly": 30 * DAY}
 MONTHLY_UNLOCK_AFTER_DEBUT = 30 * DAY   # monthly reward opens 1 month after debut
 
-# Every daily / weekly / monthly claim also gives one random player card whose
-# overall rating (ovr) falls in this inclusive range.
-REWARD_CARD_OVR = {"daily": (60, 78), "weekly": (80, 83), "monthly": (85, 88)}
+# Every daily / weekly / monthly claim also gives one player card. Its OVR is rolled
+# from the odds below (chance out of 100,000), then a random card of that OVR is given.
+REWARD_ODDS_TOTAL = 100_000
+# Daily chance for every rare OVR, out of 100,000. Edit these numbers to change the odds.
+DAILY_RARE_ODDS = {
+    99: 1, 98: 5, 97: 9, 96: 12, 95: 15, 94: 20, 93: 25, 92: 28, 91: 33, 90: 35,
+    89: 80, 88: 120, 87: 180, 86: 420, 85: 880, 84: 1600, 83: 2400, 82: 4000, 81: 6000, 80: 12000,
+}
+DAILY_75_79 = 20_000                       # 75-79 together
+WEEKLY_MULT, MONTHLY_MULT = 2, 4           # weekly = daily x2, monthly = weekly x2
+
+
+def _build_odds() -> dict:
+    """{kind: [(lo, hi, chance), ...]}. Whatever is left of the 100,000 goes to the
+    LOWEST band, so every rare chance stays exactly as written above."""
+    daily = [(o, o, c) for o, c in DAILY_RARE_ODDS.items()] + [(75, 79, DAILY_75_79)]
+    weekly = [(o, o, c * WEEKLY_MULT) for o, c in DAILY_RARE_ODDS.items() if o >= 84]
+    monthly = [(o, o, c * MONTHLY_MULT) for o, c in DAILY_RARE_ODDS.items() if o >= 89]
+    out = {}
+    for kind, bands, low in (("daily", daily, (50, 74)), ("weekly", weekly, (83, 83)), ("monthly", monthly, (88, 88))):
+        rest = REWARD_ODDS_TOTAL - sum(c for _, _, c in bands)
+        out[kind] = bands + [(low[0], low[1], max(0, rest))]
+    return out
+
+
+REWARD_ODDS = _build_odds()
+# Lowest / highest OVR each reward can give (for help texts).
+REWARD_CARD_OVR = {k: (min(b[0] for b in v), max(b[1] for b in v)) for k, v in REWARD_ODDS.items()}
+
+
+def pick_reward_band(kind: str, ovrs_available) -> tuple[int, int] | None:
+    """Roll the OVR band for a daily/weekly/monthly card. Bands with no card in the game
+    are skipped (their chance is shared by the others). None = no card in any band."""
+    have = set(int(o) for o in ovrs_available)
+    bands = [(lo, hi, c) for lo, hi, c in REWARD_ODDS[kind] if c > 0 and any(lo <= o <= hi for o in have)]
+    if not bands:
+        return None
+    roll = _rng.uniform(0, sum(c for _, _, c in bands))
+    for lo, hi, c in bands:
+        roll -= c
+        if roll <= 0:
+            return lo, hi
+    return bands[-1][0], bands[-1][1]
 
 _rng = secrets.SystemRandom()
 
@@ -633,6 +673,62 @@ def resolve_pending(user_id, new_key: str, action: str, replace_key: str | None 
 
 # ── Rewards (daily / weekly / monthly) ──────────────────────────────────────
 
+# ── owner-set reward: the next daily/weekly/monthly gives this exact card (once) ──
+def _ensure_force_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS reward_force (
+               user_id    INTEGER NOT NULL,
+               kind       TEXT    NOT NULL,
+               player_key TEXT    NOT NULL,
+               set_by     INTEGER,
+               ts         REAL    NOT NULL,
+               PRIMARY KEY (user_id, kind)
+           )"""
+    )
+
+
+OPEN_REWARD_USER = 0   # user_id 0 = "whoever claims this reward first gets the card"
+
+
+FORCE_KINDS = ("daily", "weekly", "monthly", "claim")   # "claim" = rcclaim
+
+
+def _take_forced(conn: sqlite3.Connection, uid: int, kind: str) -> str | None:
+    """The owner-set card for this claim (the user's own first, then the open one), removed
+    in the SAME transaction, so it is given only once and to only one person."""
+    _ensure_force_table(conn)
+    for who in (uid, OPEN_REWARD_USER):
+        row = conn.execute("SELECT player_key FROM reward_force WHERE user_id = ? AND kind = ?", (who, kind)).fetchone()
+        if row:
+            conn.execute("DELETE FROM reward_force WHERE user_id = ? AND kind = ?", (who, kind))
+            return row["player_key"]
+    return None
+
+
+def set_forced_reward(user_id, kind: str, player_key: str, set_by: int | None = None) -> None:
+    """The user's NEXT `kind` claim gives `player_key` (one time, then it is removed)."""
+    if kind not in FORCE_KINDS:
+        raise ValueError("unknown reward kind")
+    with _tx() as conn:
+        _ensure_force_table(conn)
+        conn.execute("INSERT OR REPLACE INTO reward_force (user_id, kind, player_key, set_by, ts) VALUES (?, ?, ?, ?, ?)",
+                     (_uid(user_id), kind, player_key.strip().lower(), set_by, time.time()))
+
+
+def clear_forced_reward(user_id, kind: str) -> bool:
+    with _tx() as conn:
+        _ensure_force_table(conn)
+        return conn.execute("DELETE FROM reward_force WHERE user_id = ? AND kind = ?", (_uid(user_id), kind)).rowcount > 0
+
+
+def get_forced_reward(user_id, kind: str) -> str | None:
+    with _tx() as conn:
+        _ensure_force_table(conn)
+        row = conn.execute("SELECT player_key FROM reward_force WHERE user_id = ? AND kind = ?",
+                           (_uid(user_id), kind)).fetchone()
+        return row["player_key"] if row else None
+
+
 def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
                  dupe_values: dict[str, int] | None = None) -> dict:
     """Claim a daily/weekly/monthly reward atomically: coins + one random card
@@ -684,7 +780,12 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
             _voucher_change(conn, uid, vouchers, f"Daily streak {streak}")
         card_key, dupe, refund, pending = None, False, 0, False
         pool = list(card_pool or [])
-        if pool:
+        forced = _take_forced(conn, uid, kind)
+        if forced:   # owner-set card (see /rewardset)
+            _ensure_pending_table(conn)
+            card_key = forced
+            pending = _grant(conn, uid, card_key, f"{kind} reward", allow_disabled=True) == "pending"
+        elif pool:
             _ensure_pending_table(conn)
             owned = {r["player_key"] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
             owned |= {r["player_key"] for r in conn.execute("SELECT player_key FROM pending_cards WHERE user_id = ?", (uid,))}
@@ -766,6 +867,12 @@ def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
         left = cooldown - (now - float(row["last_claim"]))
         if left > 0:
             return {"ok": False, "wait": int(left) + 1}
+        forced = _take_forced(conn, uid, "claim")
+        if forced:   # owner-set card (see /rewardset)
+            _ensure_pending_table(conn)
+            pending = _grant(conn, uid, forced, "rcclaim", allow_disabled=True) == "pending"
+            conn.execute("UPDATE users SET last_claim = ? WHERE user_id = ?", (now, uid))
+            return {"ok": True, "card": forced, "dupe": False, "refund": 0, "pending": pending, "balance": int(row["purse"])}
         pool = _claim_pool(by_ovr, _roll_claim_ovr())
         if not pool:
             return {"ok": False, "empty": True, "wait": 0}   # no cards exist: cooldown NOT used

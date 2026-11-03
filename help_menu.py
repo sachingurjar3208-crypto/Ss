@@ -33,9 +33,9 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Team Name", "rcteamname <name>", "Change your team name.", "rcteamname"),
     ]),
     "rewards": ("Rewards", "Daily, weekly, monthly and claim", [
-        ("Daily", "rcdaily", "Daily coins and a random player (60-78 OVR). Every 7th day gives a streak bonus."),
-        ("Weekly", "rcweekly", "Premium only. Weekly coins and a random player (80-83 OVR)."),
-        ("Monthly", "rcmonthly", "Monthly coins and a random player (85-88 OVR)."),
+        ("Daily", "rcdaily", "Daily coins and a random player (50-99 OVR, high OVR is rare). Every 7th day gives a streak bonus."),
+        ("Weekly", "rcweekly", "Premium only. Weekly coins and a random player (83-99 OVR)."),
+        ("Monthly", "rcmonthly", "Monthly coins and a random player (88-99 OVR)."),
         ("Claim", "rcclaim", "A free random player every hour. Premium members can claim every 35 minutes."),
         ("Cooldowns", "rccd", "Shows when daily, weekly, monthly and claim are ready again."),
         ("Quests", "rcquest", "Your daily quests and progress. Finishing a quest gives a voucher."),
@@ -91,7 +91,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Help", "rchelp", "This menu."),
     ]),
     "premium": ("Premium", "What Premium members get", [
-        ("Weekly Reward", "rcweekly", "Weekly coins and a random 80-83 OVR player."),
+        ("Weekly Reward", "rcweekly", "Weekly coins and a random 83-99 OVR player."),
         ("Faster Claim", "rcclaim", "Claim every 35 minutes instead of every hour."),
         ("All-Time Stats", "rcdata <player>", "A card's stats across every owner.", "rcdata"),
         ("View Other XI", "rcxi @user", "See another player's playing XI."),

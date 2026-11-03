@@ -441,3 +441,14 @@ DB me 4 naye column apne aap ban jate hain (eoae_start, eoae_end, eoae_jersey, e
 EOAE v2 (sirf card_eoae.py badla): top ka sun hata, player ka asli rang, naya laurel,
 ribbon ke mude kinare, stadium stand + floodlights, saal ke dono taraf gold line,
 left column (OVR / role / flag) ke peeche kaali patti.
+
+== Daily / Weekly / Monthly card odds + /rewardset ==
+rcdaily: 50-99 OVR. Chance 100,000 me se (economy.py DAILY_RARE_ODDS):
+  99:1 98:5 97:9 96:12 95:15 94:20 93:25 92:28 91:33 90:35 89:80 88:120 87:180
+  86:420 85:880 84:1600 83:2400 82:4000 81:6000 80:12000 | 75-79: 20000 | 50-74: baaki (52137)
+rcweekly: 83-99, har chance x2, baaki 83 ko. rcmonthly: 88-99, har chance x4, baaki 88 ko.
+Jis OVR ka koi card game me nahi, uska chance baaki me bat jata hai.
+/rewardset pack playername user active  (sirf owner, secret). pack = Daily / Weekly / Monthly / Claim (rcclaim).
+  user diya: us user ka AGLA claim wahi card dega. user khaali: jo SABSE PEHLE woh claim kare, usko milega.
+  Sirf ek baar. active False = cancel.
+Files: economy.py, economy_cog.py, help_menu.py
