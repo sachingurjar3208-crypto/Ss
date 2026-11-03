@@ -568,6 +568,12 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
         buf.seek(0)
         return buf
 
+    # END OF AN ERA: its own full design (card_eoae.py), no frame file needed.
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "eoae":
+        import card_eoae
+        with _RENDER_LOCK:
+            return card_eoae.build(card_row, fg_image, role)
+
     theme_key = _card_theme(card_row)
     if theme_key:
         ts = _theme_static(theme_key, card_row)

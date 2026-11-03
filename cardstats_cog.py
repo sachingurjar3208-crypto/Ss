@@ -30,6 +30,7 @@ THEME_CHOICES = [
     app_commands.Choice(name="Normal (purple)", value="default"),
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
     app_commands.Choice(name="Diwali", value="diwali"),
+    app_commands.Choice(name="End of an Era", value="eoae"),
 ]
 
 STYLE_CHOICES = [
@@ -209,7 +210,7 @@ class CardStatsCog(commands.Cog):
         if to_save:
             set_extra_stats(player, to_save)
         chosen_style = style.value if style is not None else "style2"
-        if theme is not None and theme.value in ("halloween", "diwali"):
+        if theme is not None and theme.value in ("halloween", "diwali", "eoae"):
             chosen_style = "style2"                      # Halloween / Diwali only exist in Style 2
         set_card_style(player, chosen_style)
 

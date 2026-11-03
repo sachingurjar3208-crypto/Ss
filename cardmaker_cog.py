@@ -102,6 +102,7 @@ THEME_CHOICES = [
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
     app_commands.Choice(name="Signature Edition", value="signature"),
     app_commands.Choice(name="Diwali", value="diwali"),
+    app_commands.Choice(name="End of an Era", value="eoae"),
 ]
 THEME_HELP = ("Card theme. Halloween = background used as frame + orange text. "
               "Signature Edition = autograph card (add the PNG with /signatureadd). "
@@ -119,6 +120,10 @@ def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
             set_style2_options(playername, theme="halloween", bg=frame_bg)
         else:
             set_style2_options(playername, theme="halloween")
+    elif theme.value == "eoae":
+        # END OF AN ERA: years / jersey / ribbon are set with /eoae
+        set_card_style(playername, "style2")
+        set_style2_options(playername, theme="eoae")
     elif theme.value == "diwali":
         # Diwali uses its built-in frame (diwali_frame.png); the background option is not needed
         set_card_style(playername, "style2")
@@ -1280,6 +1285,44 @@ class CardMakerCog(commands.Cog):
             f"ℹ️ The panel always renders IN FRONT of the foreground — the foreground never "
             f"covers it, whatever position/size you set."
         )
+
+    # ── /eoae (END OF AN ERA card) ──────────────────────────────────
+    @app_commands.command(name="eoae", description="Make a card an END OF AN ERA card (retired player): years, jersey, ribbon")
+    @app_commands.describe(
+        playername="Card to change",
+        start="First year of the career, e.g. 2012",
+        end="Last year, e.g. 2026",
+        jersey="Jersey number shown big behind the player (empty = none)",
+        ribbon="Ribbon text (empty = END OF AN ERA)",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @admin_only()
+    async def eoae(self, interaction: discord.Interaction, playername: str,
+                   start: app_commands.Range[int, 1900, 2100] | None = None,
+                   end: app_commands.Range[int, 1900, 2100] | None = None,
+                   jersey: app_commands.Range[str, 0, 3] | None = None,
+                   ribbon: app_commands.Range[str, 0, 30] | None = None):
+        await interaction.response.defer()
+        from card_db import set_eoae
+        card = get_card(playername)
+        if card is None:
+            await interaction.followup.send(f"❌ No card named `{playername}`. Pick one from the list.")
+            return
+        if start and end and end < start:
+            await interaction.followup.send("❌ The last year can't be before the first year.")
+            return
+        set_eoae(card["playername"], start, end, jersey, ribbon)
+        ok = await _regenerate_silently(card["playername"])
+        card = get_card(card["playername"])
+        years = f"{card['eoae_start'] or '?'} - {card['eoae_end'] or '?'}" if "eoae_start" in card.keys() else ""
+        msg = (f"✅ **{card['playername']}** is now an END OF AN ERA card ({years}"
+               + (f", jersey {card['eoae_jersey']}" if card["eoae_jersey"] else "") + ").")
+        if not ok:
+            msg += " The image will refresh on the next edit (the background or foreground could not be loaded)."
+        file = None
+        if ok and card["image_path"] and os.path.exists(card["image_path"]):
+            file = discord.File(card["image_path"], filename="eoae_card.png")
+        await interaction.followup.send(msg, file=file) if file else await interaction.followup.send(msg)
 
     # ── /signatureadd  /signatureremove ─────────────────────────────
     @app_commands.command(

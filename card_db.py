@@ -106,6 +106,11 @@ _NEW_CARD_COLUMNS = [
     # NULL = Gold, so every card made before levels existed keeps exactly the same power.
     ("playstyle1_level", "INTEGER"),
     ("playstyle2_level", "INTEGER"),
+    # END OF AN ERA theme (s2_theme = "eoae"), set with /eoae
+    ("eoae_start",  "INTEGER"),    # first year, e.g. 2012
+    ("eoae_end",    "INTEGER"),    # last year, e.g. 2026
+    ("eoae_jersey", "TEXT"),       # jersey number shown big behind the player
+    ("eoae_ribbon", "TEXT"),       # ribbon text, NULL = "END OF AN ERA"
 ]
 
 
@@ -646,7 +651,7 @@ def set_card_obtainable(playername: str, obtainable: bool) -> bool:
 # ── Style 2 card design: style switch + extra stats ──────────────────────
 
 CARD_STYLES = ("classic", "style2")
-CARD_THEMES = ("halloween", "signature", "diwali")   # Style 2 themes (NULL in the database = normal card)
+CARD_THEMES = ("halloween", "signature", "diwali", "eoae")   # Style 2 themes (NULL in the database = normal card)
 
 
 def set_card_style(playername: str, style: str) -> bool:
@@ -691,6 +696,26 @@ def set_style2_options(playername: str, bg=_UNSET, icon=_UNSET, transparent=_UNS
         vals.append(icon)
     if not sets:
         return True
+    sets.append("updated_at = ?")
+    vals.append(time.time())
+    vals.append(playername.strip().lower())
+    with _conn() as conn:
+        conn.execute(f"UPDATE cards SET {', '.join(sets)} WHERE playername_key = ?", vals)
+        conn.commit()
+    return True
+
+
+def set_eoae(playername: str, start: int | None = None, end: int | None = None,
+             jersey: str | None = None, ribbon: str | None = None) -> bool:
+    """END OF AN ERA details of a card (years, jersey number, ribbon text) + the eoae theme.
+    Arguments left as None keep what the card already has."""
+    if get_card(playername) is None:
+        return False
+    sets, vals = ["s2_theme = ?", "card_style = ?"], ["eoae", "style2"]
+    for col, v in (("eoae_start", start), ("eoae_end", end), ("eoae_jersey", jersey), ("eoae_ribbon", ribbon)):
+        if v is not None:
+            sets.append(f"{col} = ?")
+            vals.append(v if v != "" else None)
     sets.append("updated_at = ?")
     vals.append(time.time())
     vals.append(playername.strip().lower())

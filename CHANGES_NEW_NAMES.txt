@@ -429,3 +429,12 @@ SQUAD 35 / PREMIUM 60 + DUPLICATE CARDS (economy.py, economy_cog.py, squad_cog.p
   * rcbuy: jo card pehle se hai uski copy bhi khareed sakte ho.
   * Trade: aane wala card agar pehle se hai to copy ban jata hai.
   * Database: owned.qty aur pending_cards.qty apne aap jud jaate hain (purana data safe).
+
+== END OF AN ERA (EOAE) card theme ==
+Naya theme: "End of an Era" (retire hone wale players ke liye).
+  - Sunset stadium background, sepia player, gold laurel, career years, jersey number, gold ribbon.
+  - /cardmaker ya /editcard me theme: End of an Era
+  - /eoae playername start end jersey ribbon  -> har card ke apne saal / jersey / ribbon text
+    (ribbon khaali = END OF AN ERA)
+Files: card_eoae.py (naya), card_db.py, card_style2.py, cardmaker_cog.py, cardstats_cog.py
+DB me 4 naye column apne aap ban jate hain (eoae_start, eoae_end, eoae_jersey, eoae_ribbon).
