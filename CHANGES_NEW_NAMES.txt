@@ -452,3 +452,17 @@ Jis OVR ka koi card game me nahi, uska chance baaki me bat jata hai.
   user diya: us user ka AGLA claim wahi card dega. user khaali: jo SABSE PEHLE woh claim kare, usko milega.
   Sirf ek baar. active False = cancel.
 Files: economy.py, economy_cog.py, help_menu.py
+
+== Live Auction (roz 9 PM) ==
+Naye files: auction.py, auction_cog.py, auction_image.py  |  main.py me "auction_cog" joda
+Shuru me ek image: aaj ke saare card ek line me, LOT number + base price ke saath.
+Channel: 1567238927709110373 (env AUCTION_CHANNEL_ID se badal sakte ho). Time: roz 21:00 IST.
+Har din: 85-89 ke 2 random + 90-99 ke 3 random card (event / signature / EOAE nahi). Base = sell price.
+Boli chat me: bid 30L / bid 2.5m / bid 1.2cr / bid 500k / bid 2400000
+  - boli lagte hi coins hold, koi upar boli lagaye to wapas
+  - aakhri 10 sec me boli = timer wapas 10 sec
+  - ek din me ek insaan max 2 lot
+  - account 30 din purana + server me 3 din
+  - bot restart ho jaye to hold kiye coins apne aap wapas
+User: rcauction | rcauction notify | rcauction history | rcauction won
+Admin: /auction start | /auction cancel | /auction pingrole role | /auction status
