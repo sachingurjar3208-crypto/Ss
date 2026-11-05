@@ -375,31 +375,29 @@ SPIN_BUTTONS_BY_TYPE = {
 # playstyles, commentary) keeps using the original names above, so nothing else changes.
 # Buttons not listed here show their normal name.
 BUTTON_DISPLAY: dict[str, dict[str, str]] = {
+    # Display names only (easy to understand): the engine keeps the original keys
+    # (shot guide, matchups, the 2-per-over limits).
+    # Pace = row 1 what the ball does, row 2 where it lands.
     "Fast": {
-        "Fast": "Rapid", "Slow": "Off Pace",
-        "Full": "Over Pitch", "Yorker": "Toe Crusher",
-        # Outswing, Inswing, Bouncer, Good -> same naam
+        "Outswing": "Swing Away", "Inswing": "Swing In", "Fast": "Full Pace", "Slow": "Slow Ball",
+        "Bouncer": "Bouncer", "Good": "Good Length", "Full": "Full", "Yorker": "Yorker",
     },
     "Medium Pacer": {
-        "Slower": "Off Pace",
-        "Full": "Over Pitch", "Good Length": "Good", "Yorker": "Toe Crusher",
-        # Outswing, Inswing, Cutter, Bouncer -> same naam
+        "Outswing": "Swing Away", "Inswing": "Swing In", "Cutter": "Cutter", "Slower": "Slow Ball",
+        "Bouncer": "Bouncer", "Good Length": "Good Length", "Full": "Full", "Yorker": "Yorker",
     },
     "Off Spin": {
-        "Offspin": "Off Break", "Arm Ball": "Undercutter",
-        "Doosra": "Reverse Turn", "Topspin": "Dipper",
-        # Carrom -> same naam
+        "Offspin": "Turn In", "Carrom": "Mystery Ball", "Arm Ball": "Straight Ball",
+        "Doosra": "Turn Away", "Topspin": "Bounce Ball",
     },
     "Leg Spin": {
-        "Legspin": "Leg Break", "Googly": "Mystery Turn",
-        "Drifter": "Floater", "Slider": "Zooter",
-        "Topspin": "Dipper",   # not a button; practice CPU sometimes bowls it
-        # Flipper -> same naam
+        "Legspin": "Turn Away", "Googly": "Turn In", "Flipper": "Skid Low",
+        "Drifter": "Slow Drift", "Slider": "Quick Straight",
+        "Topspin": "Bounce Ball",   # not a button; practice CPU sometimes bowls it
     },
     "Orthodox": {
-        "Arm Ball": "Undercutter", "Top Spinner": "Dipper",
-        "Doosra": "Reverse Turn", "Slider": "Zooter",
-        # Carrom -> same naam
+        "Arm Ball": "Straight Ball", "Top Spinner": "Bounce Ball", "Doosra": "Turn In",
+        "Carrom": "Mystery Ball", "Slider": "Quick Straight",
     },
 }
 
@@ -447,7 +445,7 @@ BATTING_BUTTONS = ["Drive", "Loft", "Flick", "Pull", "Cut", "Sweep", "Scoop", "D
 # Text shown ON the batting buttons. Display only: the logic keeps the original
 # names above (shot guide, matchups, autoplay). Shots not listed keep their name.
 BAT_DISPLAY: dict[str, str] = {
-    "Loft":   "Smash",
+    "Loft":   "Loft",
     "Scoop":  "Lap",
     "Pull":   "Hook",
     "Cut":    "Upper Cut",
@@ -511,6 +509,47 @@ def translate_shot(height: str, direction_key: str, delivery_internal: str) -> s
     if direction_key == "DR":
         return "Sweep" if is_spin else "Flick"
     return "Defend"  # unreachable with a valid key — safe fallback
+
+
+# ── Direction + Intent batting (the batting buttons) ────────────────────────
+# Row 1: where to hit.  Row 2: how hard.  The pair becomes one of BATTING_BUTTONS,
+# so the shot guide, matchups and commentary keep working unchanged.
+BAT_DIRECTIONS = ["Off Side", "Straight", "Leg Side", "Behind"]
+# internal intent keys (logic.py uses them) in button order; the button text comes from BAT_INTENT_LABEL
+BAT_INTENTS = ["Hit", "Loft", "Block", "Push"]
+BAT_INTENT_LABEL = {"Hit": "Drive", "Loft": "Loft", "Block": "Block", "Push": "Flick"}
+# Ground shots each direction can become (the one the shot guide recommends is used if any).
+_DIR_SHOTS = {
+    "Off Side": ["Drive", "Cut"],
+    "Straight": ["Drive"],
+    "Leg Side": ["Pull", "Flick", "Sweep"],
+    "Behind":   ["Cut", "Flick"],
+}
+
+
+def intent_to_shot(direction: str, intent: str, delivery_button: str, delivery_internal: str,
+                   recommended: list | None = None) -> str:
+    """(direction, intent, ball) -> a BATTING_BUTTONS key.
+    Block = Defend. Loft = Loft (Behind: Scoop). Push / Hit = a ground shot in that direction:
+    the recommended one for this ball if the direction has it, else the natural one."""
+    if intent == "Block":
+        return "Defend"
+    if intent == "Loft":
+        return "Scoop" if direction == "Behind" else "Loft"
+    rec = [s for s in (recommended or []) if s in _DIR_SHOTS.get(direction, [])]
+    if rec:
+        return rec[0]
+    spin = delivery_internal in SPIN_DELIVERIES
+    short = delivery_button in ("Bouncer",)
+    if direction == "Off Side":
+        return "Cut" if short else "Drive"
+    if direction == "Leg Side":
+        if spin:
+            return "Sweep"
+        return "Pull" if delivery_button in ("Bouncer", "Good", "Good Length") else "Flick"
+    if direction == "Behind":
+        return "Cut" if short else "Flick"
+    return "Drive"
 
 
 # ── Phase 2 (optional): direction matters for lofted shots too ────────────

@@ -466,3 +466,43 @@ Boli chat me: bid 30L / bid 2.5m / bid 1.2cr / bid 500k / bid 2400000
   - bot restart ho jaye to hold kiye coins apne aap wapas
 User: rcauction | rcauction notify | rcauction history | rcauction won
 Admin: /auction start | /auction cancel | /auction pingrole role | /auction status
+
+== Startup fast (WebSocket ratelimited fix) ==
+main.py: chunk_guilds_at_startup=False (har server ke members start pe download nahi honge).
+squad_cog.py: sirf main server ke members load (Premium role sync ke liye).
+
+== Auction v2 ==
+Shuru ki image: har lot ek MYSTERY card ("?"), na card ki photo na naam. Player lot shuru hone pe dikhta hai.
+Lal JOIN AUCTION button (shuru ke message aur har lot pe). Sirf join karne wale boli laga sakte hain.
+Join ke checks: debut, ban nahi, account 30 din, server me 3 din.
+Auction ke time band: rcsell, rcms, rctrade, rcdaily, rcweekly, rcmonthly, pending ka sell/replace
+(economy.AUCTION_LOCK). Auction khatam hote hi sab chalu.
+Files: auction_cog.py, auction_image.py, economy.py, economy_cog.py
+Auction join/leave: rcjoin auction (ya rcauction join / lal button) = join. rcauction leave = leave,
+usi auction me dobara join nahi. Live lot pe sabse upar boli ho to leave nahi (lot khatam hone ke baad).
+
+== Batting buttons: Direction + Intent ==
+Line 1: Off Side | Straight | Leg Side | Behind     Line 2: Drive | Loft | Block | Flick
+(Drive = andar "Hit", Flick = andar "Push")
+Block = turant Defend. Baaki: dono chuno (kisi bhi order me), phir ball khelti hai.
+Andar shot ban jata hai: Off Side = Drive/Cut, Straight = Drive, Leg Side = Pull/Flick/Sweep,
+Behind = Cut/Flick, Loft = chhakka try (Behind + Loft = Lap). Ball ke liye sahi shot us direction me ho to wahi.
+Flick: ~6 run/over, chhakka nahi, kam wicket. Drive: ~8-9 run/over, chauke. Loft: ~12 run/over, 21% chhakke, wicket double. ("Smash" naam hata diya, commentary me bhi Loft)
+Files: data.py (intent_to_shot), logic.py (intent), views.py (BattingView + autoplay)
+Practice mode (practice_views) me purane buttons hi hain.
+
+== Bowling buttons ke naye naam (aasan, sirf naam, engine wahi) ==
+Fast:   Swing Away | Swing In | Full Pace | Slow Ball   ->  Bouncer | Good Length | Full | Yorker
+Medium: Swing Away | Swing In | Cutter | Slow Ball      ->  Bouncer | Good Length | Full | Yorker
+Off Spin: Turn In | Mystery Ball | Straight Ball | Turn Away | Bounce Ball
+Leg Spin: Turn Away | Turn In | Skid Low | Slow Drift | Quick Straight
+Orthodox: Straight Ball | Bounce Ball | Turn In | Mystery Ball | Quick Straight
+File: data.py (BUTTON_DISPLAY)
+
+== Match: har over ke end pe scoreboard image + GIF sahi jagah ==
+over_image.py (naya): 760x240 chhoti image (~7 KB, ~30 ms): score, over ki saari ball, runs,
+dono batter, bowler, CRR/Projected ya Need/RRR, chase me win probability bar.
+Over khatam -> usi ball ke scoreboard embed ke andar image (ek over me ek hi baar).
+Last ball pe wicket/DRS se over khatam ho to next-bowler prompt se pehle image.
+GIF (4, 6, wicket, umpire...) ab usi ball ki commentary ke theek neeche aate hain, agle prompt se pehle.
+Files: over_image.py, views.py

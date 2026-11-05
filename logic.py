@@ -340,6 +340,7 @@ def calculate_outcome(
     bowler_max_balls: int = 0,
     bowler_levels: dict | None = None,
     batsman_levels: dict | None = None,
+    intent: str | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -676,6 +677,19 @@ def calculate_outcome(
     elif guide_entry_exists:
         # Guide covered this delivery but batter ignored it → wrong-shot penalty
         w["W"] = w["W"] * 1.25
+
+    # ── Batting intent (Direction + Intent buttons): three clearly different plans ──
+    # Push  = safe: singles and twos, a rare four, NO six, few wickets.
+    # Hit   = along the ground: fours, few sixes, normal risk.
+    # Loft = all-in: lots of sixes, more misses (dots) and a lot more wickets.
+    INTENT_MULT = {
+        "Push":  {"0": 0.9, "1": 1.45, "2": 1.3, "3": 1.0, "4": 0.40, "6": 0.0,  "W": 0.55},
+        "Hit":   {"0": 1.0, "1": 0.95, "2": 1.0, "3": 1.0, "4": 1.20, "6": 0.40, "W": 1.0},
+        "Loft": {"0": 1.05, "1": 0.5, "2": 0.55, "3": 0.6, "4": 1.0, "6": 4.0, "W": 1.8},
+    }
+    for k, m in INTENT_MULT.get(intent or "", {}).items():
+        if k in w:
+            w[k] *= m
 
     # ── DEFEND is a defensive shot: it can NEVER give a 4, a 6 or a 3 ────────
     # (a defended ball only dies for 0 / a quick single / 2, or the batter is

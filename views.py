@@ -311,6 +311,7 @@ from data import (
     OFF_SPIN_BUTTONS, LEG_SPIN_BUTTONS,
     is_two_stage, get_two_stage_buttons, get_spin_buttons, button_label,
     BATTING_BUTTONS, SHOT_BUTTON_MAP, bat_label, delivery_label,
+    BAT_DIRECTIONS, BAT_INTENTS, BAT_INTENT_LABEL, intent_to_shot,
     get_delivery_speed, resolve_delivery, BOWLING_TYPE_ICON,
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
@@ -660,6 +661,10 @@ def _shot_key(btn) -> str:
 
 
 async def _auto_bat(view, make):
+    if hasattr(view, "auto_choice"):          # Direction + Intent batting
+        d, i = view.auto_choice(_acting_skill(view))
+        await view.resolve(make(), d, i)
+        return
     btns = [c for c in view.children if isinstance(c, ui.Button)]
     good = [b for b in btns if _shot_key(b) in (view.recommended or [])]
     skill = _acting_skill(view)
@@ -1105,8 +1110,9 @@ async def _send_commentary_with_gifs(
     embed: discord.Embed,
     gif_urls: list[str],
     interaction: discord.Interaction | None = None,
-    background: bool = True,
+    background: bool = False,
     anim: list[str] | None = None,
+    file: discord.File | None = None,
 ):
     """
     Show ball commentary + scoreboard embed.
@@ -1117,7 +1123,10 @@ async def _send_commentary_with_gifs(
     # The shot message keeps its "X is coming with N kmph" line (buttons already removed).
     # Then: 1) the scoreboard, 2) the commentary as its OWN message right below it.
     if embed is not None:
-        await channel.send(embed=embed)
+        if file is not None:
+            await channel.send(embed=embed, file=file)
+        else:
+            await channel.send(embed=embed)
     shown = await _comm.play_animated(channel, commentary, None, anim) if anim else False
     if not shown:
         await channel.send(content=commentary)
@@ -1136,6 +1145,74 @@ async def _send_commentary_with_gifs(
 
 
 _BG_GIF_TASKS: set = set()
+
+
+# ── End-of-over scoreboard image (small, one per over) ──────────────────────
+_EMOJI_TO_BALL = {v: ("NB" if k.startswith("NB") else k) for k, v in TIMELINE_EMOJIS.items()}
+
+
+def _over_image_data(game: GameState) -> dict | None:
+    tl = [t for t in game.timeline]
+    if not tl or tl[-1] != "|":
+        return None
+    seg = tl[:-1]
+    if "|" in seg:
+        seg = seg[len(seg) - seg[::-1].index("|"):]
+    balls = [("0" if t == NOT_OUT_EMOJI else _EMOJI_TO_BALL[t]) for t in seg
+             if t in _EMOJI_TO_BALL or t == NOT_OUT_EMOJI]     # NOT OUT after a review = a dot
+    hist = getattr(game, "over_history", []) or []
+    over_runs = hist[-1].get("runs", 0) if hist else sum(int(b) for b in balls if b.isdigit())
+    bat = game.get_batting_team().get("name", "Batting")
+    bowl = game.get_bowling_team().get("name", "Bowling")
+    batters = []
+    for p, on in ((game.striker, True), (game.non_striker, False)):
+        if p:
+            pn = _pname(p)
+            st = game.batsman_stats.get(pn, {})
+            batters.append((pn, st.get("runs", st.get("r", 0)), st.get("balls", st.get("b", 0)), on))
+    bowler = None
+    if game.current_bowler:
+        bn = _pname(game.current_bowler)
+        bs = game.bowler_stats.get(bn, {})
+        bowler = (bn, game.bowler_overs_str(bn), bs.get("runs", 0), bs.get("wickets", 0))
+    win = None
+    if game.innings == 2:
+        tgt = game.target() or 0
+        need = max(0, tgt - game.current_runs)
+        line = f"Need {need} from {game.balls_remaining()} balls   |   RRR {game.rrr():.2f}"
+        try:
+            from moments import chase_win_probability
+            pwin = chase_win_probability(game)
+            if pwin is not None:
+                win = (pwin, bat, bowl)
+        except Exception:
+            win = None
+    else:
+        line = f"CRR {game.crr():.2f}   |   Projected {game.projected()}"
+    return {
+        "over": game.current_legal_balls // 6, "team": bat,
+        "score": f"{game.current_runs}/{game.current_wickets}", "overs": game.overs_str(),
+        "total_overs": game.overs, "balls": balls, "over_runs": over_runs,
+        "batters": batters, "bowler": bowler, "line": line, "win": win, "innings": game.innings,
+    }
+
+
+async def _over_image_file(game: GameState) -> discord.File | None:
+    """The end-of-over scoreboard image, ONCE per over (None if already sent / not at an over end)."""
+    try:
+        key = (game.innings, game.current_legal_balls)
+        if game.__dict__.get("_over_img_key") == key:
+            return None
+        data = _over_image_data(game)
+        if data is None:
+            return None
+        import over_image
+        buf = await asyncio.to_thread(over_image.build, data)
+        game.__dict__["_over_img_key"] = key
+        return discord.File(buf, filename="over.png")
+    except Exception as e:
+        print(f"[over image] skipped ({type(e).__name__}: {e})")
+        return None
 
 
 async def _send_gif_items(channel, items: list[str]) -> None:
@@ -1215,6 +1292,14 @@ async def _send_bowling_prompt(
 
 async def _send_next_bowler_prompt(channel: discord.TextChannel, game: GameState):
     """Prompt the bowling captain to choose the next over's bowler."""
+    _ofile = await _over_image_file(game)          # only if this over's image wasn't shown yet
+    if _ofile is not None:
+        try:
+            _oe = build_scoreboard_embed(game)
+            _oe.set_image(url="attachment://over.png")
+            await channel.send(embed=_oe, file=_ofile)
+        except discord.HTTPException:
+            pass
     for _item in _moments.drain_pending_items(game):   # maiden-over banner (if the over just ended was one)
         try:
             await _send_gif_item(channel, _item)
@@ -1280,6 +1365,7 @@ async def _process_delivery(
         return
 
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
+    _bat_intent       = game.__dict__.pop("pending_intent", None)   # Push / Hit / Loft (Direction + Intent buttons)
     delivery_button   = game.pending_delivery
     delivery_internal = game.pending_delivery_internal
     bowler            = game.current_bowler
@@ -1368,6 +1454,7 @@ async def _process_delivery(
             bowler_max_balls=game.max_bowler_balls(),
             bowler_levels=player_attr_levels(bowler),
             batsman_levels=player_attr_levels(striker),
+            intent=_bat_intent,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1642,7 +1729,10 @@ async def _process_delivery(
             game.rotate_strike()
             game.timeline.append("|")
             game.end_over()
-            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, anim=_anim)
+            _ofile = await _over_image_file(game)
+            if _ofile is not None:
+                embed.set_image(url="attachment://over.png")
+            await _send_commentary_with_gifs(channel, commentary, embed, gif_urls, interaction, anim=_anim, file=_ofile)
             await _send_next_bowler_prompt(channel, game)
             return
 
@@ -2523,45 +2613,92 @@ class BattingView(_TimeoutMixin, ui.View):
 
         self._add_buttons()
 
-    def _add_buttons(self):
-        STYLES = {
-            "Drive":  discord.ButtonStyle.success,
-            "Loft":   discord.ButtonStyle.danger,
-            "Flick":  discord.ButtonStyle.success,
-            "Pull":   discord.ButtonStyle.danger,
-            "Cut":    discord.ButtonStyle.primary,
-            "Sweep":  discord.ButtonStyle.primary,
-            "Scoop":  discord.ButtonStyle.secondary,
-            "Defend": discord.ButtonStyle.secondary,
-            "Leave":  discord.ButtonStyle.secondary,
-        }
-        ROWS = {
-            "Drive": 0, "Loft": 0, "Flick": 0, "Pull": 0, "Cut": 0,
-            "Sweep": 1, "Scoop": 1, "Defend": 1, "Leave": 1,
-        }
-        for label in BATTING_BUTTONS:
-            style   = STYLES.get(label, discord.ButtonStyle.secondary)
-            row     = ROWS.get(label, 0)
-            is_good = label in self.recommended
-            # Button shows the new name; custom_id keeps the original (used by autoplay)
-            btn     = ui.Button(label=bat_label(label), style=style, row=row, custom_id=f"bat_{label}")
-            btn.callback = self._make_callback(label, is_good, self.guide_entry_exists)
-            self.add_item(btn)
+    # Direction + Intent: row 1 = where (Off Side / Straight / Leg Side / Behind),
+    # row 2 = the shot: Drive (= intent Hit), Loft, Block, Flick (= intent Push).
+    # Block plays at once; otherwise the
+    # ball is played when both are picked (in any order).
+    _INTENT_STYLE = {
+        "Block": discord.ButtonStyle.secondary, "Push": discord.ButtonStyle.primary,
+        "Hit": discord.ButtonStyle.success, "Loft": discord.ButtonStyle.danger,
+    }
 
-    def _make_callback(self, shot: str, is_recommended: bool, guide_entry_exists: bool):
+    def _add_buttons(self):
+        self.direction: str | None = None
+        self.intent: str | None = None
+        self._dir_btns, self._int_btns = {}, {}
+        for d in BAT_DIRECTIONS:
+            b = ui.Button(label=d, style=discord.ButtonStyle.secondary, row=0, custom_id=f"batdir_{d}")
+            b.callback = self._make_dir(d)
+            self._dir_btns[d] = b
+            self.add_item(b)
+        for it in BAT_INTENTS:
+            b = ui.Button(label=BAT_INTENT_LABEL.get(it, it), style=self._INTENT_STYLE[it], row=1, custom_id=f"batint_{it}")
+            b.callback = self._make_int(it)
+            self._int_btns[it] = b
+            self.add_item(b)
+
+    def _shot_for(self, direction: str, intent: str) -> str:
+        return intent_to_shot(direction, intent, self.game.pending_delivery or "",
+                              self.game.pending_delivery_internal or "", self.recommended)
+
+    def _mark(self):
+        for d, b in self._dir_btns.items():
+            b.style = discord.ButtonStyle.success if d == self.direction else discord.ButtonStyle.secondary
+        for it, b in self._int_btns.items():
+            name = BAT_INTENT_LABEL.get(it, it)
+            b.label = f"{name} *" if it == self.intent else name
+
+    async def _ok(self, interaction) -> bool:
+        if interaction.user.id != self.game.batting_user_id:
+            await interaction.response.send_message("Only the batting team plays shots!", ephemeral=True)
+            return False
+        return True
+
+    def _make_dir(self, d: str):
         async def callback(interaction: discord.Interaction):
-            if interaction.user.id != self.game.batting_user_id:
-                await interaction.response.send_message("Only the batting team plays shots!", ephemeral=True)
+            if not await self._ok(interaction):
                 return
-            self.stop()
-            await _process_delivery(
-                interaction, self.game, shot,
-                stage1_choice=self.stage1_choice,
-                is_recommended_shot=is_recommended,
-                guide_entry_exists=guide_entry_exists,
-                is_free_hit=self.is_free_hit,
-            )
+            self.direction = d
+            if self.intent:
+                await self.resolve(interaction, d, self.intent)
+                return
+            self._mark()
+            await interaction.response.edit_message(view=self)
         return callback
+
+    def _make_int(self, it: str):
+        async def callback(interaction: discord.Interaction):
+            if not await self._ok(interaction):
+                return
+            if it == "Block" or self.direction:
+                await self.resolve(interaction, self.direction or "Straight", it)
+                return
+            self.intent = it
+            self._mark()
+            await interaction.response.edit_message(view=self)
+        return callback
+
+    async def resolve(self, interaction, direction: str, intent: str):
+        """Play the ball: (direction, intent) -> shot, then the normal ball processing."""
+        shot = self._shot_for(direction, intent)
+        self.game.__dict__["pending_intent"] = intent if intent in ("Push", "Hit", "Loft") else None
+        self.stop()
+        await _process_delivery(
+            interaction, self.game, shot,
+            stage1_choice=self.stage1_choice,
+            is_recommended_shot=shot in self.recommended,
+            guide_entry_exists=self.guide_entry_exists,
+            is_free_hit=self.is_free_hit,
+        )
+
+    def auto_choice(self, skill):
+        """Autoplay / ranked bot: a (direction, intent) pair, like the old auto batting."""
+        pairs = [(d, i) for d in BAT_DIRECTIONS for i in ("Push", "Hit", "Loft")]
+        good = [p for p in pairs if self._shot_for(*p) in (self.recommended or [])]
+        if skill is not None and random.random() > skill:
+            good = []
+        pool = good or [p for p in pairs if not (p[0] == "Behind" and p[1] == "Loft")]
+        return random.choice(pool)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
