@@ -522,3 +522,13 @@ batting buttons ka shot sirf ek baar resolve.
 Aur fix (views.py):
 - Match end sirf ek baar: result, record, coins, quests, ranked stars do baar nahi milenge (_match_finished, _record_saved).
 - Prompt ka jawab ho chuka ho (bowler, opener, next batter, delivery...) to der se aaya dusra click ignore.
+
+== Bowling: Line + Power (sab bowler type) ==
+Line 1 (pehle): Wide Off | Off | Stumps | Pads | Wide Leg   -> chunte hi grey/lock
+Line 2: Slow | Medium | Fast | MAX (NB risk)
+Andar purani delivery ban jaati hai (speed, shot guide, matchup same). Line batter se CHUPI rehti hai.
+Batter ki direction vs line: sahi padha = zyada run (~10.6 RPO), galat side = edge/wicket (~7 RPO, W 11.7%).
+MAX: ~17% no-ball (free hit), wicket zyada. Medium: sabse kam wide/no-ball.
+Wide Off/Wide Leg pe batter Block kare to ~39% wide.
+Ball ke baad commentary me: "Pads line · MAX · line read!" / "wrong side!"
+Files: data.py, logic.py, views.py

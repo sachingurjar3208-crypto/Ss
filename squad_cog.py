@@ -361,6 +361,8 @@ class SquadCog(commands.Cog, name="Squad"):
         try:
             from bot_guard import ADMIN_GUILD_ID
             guild = self.bot.get_guild(ADMIN_GUILD_ID)
+            if guild is not None and not guild.chunked:
+                await guild.chunk()          # load only the main server's members (see main.py)
             role = guild.get_role(PREMIUM_ROLE_ID) if guild else None
             if role is None:
                 return

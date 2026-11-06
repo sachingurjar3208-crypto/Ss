@@ -836,6 +836,9 @@ class EconomyCog(commands.Cog, name="Economy"):
             {c["playername_key"]: sl.sell_value(c) for c in pool},
         )
         if not res["ok"]:
+            if res.get("auction"):
+                await ctx.send(economy.AUCTION_LOCK_MSG)
+                return
             if res.get("locked"):
                 await ctx.send(
                     f"🔒 The monthly reward unlocks **1 month after your debut**. "

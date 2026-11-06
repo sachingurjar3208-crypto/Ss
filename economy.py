@@ -115,6 +115,13 @@ def fmt_coins(n: int) -> str:
     return f"{int(n):,} <:CSCoin:1558139683702055062>"
 
 
+# ── Live Auction lock ───────────────────────────────────────────────────────
+# True while a Live Auction runs (auction_cog sets it). Selling, trading and the
+# daily / weekly / monthly coin claims are paused, so nobody can raise coins mid-auction.
+AUCTION_LOCK = False
+AUCTION_LOCK_MSG = "The Live Auction is running. Selling, trading and coin claims are paused until it ends."
+
+
 # ── Connection / transaction helpers ────────────────────────────────────────
 
 def _conn() -> sqlite3.Connection:
@@ -643,6 +650,8 @@ def resolve_pending(user_id, new_key: str, action: str, replace_key: str | None 
     action "replace": ONE copy of `replace_key` (one of the user's cards) is sold for `old_value`
                       coins and the waiting card takes its place (and its XI spot, if that freed up).
     """
+    if AUCTION_LOCK and action in ("sell", "replace"):
+        return AUCTION_LOCK_MSG
     uid = _uid(user_id)
     with _tx() as conn:
         if _pending_qty(conn, uid, new_key) <= 0:
@@ -741,6 +750,8 @@ def claim_reward(user_id, kind: str, card_pool: list[str] | None = None,
     or {"ok": False, "wait": seconds_left}."""
     if kind not in COOLDOWNS:
         raise ValueError("unknown reward kind")
+    if AUCTION_LOCK:
+        return {"ok": False, "wait": 0, "auction": True}
     uid = _uid(user_id)
     col = f"last_{kind}"  # column name comes from the fixed COOLDOWNS keys, never from user input
     now = time.time()
@@ -1119,6 +1130,8 @@ def buy_card(user_id, player_key: str, price: int) -> str | None:
 def sell_card(user_id, player_key: str, value: int, replacement_key: str | None) -> str | None:
     """Sell ONE copy of a card for `value` coins. If that was the last copy and the card was in
     the XI, the `replacement_key` (a bench player) takes its batting spot."""
+    if AUCTION_LOCK:
+        return AUCTION_LOCK_MSG
     uid = _uid(user_id)
     with _tx() as conn:
         if _own_qty(conn, uid, player_key) <= 0:
@@ -1146,6 +1159,8 @@ def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) ->
                    up in the XI are refilled from this list.
     Returns (error, total_coins). error is None on success.
     """
+    if AUCTION_LOCK:
+        return AUCTION_LOCK_MSG, 0
     uid = _uid(user_id)
     if not items:
         return "Nothing to sell.", 0
@@ -1648,6 +1663,8 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
     """Swap one player each between two users, atomically. Both players pay `fee`
     coins (every trade, always). Everything is re-checked inside the transaction,
     so a stale or forged request fails."""
+    if AUCTION_LOCK:
+        return AUCTION_LOCK_MSG
     a, b = _uid(a_id), _uid(b_id)
     if a == b:
         return "You can't trade with yourself."

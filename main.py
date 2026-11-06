@@ -30,7 +30,10 @@ intents.dm_messages = True
 intents.members = True      # Star Pass: needed to see when the Premium role is given (enable "Server Members Intent" in the Developer Portal)
 
 # GuardedTree blocks every slash command during /maintenance; the check below does the same for text commands.
-bot = commands.Bot(command_prefix="", intents=intents, tree_cls=GuardedTree)
+# chunk_guilds_at_startup=False: don't download the member list of EVERY server at start
+# (that hits Discord's gateway limit and delays "Logged in" by minutes). Only the main
+# server is loaded (squad_cog.on_ready), which is all the Premium role sync needs.
+bot = commands.Bot(command_prefix="", intents=intents, tree_cls=GuardedTree, chunk_guilds_at_startup=False)
 bot.add_check(maintenance_prefix_check)
 
 COGS_DIR = Path(__file__).parent

@@ -2,13 +2,16 @@
 
 Every day at 21:00 (India time) in AUCTION_CHANNEL_ID:
   - the bot picks 2 random 85-89 cards and 3 random 90-99 cards (no event / signature / EOAE cards)
-  - pings the auction role, shows the 5 lots, and starts the first lot a minute later
+  - pings the auction role, shows 5 MYSTERY lots ("?", no names) with a red JOIN AUCTION button,
+    and starts the first lot a minute later. Only players who pressed JOIN can bid.
+  - while it runs, selling / trading / daily-weekly-monthly coin claims are paused (economy.AUCTION_LOCK)
   - each lot (2 minutes): base price = the card's sell price. People type in the channel:
         bid 2400000   bid 24L   bid 2.4m   bid 1.2cr   bid 500k   bid 24,00,000
     Every bid holds the coins at once; outbid = coins back. A bid in the last 10 seconds
     puts the timer back to 10 seconds. Highest bid when the timer ends wins the card.
 
-Users:  rcauction  |  rcauction notify  |  rcauction history  |  rcauction won
+Users:  rcauction  |  rcjoin auction (= rcauction join / red JOIN button)  |  rcauction leave
+        rcauction notify  |  rcauction history  |  rcauction won
 Admin:  /auction start  /auction cancel  /auction pingrole  /auction status
 """
 from __future__ import annotations
@@ -28,8 +31,9 @@ from discord.ext import commands, tasks
 import auction
 import auction_image
 import card_db
+import economy
 import squad_logic as sl
-from bot_guard import ADMIN_GUILD_ID, is_staff
+from bot_guard import ADMIN_GUILD_ID, MaintenancePrefixBlocked, is_staff
 
 AUCTION_CHANNEL_ID = int(os.getenv("AUCTION_CHANNEL_ID", "1567238927709110373"))
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -43,6 +47,9 @@ REMIND_EVERY = 12           # after this many bids, the bot repeats the top bid 
 MIN_ACCOUNT_DAYS = 30       # Discord account age needed to bid (stops alt accounts)
 MIN_MEMBER_DAYS = 3         # days in the server needed to bid
 GOLD = discord.Color.from_rgb(240, 198, 104)
+# text commands paused while an auction runs (they would raise coins); economy.AUCTION_LOCK also
+# blocks the same things inside the economy, so buttons / views can't do it either
+BLOCKED_DURING_AUCTION = {"rcsell", "rcms", "rctrade", "rcdaily", "rcweekly", "rcmonthly"}
 
 _rng = secrets.SystemRandom()
 _BID_RE = re.compile(r"^bid\s+([\d.,]+)\s*(k|l|lac|lakh|lakhs|m|mil|cr|crore|crores)?\s*$", re.I)
@@ -143,6 +150,18 @@ class Lot:
         return bool(p) and Path(p).is_file()
 
 
+class JoinView(discord.ui.View):
+    """Red JOIN button: only players who pressed it can bid in this auction."""
+
+    def __init__(self, cog: "AuctionCog"):
+        super().__init__(timeout=3 * 3600)    # a click after the auction just says "no auction running"
+        self.cog = cog
+
+    @discord.ui.button(label="JOIN AUCTION", style=discord.ButtonStyle.danger)
+    async def join(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_join(interaction)
+
+
 class AuctionCog(commands.Cog, name="Auction"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -150,6 +169,9 @@ class AuctionCog(commands.Cog, name="Auction"):
         self.lock = asyncio.Lock()
         self.running = False
         self.cancel = False
+        self.joined: set[int] = set()
+        self.left: set[int] = set()        # left this auction: can't join it again
+        self.view: JoinView | None = None
 
     async def cog_load(self):
         try:
@@ -199,12 +221,14 @@ class AuctionCog(commands.Cog, name="Auction"):
         if run_id is None:
             return "Today's auction already ran."
         self.running, self.cancel = True, False
+        self.joined, self.left = set(), set()
+        self.view = JoinView(self)
+        economy.AUCTION_LOCK = True          # no selling / trading / coin claims until the auction ends
         sold = []
         try:
             role_id = await asyncio.to_thread(auction.get_setting, "ping_role")
             ping = f"<@&{role_id}> " if role_id else ""
-            rows = [f"{i}. {c['playername'][:22]:<22} {c['ovr']} OVR   base {short(sl.sell_value(c))}"
-                    for i, c in enumerate(cards, 1)]
+            rows = [f"Lot {i}   ???   base {short(sl.sell_value(c))}" for i, c in enumerate(cards, 1)]
             lineup = None
             try:
                 lineup = await asyncio.to_thread(
@@ -217,10 +241,13 @@ class AuctionCog(commands.Cog, name="Auction"):
             await ch.send(
                 f"{ping}**LIVE AUCTION starts in {FIRST_LOT_DELAY} seconds**\n"
                 "```\n" + "\n".join(rows) + "\n```\n"
-                "How to bid: type `bid 30L` / `bid 2.5m` / `bid 1.2cr` in this channel.\n"
+                "Players are a mystery until their lot starts.\n"
+                "**Press JOIN AUCTION below** (or type `rcjoin auction`) to take part, then type `bid 30L` / `bid 2.5m` / `bid 1.2cr` in this channel.\n"
                 f"Coins are held when you bid, and come back if someone bids higher. "
-                f"Max {auction.MAX_WINS_PER_RUN} wins per person.",
+                f"Max {auction.MAX_WINS_PER_RUN} wins per person. "
+                "Selling, trading and coin claims are paused until the auction ends.",
                 allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
+                view=self.view,
                 **extra,
             )
             if await self._sleep(FIRST_LOT_DELAY):
@@ -236,6 +263,7 @@ class AuctionCog(commands.Cog, name="Auction"):
             await self._summary(ch, sold, cancelled=self.cancel)
             return "Done."
         finally:
+            economy.AUCTION_LOCK = False
             await asyncio.to_thread(auction.end_run, run_id, "cancelled" if self.cancel else "done")
             self.running, self.lot = False, None
 
@@ -252,7 +280,7 @@ class AuctionCog(commands.Cog, name="Auction"):
         kwargs = {}
         if lot.has_image:
             kwargs["file"] = discord.File(lot.card["image_path"], filename="lot.png")
-        lot.message = await ch.send(embed=lot.embed(), **kwargs)
+        lot.message = await ch.send(embed=lot.embed(), view=self.view, **kwargs)
         lot.end = time.time() + LOT_SECONDS
         async with self.lock:
             self.lot = lot
@@ -318,6 +346,41 @@ class AuctionCog(commands.Cog, name="Auction"):
             allowed_mentions=discord.AllowedMentions.none(),
         )
 
+    # ── join button ──────────────────────────────────────────────────────────
+    async def try_join(self, user) -> str:
+        """Join checks for the button and for `rcjoin auction`. Returns the text to show the user."""
+        if not self.running:
+            return "No auction is running right now. Next one: 9 PM."
+        if user.id in self.left:
+            return "You left this auction, so you can't join it again. Come back for the next one."
+        if user.id in self.joined:
+            return "You already joined. Type `bid 30L` when a lot is live."
+        row = await asyncio.to_thread(economy.get_user, user.id)
+        if row is None:
+            return "You haven't debuted yet. Type `rcdebut` first."
+        if int(row["banned"] or 0):
+            return "You can't join the auction."
+        now = datetime.now(timezone.utc)
+        if (now - user.created_at).days < MIN_ACCOUNT_DAYS:
+            return f"Your Discord account must be at least {MIN_ACCOUNT_DAYS} days old to join."
+        joined_at = getattr(user, "joined_at", None)
+        if joined_at and (now - joined_at).days < MIN_MEMBER_DAYS:
+            return f"You must be in this server for {MIN_MEMBER_DAYS} days to join."
+        self.joined.add(user.id)
+        return (f"You joined the auction ({len(self.joined)} joined). Your purse: **{int(row['purse']):,}** coins.\n"
+                f"When a lot is live, type `bid 30L` / `bid 2.5m` / `bid 1.2cr` in <#{AUCTION_CHANNEL_ID}>. "
+                "`rcauction leave` to leave (you can't come back to this auction).")
+
+    async def handle_join(self, interaction: discord.Interaction):
+        await interaction.response.send_message(await self.try_join(interaction.user), ephemeral=True)
+
+    # ── pause selling / trading / coin claims during the auction ─────────────
+    async def bot_check(self, ctx: commands.Context) -> bool:
+        if economy.AUCTION_LOCK and ctx.command and ctx.command.qualified_name in BLOCKED_DURING_AUCTION:
+            await ctx.send(economy.AUCTION_LOCK_MSG + f" (<#{AUCTION_CHANNEL_ID}>)")
+            raise MaintenancePrefixBlocked("auction running")
+        return True
+
     # ── chat bids ────────────────────────────────────────────────────────────
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -336,14 +399,8 @@ class AuctionCog(commands.Cog, name="Auction"):
                                 delete_after=6, mention_author=False)
             return
         member = message.author
-        now = datetime.now(timezone.utc)
-        if (now - member.created_at).days < MIN_ACCOUNT_DAYS:
-            await message.reply(f"Your Discord account must be at least {MIN_ACCOUNT_DAYS} days old to bid.",
-                                delete_after=6, mention_author=False)
-            return
-        joined = getattr(member, "joined_at", None)
-        if joined and (now - joined).days < MIN_MEMBER_DAYS:
-            await message.reply(f"You must be in this server for {MIN_MEMBER_DAYS} days to bid.",
+        if member.id not in self.joined:
+            await message.reply("Join first: press **JOIN AUCTION** (red button) or type `rcjoin auction`.",
                                 delete_after=6, mention_author=False)
             return
         async with self.lock:
@@ -396,8 +453,35 @@ class AuctionCog(commands.Cog, name="Auction"):
         await ctx.send(
             f"**Live Auction** every day at **9 PM** in <#{AUCTION_CHANNEL_ID}>: 2 players (85-89) and 3 players (90-99).\n"
             f"Next one <t:{int(nxt.timestamp())}:R>. Base price = sell price. Bid by typing `bid 30L` in the channel.\n"
+            "`rcjoin auction` = join (or the red button)  |  `rcauction leave` = leave\n"
             "`rcauction notify` = get pinged  |  `rcauction history` = last results  |  `rcauction won` = your wins",
             allowed_mentions=discord.AllowedMentions.none())
+
+    @rcauction.command(name="join")
+    async def rcauction_join(self, ctx: commands.Context):
+        await ctx.send(await self.try_join(ctx.author), allowed_mentions=discord.AllowedMentions.none())
+
+    @rcauction.command(name="leave")
+    async def rcauction_leave(self, ctx: commands.Context):
+        uid = ctx.author.id
+        if not self.running or uid not in self.joined:
+            await ctx.send("You are not in a running auction.")
+            return
+        lot = self.lot
+        if lot and lot.top and lot.top[0] == uid:
+            await ctx.send("You are the top bidder on the live lot. You can leave after this lot ends.")
+            return
+        self.joined.discard(uid)
+        self.left.add(uid)
+        await ctx.send("You left the auction. You can't join this auction again (the next one is open to you).")
+
+    @commands.command(name="rcjoin")
+    @commands.cooldown(1, 3, commands.BucketType.user)
+    async def rcjoin(self, ctx: commands.Context, what: str = ""):
+        if what.lower() != "auction":
+            await ctx.send("Use `rcjoin auction` to join the Live Auction.")
+            return
+        await ctx.send(await self.try_join(ctx.author), allowed_mentions=discord.AllowedMentions.none())
 
     @rcauction.command(name="notify")
     async def rcauction_notify(self, ctx: commands.Context):

@@ -1,4 +1,5 @@
-"""Image for the auction start: tonight's cards in one row, LOT number + base price under each."""
+"""Image for the auction start: one mystery card ("?") per lot, LOT number + base price under each.
+No card picture and no name: each player is revealed when his lot starts."""
 from __future__ import annotations
 
 import io
@@ -74,22 +75,29 @@ def build_lineup(lots: list[tuple[str | None, str, int, int]], minutes: int = 2)
     y0 = 230
     for i, (path, name, ovr, base) in enumerate(lots):
         x0 = pad + i * (cw + gap)
-        card = None
-        if path and Path(path).is_file():
-            try:
-                card = Image.open(path).convert("RGBA").resize((cw, ch), Image.LANCZOS)
-            except Exception:
-                card = None
-        if card is not None:
-            sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            sh.paste((0, 0, 0, 150), (x0 + 6, y0 + 14), card.getchannel("A"))
-            img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(12)))
-            img.alpha_composite(card, (x0, y0))
-        else:   # no saved image: a simple gold placeholder
-            d = ImageDraw.Draw(img)
-            d.rounded_rectangle((x0, y0, x0 + cw, y0 + ch), 24, fill=(40, 34, 74), outline=GOLD, width=3)
-            d.text((x0 + cw / 2, y0 + ch / 2 - 30), str(ovr), font=_font("display_bold.ttf", 130), fill=GOLD_HI, anchor="mm")
-            d.text((x0 + cw / 2, y0 + ch / 2 + 70), name.upper()[:16], font=_font("label.ttf", 30), fill=IVORY, anchor="mm")
+        # mystery card: no picture, no name, only a big "?" (the player is revealed when the lot starts)
+        sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rounded_rectangle((x0 + 6, y0 + 14, x0 + cw + 6, y0 + ch + 14), 26, fill=(0, 0, 0, 150))
+        img.alpha_composite(sh.filter(ImageFilter.GaussianBlur(12)))
+        card = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+        cd = ImageDraw.Draw(card)
+        for yy in range(ch):
+            t = yy / ch
+            a, b = (58, 36, 96), (16, 12, 30)
+            cd.line((0, yy, cw, yy), fill=tuple(int(a[k] + (b[k] - a[k]) * t) for k in range(3)) + (255,))
+        m = Image.new("L", (cw, ch), 0)
+        ImageDraw.Draw(m).rounded_rectangle((0, 0, cw - 1, ch - 1), 26, fill=255)
+        card.putalpha(m)
+        glow = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+        ImageDraw.Draw(glow).ellipse((cw * 0.12, ch * 0.18, cw * 0.88, ch * 0.72), fill=(255, 190, 110, 70))
+        card.alpha_composite(glow.filter(ImageFilter.GaussianBlur(40)))
+        cd = ImageDraw.Draw(card)
+        cd.rounded_rectangle((0, 0, cw - 1, ch - 1), 26, outline=GOLD, width=4)
+        cd.rounded_rectangle((12, 12, cw - 13, ch - 13), 20, outline=GOLD_DK, width=2)
+        cd.text((cw / 2, ch * 0.45), "?", font=_font("label.ttf", 240), fill=GOLD_HI, anchor="mm",
+                stroke_width=4, stroke_fill=INK)
+        cd.text((cw / 2, ch * 0.82), "MYSTERY PLAYER", font=_font("label.ttf", 26), fill=IVORY, anchor="mm")
+        img.alpha_composite(card, (x0, y0))
         d = ImageDraw.Draw(img)
         cx = x0 + cw / 2
         ty = y0 + ch + 30
