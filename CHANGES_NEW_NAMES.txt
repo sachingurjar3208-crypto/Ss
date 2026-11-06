@@ -506,3 +506,19 @@ Over khatam -> usi ball ke scoreboard embed ke andar image (ek over me ek hi baa
 Last ball pe wicket/DRS se over khatam ho to next-bowler prompt se pehle image.
 GIF (4, 6, wicket, umpire...) ab usi ball ki commentary ke theek neeche aate hain, agle prompt se pehle.
 Files: over_image.py, views.py
+
+== Batting order + animations band ==
+Batting: pehle upar se direction. Chunte hi upar ki line grey (lock), chuni hui hari, neeche ke shot khulte hain.
+Block hamesha seedha chal jata hai.
+views.py MATCH_ANIMATIONS = False: umpire signal (4/6/W/wide/no-ball), 50/100, maiden, hat-trick,
+5-wicket banners aur animated commentary band. Player ke saved GIF chalte rahenge. Wapas chahiye to True.
+
+== BUG FIX: ek team ne dono innings batting ki, result galat ==
+Wajah: ek hi ball do baar khel di jaati thi (shot pe double tap, ya click aur autoplay timer ek saath).
+Innings 1 ki aakhri ball do baar chali to innings 2 do baar shuru hui, side wapas badal gayi,
+wahi team dobara batting karne lagi aur result ulta aaya.
+Fix (views.py): har ball sirf ek baar (pending_delivery check), innings 2 sirf ek baar shuru,
+batting buttons ka shot sirf ek baar resolve.
+Aur fix (views.py):
+- Match end sirf ek baar: result, record, coins, quests, ranked stars do baar nahi milenge (_match_finished, _record_saved).
+- Prompt ka jawab ho chuka ho (bowler, opener, next batter, delivery...) to der se aaya dusra click ignore.

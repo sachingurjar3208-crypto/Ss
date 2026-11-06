@@ -442,6 +442,9 @@ async def _ranked_credits_announce(channel, game):
 
 def _save_match_record(game):
     """Derive winner/loser and persist to match_records. Ignores ties."""
+    if game.__dict__.get("_record_saved"):          # BUG FIX: records / coins / quests only once
+        return
+    game.__dict__["_record_saved"] = True
     t1 = game.runs[0]
     t2 = game.runs[1]
     # After start_second_innings():
@@ -860,6 +863,15 @@ class _TimeoutMixin:
         removed the game from that dict — the views already on-screen kept
         calling straight into `self.game` and the match carried on as if
         nothing happened."""
+        # BUG FIX: a click that arrives after this prompt was already answered (double tap,
+        # or the autoplay timer firing at the same moment) is ignored instead of acting twice.
+        # BattingView needs 2 clicks and stops only after the 2nd, so it is not affected.
+        if self.is_finished():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+            return False
         game = getattr(self, "game", None)
         if game is not None and active_games.get(interaction.channel_id) is not game:
             try:
@@ -1127,7 +1139,7 @@ async def _send_commentary_with_gifs(
             await channel.send(embed=embed, file=file)
         else:
             await channel.send(embed=embed)
-    shown = await _comm.play_animated(channel, commentary, None, anim) if anim else False
+    shown = await _comm.play_animated(channel, commentary, None, anim) if (anim and MATCH_ANIMATIONS) else False
     if not shown:
         await channel.send(content=commentary)
 
@@ -1361,6 +1373,18 @@ async def _process_delivery(
                 "This match has been cancelled.", ephemeral=True
             )
         except discord.InteractionResponded:
+            pass
+        return
+
+    # BUG FIX (double ball): two shot clicks at the same moment (double tap, or a click
+    # while the autoplay timer fires) played the SAME ball twice. On the last ball of
+    # innings 1 that ended the innings twice, swapped the sides back, and one team
+    # batted both innings with a wrong result. The delivery is consumed right below
+    # (no await in between), so the second call sees None and stops here.
+    if game.pending_delivery is None:
+        try:
+            await interaction.response.defer()
+        except Exception:
             pass
         return
 
@@ -1601,7 +1625,7 @@ async def _process_delivery(
         "4": "four", "6": "six", "W": "out",
         "Wd": "wide", "NB": "noball", "NB+1": "noball",
     }.get(outcome)
-    if _umpire_event:
+    if _umpire_event and MATCH_ANIMATIONS:          # umpire signal (banner or saved GIF): off with the animations
         if UMPIRE_BANNER:
             gif_urls.append(f"umpire:{_umpire_event}")
         else:
@@ -1702,6 +1726,9 @@ async def _process_delivery(
             if game.innings == 1:
                 await _do_innings_break(channel, game, commentary, embed, gif_urls, interaction, anim=_anim)
             else:
+                if game.__dict__.get("_match_finished"):     # BUG FIX: never finish (and pay) a match twice
+                    return
+                game.__dict__["_match_finished"] = True
                 save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
                 _save_match_record(game)
                 _start_match_summary(game)          # card renders while the messages below go out
@@ -1777,6 +1804,9 @@ async def _handle_wicket_fall(channel, game: GameState):
         if game.innings == 1:
             await _do_innings_break_allout(channel, game)
         else:
+            if game.__dict__.get("_match_finished"):         # BUG FIX: never finish (and pay) a match twice
+                return
+            game.__dict__["_match_finished"] = True
             save_game_innings_stats(game, game.batting_user_id, game.bowling_user_id, is_final=True)
             _save_match_record(game)
             _start_match_summary(game)
@@ -1829,6 +1859,11 @@ async def _do_innings_break_allout(channel, game: GameState):
 
 
 async def _start_second_innings(channel, game: GameState):
+    # BUG FIX: never start innings 2 twice (a second call swapped the batting side back).
+    if game.innings != 1 or game.__dict__.get("_inn2_started"):
+        print(f"[match] second innings start ignored (innings={game.innings})")
+        return
+    game.__dict__["_inn2_started"] = True
     game.start_second_innings()
     target  = game.target()
     balls   = game.overs * 6
@@ -1850,10 +1885,16 @@ async def _start_second_innings(channel, game: GameState):
 
 # ── Umpire banner (generated GIF for four / six / out / wide / noball) ───────
 UMPIRE_BANNER = True   # False = go back to the GIF links saved in the umpire_media table
+# Generated animations (umpire signal banner for 4 / 6 / W / wide / no-ball, milestone 50 / 100,
+# maiden, hat-trick, 5-wicket banners, animated commentary). False = all of them OFF.
+# GIF links you saved yourself (player / umpire GIFs) still show.
+MATCH_ANIMATIONS = False
 
 
 async def _send_gif_item(channel, item: str) -> None:
     """gif_urls holds plain URLs, or "umpire:<event>" for the generated umpire banner."""
+    if not MATCH_ANIMATIONS and (item.startswith("moment:") or item.startswith("umpire:")):
+        return                       # generated animations are switched off
     if item.startswith("moment:"):   # milestone / hat-trick / maiden / 5-wicket banner
         from moments import send_moment_item
         await send_moment_item(channel, item)
@@ -2615,7 +2656,7 @@ class BattingView(_TimeoutMixin, ui.View):
 
     # Direction + Intent: row 1 = where (Off Side / Straight / Leg Side / Behind),
     # row 2 = the shot: Drive (= intent Hit), Loft, Block, Flick (= intent Push).
-    # Block plays at once; otherwise the
+    # Order: direction FIRST (then the top row goes grey and the shots open). Block plays at once; otherwise the
     # ball is played when both are picked (in any order).
     _INTENT_STYLE = {
         "Block": discord.ButtonStyle.secondary, "Push": discord.ButtonStyle.primary,
@@ -2632,7 +2673,8 @@ class BattingView(_TimeoutMixin, ui.View):
             self._dir_btns[d] = b
             self.add_item(b)
         for it in BAT_INTENTS:
-            b = ui.Button(label=BAT_INTENT_LABEL.get(it, it), style=self._INTENT_STYLE[it], row=1, custom_id=f"batint_{it}")
+            b = ui.Button(label=BAT_INTENT_LABEL.get(it, it), style=self._INTENT_STYLE[it], row=1, custom_id=f"batint_{it}",
+                          disabled=(it != "Block"))      # shots open after a direction is picked (Block always works)
             b.callback = self._make_int(it)
             self._int_btns[it] = b
             self.add_item(b)
@@ -2642,11 +2684,12 @@ class BattingView(_TimeoutMixin, ui.View):
                               self.game.pending_delivery_internal or "", self.recommended)
 
     def _mark(self):
+        """Direction picked: the top row turns grey (locked, the chosen one stays green), the shots open."""
         for d, b in self._dir_btns.items():
             b.style = discord.ButtonStyle.success if d == self.direction else discord.ButtonStyle.secondary
+            b.disabled = self.direction is not None
         for it, b in self._int_btns.items():
-            name = BAT_INTENT_LABEL.get(it, it)
-            b.label = f"{name} *" if it == self.intent else name
+            b.disabled = self.direction is None and it != "Block"
 
     async def _ok(self, interaction) -> bool:
         if interaction.user.id != self.game.batting_user_id:
@@ -2658,10 +2701,10 @@ class BattingView(_TimeoutMixin, ui.View):
         async def callback(interaction: discord.Interaction):
             if not await self._ok(interaction):
                 return
-            self.direction = d
-            if self.intent:
-                await self.resolve(interaction, d, self.intent)
+            if self.direction is not None:
+                await interaction.response.defer()
                 return
+            self.direction = d
             self._mark()
             await interaction.response.edit_message(view=self)
         return callback
@@ -2673,13 +2716,18 @@ class BattingView(_TimeoutMixin, ui.View):
             if it == "Block" or self.direction:
                 await self.resolve(interaction, self.direction or "Straight", it)
                 return
-            self.intent = it
-            self._mark()
-            await interaction.response.edit_message(view=self)
+            await interaction.response.send_message("Pick a direction first (top row).", ephemeral=True)
         return callback
 
     async def resolve(self, interaction, direction: str, intent: str):
         """Play the ball: (direction, intent) -> shot, then the normal ball processing."""
+        if getattr(self, "_resolved", False) or self.is_finished():
+            try:
+                await interaction.response.defer()
+            except Exception:
+                pass
+            return
+        self._resolved = True
         shot = self._shot_for(direction, intent)
         self.game.__dict__["pending_intent"] = intent if intent in ("Push", "Hit", "Loft") else None
         self.stop()
