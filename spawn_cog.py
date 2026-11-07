@@ -1,12 +1,12 @@
 """Wild cricketer spawns (BallsDex-style, made for Rush Cricket).
 
-How a spawn happens (per server, only in the channel set with /spawn channel):
-  * every human message in the server adds points (counted at most once per 10 s, so spam is useless)
-  * the points are halved for: very short messages (< 5 letters), fewer than 4 different people
-    in the last 100 messages, or one person writing more than 40% of them
-  * a little time bonus every minute, so a quiet server still gets one now and then
-  * when the points reach a random target -> a card spawns, never sooner than MIN_GAP after the last
-    one, never more than MAX_PER_DAY a day, and never while the last one is still uncaught
+How a spawn happens (per server; messages in ANY channel count, the card appears in the spawn channel):
+  * every human message counts as 1, but at most one message every COUNT_EVERY (3) seconds
+  * each spawn needs a random 5-7 messages (SPAWN_MESSAGES)
+  * AND at least MIN_GAP (10 min) since the last spawn: after that, the message that completes
+    the 5-7 spawns the card
+  * dead server: if DEAD_AFTER (1 hour) has passed since the last spawn, the very next message spawns
+  * never more than MAX_PER_DAY a day, never while the last spawn is still uncaught
 The spawn: "A wild cricketer appeared!" + the card with the NAME BLURRED + a "Catch me" button.
 Button -> type the name. Right name = the card (squad full / duplicate -> the normal keep/sell/replace).
 Event cards: "Virat Kohli (S1)" is caught with just "Virat Kohli" (the short card name works too).
@@ -42,11 +42,12 @@ import spawn_db
 from bot_guard import ADMIN_GUILD_ID, OWNER_ID, MaintenanceActive, is_staff
 
 # ── settings (change freely) ──────────────────────────────────────────────────
-SPAWN_POINTS = (30, 45)      # random target of message points for each spawn
+SPAWN_MESSAGES = (5, 7)      # each spawn needs a random 5 to 7 messages
 MIN_GAP = 600                # seconds: at least 10 minutes between two spawns
+DEAD_AFTER = 3600            # 1 hour since the last spawn -> the next single message spawns
 MAX_PER_DAY = 30             # spawns per server per day (India time)
 SPAWN_TIMEOUT = 300          # seconds the "Catch me" button stays (5 min), then the cricketer runs away
-COUNT_EVERY = 10             # a server's points go up at most once per 10 seconds
+COUNT_EVERY = 3              # at most one message counted every 3 seconds (spam doesn't help)
 HEADER = "**A wild cricketer appeared!**"
 
 # OVR odds. The numbers are WEIGHTS (they add up to ~416, not 100), so the real chance of a band is
@@ -160,25 +161,14 @@ def _random_filename() -> str:
 @dataclass
 class _Counter:
     start: float = field(default_factory=time.time)
-    points: float = SPAWN_POINTS[0] / 2          # start half-way so a restart doesn't mean a long wait
-    target: int = field(default_factory=lambda: _rng.randint(*SPAWN_POINTS))
+    points: int = 0                              # messages counted since the last spawn
+    target: int = field(default_factory=lambda: _rng.randint(*SPAWN_MESSAGES))
     last_count: float = 0.0
-    cache: deque = field(default_factory=lambda: deque(maxlen=100))   # (author_id, short?)
 
     def reset(self):
         self.start = time.time()
-        self.points = 1.0
-        self.target = _rng.randint(*SPAWN_POINTS)
-
-
-def _time_mult(members: int) -> float:
-    if members < 5:
-        return 0.1
-    if members < 100:
-        return 0.8
-    if members < 1000:
-        return 0.5
-    return 0.2
+        self.points = 0
+        self.target = _rng.randint(*SPAWN_MESSAGES)
 
 
 # ── catch UI ──────────────────────────────────────────────────────────────────
@@ -337,24 +327,14 @@ class SpawnCog(commands.Cog):
         if not cfg or not cfg["enabled"] or not cfg["channel_id"]:
             return
         c = self.counters.setdefault(g.id, _Counter())
-        c.cache.append((message.author.id, len(message.content or "") < 5))
         now = time.time()
         if now - c.last_count < COUNT_EVERY:
             return
         c.last_count = now
-        members = g.member_count or 0
-        mult = 1.0
-        if members < 5 or members > 1000:
-            mult /= 2
-        if len(message.content or "") < 5:
-            mult /= 2
-        authors = [a for a, _ in c.cache]
-        if len(set(authors)) < 4 or authors.count(message.author.id) / c.cache.maxlen > 0.4:
-            mult /= 2
-        c.points += mult
-        if c.points + _time_mult(members) * ((now - c.start) // 60) <= c.target:
-            return
-        if now - c.start < MIN_GAP or self.active.get(g.id) or g.id in self.busy:
+        c.points += 1
+        waited = now - c.start
+        ready = (c.points >= c.target and waited >= MIN_GAP) or waited >= DEAD_AFTER
+        if not ready or self.active.get(g.id) or g.id in self.busy:
             return
         if await asyncio.to_thread(spawn_db.spawns_today, g.id) >= MAX_PER_DAY:
             return
@@ -466,10 +446,12 @@ class SpawnCog(commands.Cog):
             last_txt = "none yet"
         prog = "no messages counted since the restart"
         if c:
-            now = time.time()
-            pts = c.points + _time_mult(g.member_count or 0) * ((now - c.start) // 60)
-            gap = max(0, int(MIN_GAP - (now - c.start)))
-            prog = f"{pts:.1f} / {c.target} points" + (f", gap {gap // 60}m {gap % 60}s left" if gap else "")
+            waited = int(time.time() - c.start)
+            gap = max(0, MIN_GAP - waited)
+            dead = max(0, DEAD_AFTER - waited)
+            prog = (f"{c.points} / {c.target} messages"
+                    + (f", 10 min gap: {gap // 60}m {gap % 60}s left" if gap else ", 10 min gap done")
+                    + f", dead-server spawn in {dead // 60}m")
         await interaction.response.send_message(
             f"Channel: {('<#' + str(cfg['channel_id']) + '>') if cfg.get('channel_id') else 'not set'}\n"
             f"Spawning: **{'on' if cfg.get('enabled') else 'off'}**\n"
