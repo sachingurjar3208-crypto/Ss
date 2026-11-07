@@ -36,7 +36,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Daily", "rcdaily", "Daily coins and a random player (50-99 OVR, high OVR is rare). Every 7th day gives a streak bonus."),
         ("Weekly", "rcweekly", "Premium only. Weekly coins and a random player (83-99 OVR)."),
         ("Monthly", "rcmonthly", "Monthly coins and a random player (88-99 OVR)."),
-        ("Claim", "rcclaim", "A free random player every hour. Premium members can claim every 35 minutes."),
+        ("Claim", "rcclaim", "A free random player every hour."),
         ("Cooldowns", "rccd", "Shows when daily, weekly, monthly and claim are ready again."),
         ("Quests", "rcquest", "Your daily quests and progress. Finishing a quest gives a voucher."),
     ]),
@@ -68,6 +68,21 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Cancel", "rccancel", "End the match running in this channel. Either player or a moderator can use it."),
         ("Resume", "rcresume", "Re-send the current prompt if your match looks stuck."),
         ("Auto Play", "rcautoplay", "Premium only. The bot plays your side for you. Use it again to switch it off."),
+        ("Bowling", "Line + Power", "Pick a line first (Wide Off, Off, Stumps, Pads, Wide Leg), then the power (Slow, Medium, Fast, MAX). The batter can't see your line. MAX is fastest but can be a no-ball.", "bowling"),
+        ("Batting", "Direction + Shot", "Pick a direction first (Off Side, Straight, Leg Side, Behind), then the shot: Drive = fours, Loft = sixes but risky, Flick = safe singles, Block = defend. Guess the bowler's line for more runs.", "batting"),
+    ]),
+    "auction": ("Auction", "Daily Live Auction at 9 PM", [
+        ("Auction", "rcauction", "Next auction time, or the lot that is live now. Every day at 9 PM: 5 mystery players (85-99 OVR)."),
+        ("Join", "rcjoin auction", "Join tonight's auction (or press the red JOIN button). Only players who joined can bid.", "rcjoin auction"),
+        ("Bid", "bid 30L", "Type in the auction channel while a lot is live: bid 500k, bid 30L, bid 2.5m, bid 1.2cr. Coins are held and come back if someone bids higher.", "bid"),
+        ("Leave", "rcauction leave", "Leave tonight's auction. You can't join the same auction again.", "rcauction leave"),
+        ("Notify", "rcauction notify", "Get pinged when the auction starts.", "rcauction notify"),
+        ("Results", "rcauction history", "Last auction results. rcauction won shows the players you won.", "rcauction history"),
+    ]),
+    "spawn": ("Spawn", "Catch wild cricketers in chat", [
+        ("Wild Cricketer", "Catch me", "Chat in the server and a wild cricketer appears in the spawn channel with his name hidden. Press Catch me and type his name to get the card. For event cards like Virat Kohli (S1) just type Virat Kohli."),
+        ("Your Catches", "rcspawns", "How many cricketers you caught. Every 30 catches gives 1 Draft Voucher.", "rcspawns"),
+        ("Spawn Channel", "/spawn channel", "Slash command. Pick the channel where cricketers spawn in your server (needs Manage Server)."),
     ]),
     "ranked": ("Ranked", "Ranked mode, tiers and rewards", [
         ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "rcmp ranked"),
@@ -92,14 +107,13 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     ]),
     "premium": ("Premium", "What Premium members get", [
         ("Weekly Reward", "rcweekly", "Weekly coins and a random 83-99 OVR player."),
-        ("Faster Claim", "rcclaim", "Claim every 35 minutes instead of every hour."),
         ("All-Time Stats", "rcdata <player>", "A card's stats across every owner.", "rcdata"),
         ("View Other XI", "rcxi @user", "See another player's playing XI."),
         ("Auto Play", "rcautoplay", "The bot plays your side of the match for you."),
     ]),
 }
 
-ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "ranked", "events", "other", "premium"]
+ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "spawn", "auction", "ranked", "events", "other", "premium"]
 
 
 # ── Packs page (live from squad_logic.PACKS) ────────────────────────────────

@@ -100,6 +100,7 @@ async def load_cogs():
         "playstyle_info_cog",
         "sigbox_cog",
         "auction_cog",
+        "spawn_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:
