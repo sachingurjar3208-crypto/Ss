@@ -15,8 +15,8 @@ Unob cards (obtainable off) and cards of a disabled event never spawn. /spawn ca
 
 Slash (every server, everyone sees it):  /spawn channel   (needs Manage Server)
 Slash (hidden, only your server):        /spawnadmin toggle  /spawnadmin status   (owner + admin role)
-                                         /spawnadmin force [player]  /spawnadmin card <player> <on/off>
-                                         /spawnadmin blocked   (owner only)
+                                         /spawnadmin card <player> <on/off>  /spawnadmin blocked   (owner only)
+                                         /admin cricketer spawn [playername] [count] [ovr] [event] (owner only)
 Users:                       rcspawns
 """
 from __future__ import annotations
@@ -100,6 +100,48 @@ def pick_card(exclude: set[str] | None = None):
     if not bands:
         return _rng.choice(pool)
     return _rng.choice(_rng.choices(bands, weights=weights, k=1)[0])
+
+
+def parse_ovrs(text: str) -> set[int] | None:
+    """ "88, 91" -> {88, 91};  "85-89" -> {85..89};  mixed works too. None if nothing valid."""
+    out: set[int] = set()
+    for part in re.split(r"[,\s]+", str(text or "").strip()):
+        if not part:
+            continue
+        m = re.fullmatch(r"(\d{1,2})-(\d{1,2})", part)
+        if m:
+            a, b = sorted((int(m.group(1)), int(m.group(2))))
+            out.update(range(a, b + 1))
+        elif part.isdigit():
+            out.add(int(part))
+        else:
+            return None
+    out = {o for o in out if 1 <= o <= 99}
+    return out or None
+
+
+def admin_pool(ovrs: set[int] | None, event_key: str | None) -> list:
+    """Cards for /admin cricketer spawn: never unob, never turned-off cards."""
+    blocked = spawn_db.blocked_keys()
+    pool = [c for c in card_db.list_obtainable_cards() if c["playername_key"] not in blocked]
+    if ovrs:
+        pool = [c for c in pool if int(c["ovr"]) in ovrs]
+    if event_key == "*":
+        pool = [c for c in pool if card_db._rget(c, "event_key", None)]
+    elif event_key:
+        pool = [c for c in pool if str(card_db._rget(c, "event_key", "") or "").lower() == event_key]
+    return pool
+
+
+def pick_from(pool: list, tried: set[str] | None = None):
+    """Random card from `pool`: first a random OVR (each OVR asked for has the same chance), then a card."""
+    cards = [c for c in pool if c["playername_key"] not in (tried or set())]
+    if not cards:
+        return None
+    by_ovr: dict[int, list] = {}
+    for c in cards:
+        by_ovr.setdefault(int(c["ovr"]), []).append(c)
+    return _rng.choice(by_ovr[_rng.choice(list(by_ovr))])
 
 
 def odds_table() -> str:
@@ -194,7 +236,7 @@ class SpawnView(discord.ui.View):
                 return
             self.caught_by = interaction.user.id
             self.stop()
-        self.cog.active.pop(self.guild_id, None)
+        self.cog.drop(self)
 
         card = self.card
         left = spawn_db.SPAWN_VOUCHER_EVERY - res["catches"] % spawn_db.SPAWN_VOUCHER_EVERY
@@ -228,7 +270,7 @@ class SpawnView(discord.ui.View):
                 print(f"[spawn] pending prompt failed: {type(e).__name__}: {e}")
 
     async def on_timeout(self):
-        self.cog.active.pop(self.guild_id, None)
+        self.cog.drop(self)
         if self.caught_by is not None or self.message is None:
             return
         self.catch_btn.disabled = True
@@ -254,6 +296,15 @@ async def _player_autocomplete(interaction: discord.Interaction, current: str):
     return out
 
 
+async def _event_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    out = [app_commands.Choice(name="Any event", value="any")] if "any".startswith(cur) or not cur else []
+    for e in card_db.list_events():
+        if cur in e["eventname"].lower():
+            out.append(app_commands.Choice(name=e["eventname"][:100], value=e["event_key"][:100]))
+    return out[:25]
+
+
 def _owner_check(i: discord.Interaction) -> bool:
     return i.user.id == OWNER_ID
 
@@ -269,7 +320,7 @@ class SpawnCog(commands.Cog):
         self.bot = bot
         self.configs: dict[int, dict] = {}
         self.counters: dict[int, _Counter] = {}
-        self.active: dict[int, SpawnView] = {}
+        self.active: dict[int, set] = {}          # guild -> live (uncaught) spawn views
         self.busy: set[int] = set()
 
     async def cog_load(self):
@@ -303,7 +354,7 @@ class SpawnCog(commands.Cog):
         c.points += mult
         if c.points + _time_mult(members) * ((now - c.start) // 60) <= c.target:
             return
-        if now - c.start < MIN_GAP or g.id in self.active or g.id in self.busy:
+        if now - c.start < MIN_GAP or self.active.get(g.id) or g.id in self.busy:
             return
         if await asyncio.to_thread(spawn_db.spawns_today, g.id) >= MAX_PER_DAY:
             return
@@ -314,7 +365,14 @@ class SpawnCog(commands.Cog):
         asyncio.create_task(self.spawn(channel))
 
     # ── spawning ─────────────────────────────────────────────────────────────
-    async def spawn(self, channel: discord.abc.Messageable, card=None) -> str:
+    def drop(self, view: "SpawnView") -> None:
+        live = self.active.get(view.guild_id)
+        if live:
+            live.discard(view)
+            if not live:
+                self.active.pop(view.guild_id, None)
+
+    async def spawn(self, channel: discord.abc.Messageable, card=None, chooser=None, manual: bool = False) -> str:
         g = channel.guild
         if g.id in self.busy:
             return "A spawn is already being prepared."
@@ -323,7 +381,7 @@ class SpawnCog(commands.Cog):
             data, tried = None, set()
             for _ in range(4):                      # a card that can't be drawn -> try another
                 if card is None:
-                    card = await asyncio.to_thread(pick_card, tried)
+                    card = await asyncio.to_thread(chooser or pick_card, tried)
                 if card is None:
                     return "No card can spawn (all unob / turned off)."
                 data = await spawn_blur.blurred_card(card)
@@ -333,11 +391,11 @@ class SpawnCog(commands.Cog):
                 card = None
             if not data:
                 return "Could not draw the spawn image."
-            log_id = await asyncio.to_thread(spawn_db.log_spawn, g.id, card["playername_key"])
+            log_id = await asyncio.to_thread(spawn_db.log_spawn, g.id, card["playername_key"], manual)
             view = SpawnView(self, g.id, card, log_id)
             view.message = await channel.send(HEADER, file=discord.File(io.BytesIO(data), filename=_random_filename()),
                                               view=view)
-            self.active[g.id] = view
+            self.active.setdefault(g.id, set()).add(view)
             print(f"[spawn] {g.id}: {card['playername']} ({card['ovr']})")
             return f"Spawned in {channel.mention}."
         except discord.HTTPException as e:
@@ -400,7 +458,7 @@ class SpawnCog(commands.Cog):
         if last:
             lc = card_db.get_card(last["player_key"])
             lname = lc["playername"] if lc else last["player_key"]
-            if not last["caught_by"] and g.id in self.active:
+            if not last["caught_by"] and self.active.get(g.id):
                 lname = "hidden (still waiting to be caught)"      # never give the live answer away
             who = f"caught by <@{last['caught_by']}>" if last["caught_by"] else "not caught"
             last_txt = f"{lname}, <t:{int(last['ts'])}:R>, {who}"
@@ -415,33 +473,90 @@ class SpawnCog(commands.Cog):
         await interaction.response.send_message(
             f"Channel: {('<#' + str(cfg['channel_id']) + '>') if cfg.get('channel_id') else 'not set'}\n"
             f"Spawning: **{'on' if cfg.get('enabled') else 'off'}**\n"
-            f"Today: {today} / {MAX_PER_DAY}\nLive now: {'yes' if g.id in self.active else 'no'}\n"
+            f"Today: {today} / {MAX_PER_DAY} (admin spawns not counted)\nLive now: {len(self.active.get(g.id, ()))}\n"
             f"Last: {last_txt}\nProgress: {prog}",
             ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
-    @admin_group.command(name="force", description="(Owner) Spawn now. Optional: a chosen player")
-    @app_commands.describe(player="(optional) this exact card spawns")
-    @app_commands.autocomplete(player=_player_autocomplete)
+    # /admin cricketer spawn (owner only, hidden, your server)
+    admin_root = app_commands.Group(name="admin", description="Owner tools",
+                                    guild_only=True, default_permissions=discord.Permissions())
+    app_commands.guilds(ADMIN_GUILD_ID)(admin_root)
+    cricketer = app_commands.Group(name="cricketer", description="Wild cricketer tools", parent=admin_root)
+
+    @cricketer.command(name="spawn", description="(Owner) Spawn cricketers in this channel now")
+    @app_commands.describe(
+        playername="(optional) this exact card spawns",
+        count="How many spawns, one after another (1-10, default 1)",
+        ovr="(optional) only these OVRs, e.g. 88, 91  or a range 85-89",
+        event="(optional) a random card of this event (Any event = any event card)",
+    )
+    @app_commands.autocomplete(playername=_player_autocomplete, event=_event_autocomplete)
     @app_commands.check(_owner_check)
-    async def s_force(self, interaction: discord.Interaction, player: str | None = None):
-        cfg = self.configs.get(interaction.guild.id) or {}
-        ch = interaction.guild.get_channel(int(cfg["channel_id"])) if cfg.get("channel_id") else None
-        if ch is None:
-            await interaction.response.send_message("Set the channel first: `/spawn channel`.", ephemeral=True)
+    async def a_spawn(self, interaction: discord.Interaction, playername: str | None = None,
+                      count: app_commands.Range[int, 1, 10] = 1, ovr: str | None = None, event: str | None = None):
+        ch = interaction.channel
+        perms = ch.permissions_for(interaction.guild.me) if hasattr(ch, "permissions_for") else None
+        if perms is None or not (perms.send_messages and perms.attach_files):
+            await interaction.response.send_message("I need Send Messages and Attach Files in this channel.", ephemeral=True)
             return
-        if interaction.guild.id in self.active:
-            await interaction.response.send_message("A cricketer is still waiting to be caught.", ephemeral=True)
-            return
-        card = None
-        if player:
-            card = card_db.get_card(player)
+        chooser, label = None, "random card"
+        if playername:
+            card = card_db.get_card(playername)
             if card is None:
-                await interaction.response.send_message(f"No card named `{player}`.", ephemeral=True)
+                await interaction.response.send_message(f"No card named `{playername}`.", ephemeral=True)
                 return
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        msg = await self.spawn(ch, card)
-        self.counters.setdefault(interaction.guild.id, _Counter()).reset()
-        await interaction.followup.send(msg, ephemeral=True)
+            if not card_db.is_obtainable(card):
+                await interaction.response.send_message(
+                    f"**{card['playername']}** is unob (or its event is disabled). Unob cards never spawn.", ephemeral=True)
+                return
+            chooser, label = (lambda tried, k=card["playername_key"]: card_db.get_card(k)), card["playername"]
+        else:
+            ovrs = None
+            if ovr:
+                ovrs = parse_ovrs(ovr)
+                if not ovrs:
+                    await interaction.response.send_message("OVR not understood. Examples: `88`  `88, 91`  `85-89`.",
+                                                            ephemeral=True)
+                    return
+            ev_key = None
+            if event:
+                ev_key = "*" if event.strip().lower() in ("*", "any", "any event") else event.strip().lower()
+                if ev_key != "*" and ev_key not in {e["event_key"] for e in card_db.list_events()}:
+                    await interaction.response.send_message(f"No event named `{event}`.", ephemeral=True)
+                    return
+            pool = await asyncio.to_thread(admin_pool, ovrs, ev_key)
+            if not pool:
+                await interaction.response.send_message(
+                    "No card matches (unob cards never spawn, cards turned off with /spawnadmin card don't either).",
+                    ephemeral=True)
+                return
+            chooser = lambda tried, p=pool: pick_from(p, tried)
+            parts = []
+            if ovrs:
+                parts.append("OVR " + ", ".join(str(o) for o in sorted(ovrs)))
+            if ev_key:
+                parts.append("any event" if ev_key == "*" else f"event {event}")
+            label = " | ".join(parts) or label
+        await interaction.response.send_message(f"Spawning **{count}** ({label}) here.", ephemeral=True)
+
+        async def run():
+            ok = 0
+            for i in range(count):
+                msg = await self.spawn(ch, None, chooser, manual=True)
+                if msg.startswith("Spawned"):
+                    ok += 1
+                elif msg.startswith("A spawn is already"):
+                    await asyncio.sleep(3)
+                    msg = await self.spawn(ch, None, chooser, manual=True)
+                    ok += msg.startswith("Spawned")
+                if i < count - 1:
+                    await asyncio.sleep(3)
+            if ok < count:
+                try:
+                    await interaction.followup.send(f"Spawned {ok} of {count}.", ephemeral=True)
+                except discord.HTTPException:
+                    pass
+        asyncio.create_task(run())
 
     @admin_group.command(name="card", description="(Owner) Turn spawning on/off for one card")
     @app_commands.describe(player="The card", enabled="True = can spawn, False = never spawns")
@@ -476,7 +591,7 @@ class SpawnCog(commands.Cog):
             return
         if isinstance(error, app_commands.CheckFailure):
             msg = "Only the owner can use this." if interaction.command and interaction.command.name in (
-                "force", "card", "blocked") else "You need the Manage Server permission to change spawns."
+                "spawn", "card", "blocked") else "You need the Manage Server permission to change spawns."
         else:
             print(f"[spawn] command error: {type(error).__name__}: {error}")
             msg = "Something went wrong. Please try again."

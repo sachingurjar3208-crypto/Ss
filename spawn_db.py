@@ -27,6 +27,10 @@ def _ensure(conn) -> None:
     conn.execute("CREATE TABLE IF NOT EXISTS spawn_stats (user_id INTEGER PRIMARY KEY, catches INTEGER NOT NULL DEFAULT 0)")
     conn.execute("CREATE TABLE IF NOT EXISTS spawn_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, "
                  "player_key TEXT, ts REAL, caught_by INTEGER, caught_ts REAL)")
+    try:   # admin spawns (/admin cricketer spawn) don't use up the daily limit
+        conn.execute("ALTER TABLE spawn_log ADD COLUMN manual INTEGER NOT NULL DEFAULT 0")
+    except Exception:
+        pass
 
 
 def init() -> None:
@@ -87,11 +91,11 @@ def blocked_keys() -> set[str]:
 
 # ── log + stats ───────────────────────────────────────────────────────────────
 
-def log_spawn(guild_id: int, player_key: str) -> int:
+def log_spawn(guild_id: int, player_key: str, manual: bool = False) -> int:
     with economy._tx() as conn:
         _ensure(conn)
-        cur = conn.execute("INSERT INTO spawn_log (guild_id, player_key, ts) VALUES (?, ?, ?)",
-                           (guild_id, player_key, time.time()))
+        cur = conn.execute("INSERT INTO spawn_log (guild_id, player_key, ts, manual) VALUES (?, ?, ?, ?)",
+                           (guild_id, player_key, time.time(), 1 if manual else 0))
         return int(cur.lastrowid)
 
 
@@ -100,7 +104,7 @@ def spawns_today(guild_id: int) -> int:
     start = now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     with economy._tx() as conn:
         _ensure(conn)
-        r = conn.execute("SELECT COUNT(*) AS n FROM spawn_log WHERE guild_id = ? AND ts >= ?", (guild_id, start)).fetchone()
+        r = conn.execute("SELECT COUNT(*) AS n FROM spawn_log WHERE guild_id = ? AND ts >= ? AND manual = 0", (guild_id, start)).fetchone()
     return int(r["n"])
 
 
