@@ -82,7 +82,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     "spawn": ("Spawn", "Catch wild cricketers in chat", [
         ("Wild Cricketer", "Catch me", "Chat in the server and a wild cricketer appears in the spawn channel with his name hidden. Press Catch me and type his name to get the card. For event cards like Virat Kohli (S1) just type Virat Kohli."),
         ("Your Catches", "rcspawns", "How many cricketers you caught. Every 30 catches gives 1 Draft Voucher.", "rcspawns"),
-        ("Spawn Channel", "/spawn channel", "Slash command. Pick the channel where cricketers spawn in your server (needs Manage Server)."),
+        ("Spawn Channel", "/spawn channel", "Slash command. Pick the channel where cricketers spawn in your server (needs Manage Server and at least 40 members in the server)."),
     ]),
     "ranked": ("Ranked", "Ranked mode, tiers and rewards", [
         ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "rcmp ranked"),

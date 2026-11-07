@@ -13,7 +13,7 @@ Event cards: "Virat Kohli (S1)" is caught with just "Virat Kohli" (the short car
 Every SPAWN_VOUCHER_EVERY (30) catches = 1 Draft Voucher.
 Unob cards (obtainable off) and cards of a disabled event never spawn. /spawn card turns any card off/on.
 
-Slash (every server, everyone sees it):  /spawn channel   (needs Manage Server)
+Slash (every server, everyone sees it):  /spawn channel   (needs Manage Server + 40 members in the server)
 Slash (hidden, only your server):        /spawnadmin toggle  /spawnadmin status   (owner + admin role)
                                          /spawnadmin card <player> <on/off>  /spawnadmin blocked   (owner only)
                                          /admin cricketer spawn [playername] [count] [ovr] [event] (owner only)
@@ -45,22 +45,31 @@ from bot_guard import ADMIN_GUILD_ID, OWNER_ID, MaintenanceActive, is_staff
 SPAWN_MESSAGES = (5, 7)      # each spawn needs a random 5 to 7 messages
 MIN_GAP = 600                # seconds: at least 10 minutes between two spawns
 DEAD_AFTER = 3600            # 1 hour since the last spawn -> the next single message spawns
+MIN_MEMBERS = 40             # a server needs at least 40 members to set a spawn channel / get spawns
 MAX_PER_DAY = 30             # spawns per server per day (India time)
 SPAWN_TIMEOUT = 300          # seconds the "Catch me" button stays (5 min), then the cricketer runs away
 COUNT_EVERY = 3              # at most one message counted every 3 seconds (spam doesn't help)
 HEADER = "**A wild cricketer appeared!**"
 
-# OVR odds. The numbers are WEIGHTS (they add up to ~416, not 100), so the real chance of a band is
-# weight / total. Bands with no spawnable card are skipped and the rest share their chance.
-SPAWN_ODDS: list[tuple[int, int, float]] = [
-    (99, 99, 0.001), (98, 98, 0.015), (97, 97, 0.050), (96, 96, 0.5), (95, 95, 1), (94, 94, 2),
-    (93, 93, 3), (92, 92, 4), (91, 91, 5), (90, 90, 6), (89, 89, 7), (88, 88, 8), (87, 87, 10),
-    (86, 86, 11), (85, 85, 13), (84, 84, 15), (83, 83, 16), (82, 82, 18), (81, 81, 20), (80, 80, 22),
+# OVR odds.
+# 80-99: exact chances in % (as asked).
+SPAWN_EXACT: list[tuple[int, int, float]] = [
+    (99, 99, 0.001), (98, 98, 0.002), (97, 97, 0.005), (96, 96, 0.010), (95, 95, 0.050), (94, 94, 0.090),
+    (93, 93, 0.50), (92, 92, 0.90), (91, 91, 1.0), (90, 90, 1.50), (89, 89, 2.0), (88, 88, 2.50),
+    (87, 87, 3.0), (86, 86, 3.50), (85, 85, 4.0), (84, 84, 4.50), (83, 83, 5.0), (82, 82, 5.50),
+    (81, 81, 6.0), (80, 80, 6.50),
+]
+# 79 and below share whatever is left (100% - the above = 53.442%) in these proportions.
+SPAWN_LOW: list[tuple[int, int, float]] = [
     (79, 79, 24), (78, 78, 26),
     (72, 77, 40),            # 72-77: one random card of these OVRs
     (60, 71, 80),            # 60-71
     (0, 59, 85),             # 50-59 (and anything lower)
 ]
+_left = 100 - sum(w for _, _, w in SPAWN_EXACT)
+_low_total = sum(w for _, _, w in SPAWN_LOW)
+SPAWN_ODDS: list[tuple[int, int, float]] = SPAWN_EXACT + [(lo, hi, w / _low_total * _left) for lo, hi, w in SPAWN_LOW]
+# (if an OVR has no spawnable card, its chance is shared by the others)
 
 _rng = secrets.SystemRandom()
 
@@ -326,6 +335,8 @@ class SpawnCog(commands.Cog):
         cfg = self.configs.get(g.id)
         if not cfg or not cfg["enabled"] or not cfg["channel_id"]:
             return
+        if (g.member_count or 0) < MIN_MEMBERS:          # members left after the channel was set
+            return
         c = self.counters.setdefault(g.id, _Counter())
         now = time.time()
         if now - c.last_count < COUNT_EVERY:
@@ -406,6 +417,12 @@ class SpawnCog(commands.Cog):
     @app_commands.describe(channel="The spawn channel")
     @app_commands.check(_manager_check)
     async def s_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        members = interaction.guild.member_count or 0
+        if members < MIN_MEMBERS:
+            await interaction.response.send_message(
+                f"This server needs at least **{MIN_MEMBERS} members** to set a spawn channel "
+                f"(it has {members}).", ephemeral=True)
+            return
         perms = channel.permissions_for(interaction.guild.me)
         if not (perms.send_messages and perms.attach_files and perms.view_channel):
             await interaction.response.send_message(
