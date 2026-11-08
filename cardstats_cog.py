@@ -31,6 +31,12 @@ THEME_CHOICES = [
     app_commands.Choice(name="Halloween 🎃", value="halloween"),
     app_commands.Choice(name="Diwali", value="diwali"),
     app_commands.Choice(name="End of an Era", value="eoae"),
+    app_commands.Choice(name="Arena (rectangle)", value="arena"),
+    app_commands.Choice(name="Crest (gold shield)", value="crest"),
+    app_commands.Choice(name="Rangoli (Diwali arch)", value="rangoli"),
+    app_commands.Choice(name="Prestige (black marble, ribbons)", value="prestige"),
+    app_commands.Choice(name="Prestige Diwali", value="prestige_diwali"),
+    app_commands.Choice(name="Artwork (your own full design)", value="art"),
 ]
 
 STYLE_CHOICES = [
@@ -210,7 +216,7 @@ class CardStatsCog(commands.Cog):
         if to_save:
             set_extra_stats(player, to_save)
         chosen_style = style.value if style is not None else "style2"
-        if theme is not None and theme.value in ("halloween", "diwali", "eoae"):
+        if theme is not None and theme.value in ("halloween", "diwali", "eoae", "arena", "art", "crest", "rangoli", "prestige", "prestige_diwali"):
             chosen_style = "style2"                      # Halloween / Diwali only exist in Style 2
         set_card_style(player, chosen_style)
 

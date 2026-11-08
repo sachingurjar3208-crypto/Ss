@@ -50,6 +50,41 @@ SHIELD = [
     (188, 1475), (152, 1405),
 ]
 
+# Card outline: "shield" (pointed top/bottom, the original) or "rect" (rounded rectangle).
+# Every Style 2 card (and the EOAE theme) is cut with this shape. Frame-image themes
+# (halloween, diwali) draw their own shield PNG, so they look best with "shield".
+_SHAPE_FILE = Path(__file__).with_name("card_shape.txt")     # saved by /cardshape
+
+
+def _load_shape() -> str:
+    try:
+        v = _SHAPE_FILE.read_text().strip().lower()
+        return v if v in ("shield", "rect") else "shield"
+    except Exception:
+        return "shield"
+
+
+CARD_SHAPE = _load_shape()
+
+
+def set_card_shape(shape: str) -> None:
+    """Switch the outline for every NEW render (existing images need a redraw)."""
+    global CARD_SHAPE
+    shape = "rect" if shape == "rect" else "shield"
+    _SHAPE_FILE.write_text(shape)
+    with _STATIC_LOCK:
+        CARD_SHAPE = shape
+        _STATIC.clear()                     # rebuild the mask / border with the new shape
+    try:
+        import card_eoae
+        card_eoae._STATIC.clear()           # the EOAE frame is built from the same mask
+    except Exception:
+        pass
+
+
+RECT_BOX = (152, 96, 1128, 1648)       # design-space box of the rectangle card
+RECT_RADIUS = 64                       # corner radius (design px)
+
 # Foreground fit box (design space) for the player cutout.
 FG_BOX = {"x": 430, "y": 215, "w": 690, "h": 880}
 
@@ -217,7 +252,11 @@ _RENDER_LOCK = threading.Lock()   # one card at a time keeps RAM low on a small 
 def _build_static() -> dict:
     # Shield mask
     mask = Image.new("L", (CW, CH), 0)
-    ImageDraw.Draw(mask).polygon([_p(x, y) for x, y in SHIELD], fill=255)
+    if CARD_SHAPE == "rect":
+        x0, y0 = _p(RECT_BOX[0], RECT_BOX[1]); x1, y1 = _p(RECT_BOX[2], RECT_BOX[3])
+        ImageDraw.Draw(mask).rounded_rectangle((x0, y0, x1, y1), radius=RECT_RADIUS * S, fill=255)
+    else:
+        ImageDraw.Draw(mask).polygon([_p(x, y) for x, y in SHIELD], fill=255)
 
     # Gradient background: top -> mid (45%) -> bottom, made as 1 px wide column.
     top, mid, bot = (160, 75, 240), (88, 40, 150), (22, 8, 44)
@@ -569,6 +608,37 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
         return buf
 
     # END OF AN ERA: its own full design (card_eoae.py), no frame file needed.
+    # ARTWORK: your own full card picture (set as the foreground) + the stats layer (card_art.py).
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "art":
+        import card_art
+        with _RENDER_LOCK:
+            return card_art.build(card_row, fg_image, role)
+
+    # PRESTIGE: marble + ribbons collector design (card_prestige.py).
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() in ("prestige", "prestige_diwali"):
+        import card_prestige
+        festive = str(ci._col(card_row, "s2_theme", "")).strip().lower() == "prestige_diwali"
+        with _RENDER_LOCK:
+            return card_prestige.build(card_row, fg_image, role, festive=festive)
+
+    # RANGOLI: Diwali arch design (card_rangoli.py).
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "rangoli":
+        import card_rangoli
+        with _RENDER_LOCK:
+            return card_rangoli.build(card_row, fg_image, role)
+
+    # CREST: crest-shaped full design (card_crest.py).
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "crest":
+        import card_crest
+        with _RENDER_LOCK:
+            return card_crest.build(card_row, fg_image, role)
+
+    # ARENA: rectangular full design (card_arena.py).
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "arena":
+        import card_arena
+        with _RENDER_LOCK:
+            return card_arena.build(card_row, fg_image, role)
+
     if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "eoae":
         import card_eoae
         with _RENDER_LOCK:

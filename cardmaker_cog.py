@@ -103,6 +103,12 @@ THEME_CHOICES = [
     app_commands.Choice(name="Signature Edition", value="signature"),
     app_commands.Choice(name="Diwali", value="diwali"),
     app_commands.Choice(name="End of an Era", value="eoae"),
+    app_commands.Choice(name="Arena (rectangle)", value="arena"),
+    app_commands.Choice(name="Crest (gold shield)", value="crest"),
+    app_commands.Choice(name="Rangoli (Diwali arch)", value="rangoli"),
+    app_commands.Choice(name="Prestige (black marble, ribbons)", value="prestige"),
+    app_commands.Choice(name="Prestige Diwali", value="prestige_diwali"),
+    app_commands.Choice(name="Artwork (your own full design)", value="art"),
 ]
 THEME_HELP = ("Card theme. Halloween = background used as frame + orange text. "
               "Signature Edition = autograph card (add the PNG with /signatureadd). "
@@ -120,10 +126,10 @@ def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
             set_style2_options(playername, theme="halloween", bg=frame_bg)
         else:
             set_style2_options(playername, theme="halloween")
-    elif theme.value == "eoae":
-        # END OF AN ERA: years / jersey / ribbon are set with /eoae
+    elif theme.value in ("eoae", "arena", "art", "crest", "rangoli", "prestige", "prestige_diwali"):
+        # END OF AN ERA (years / jersey / ribbon via /eoae) or ARENA (rectangle design)
         set_card_style(playername, "style2")
-        set_style2_options(playername, theme="eoae")
+        set_style2_options(playername, theme=theme.value)
     elif theme.value == "diwali":
         # Diwali uses its built-in frame (diwali_frame.png); the background option is not needed
         set_card_style(playername, "style2")
@@ -1286,6 +1292,43 @@ class CardMakerCog(commands.Cog):
             f"covers it, whatever position/size you set."
         )
 
+    # ── /cardshape: shield or rectangle for every Style 2 card ───────
+    @app_commands.command(name="cardshape", description="Owner: card outline for ALL Style 2 cards (shield or rectangle), then redraw them")
+    @app_commands.describe(shape="Shield (pointed) or Rectangle (rounded corners)")
+    @app_commands.choices(shape=[app_commands.Choice(name="Shield", value="shield"),
+                                 app_commands.Choice(name="Rectangle", value="rect")])
+    @admin_only()
+    async def cardshape(self, interaction: discord.Interaction, shape: app_commands.Choice[str]):
+        if interaction.user.id != OWNER_ID:
+            await interaction.response.send_message("Only the bot owner can change the card shape.", ephemeral=True)
+            return
+        if getattr(self, "_shape_busy", False):
+            await interaction.response.send_message("Cards are already being redrawn. Wait for it to finish.", ephemeral=True)
+            return
+        import card_style2
+        await asyncio.to_thread(card_style2.set_card_shape, shape.value)
+        names = [c["playername"] for c in list_all_cards()
+                 if str(c["card_style"] if "card_style" in c.keys() else "").lower() == "style2"]
+        await interaction.response.send_message(
+            f"Card shape: **{shape.name}**. Redrawing **{len(names)}** Style 2 cards in the background "
+            "(about 1-2 seconds each). I'll post here when it's done.", ephemeral=True)
+        self._shape_busy = True
+
+        async def redraw():
+            ok = 0
+            try:
+                for n in names:
+                    if await _regenerate_silently(n):
+                        ok += 1
+                    await asyncio.sleep(0.2)        # leave room for matches and commands
+            finally:
+                self._shape_busy = False
+            try:
+                await interaction.followup.send(f"Done: {ok}/{len(names)} cards redrawn as **{shape.name}**.", ephemeral=True)
+            except discord.HTTPException:
+                pass
+        asyncio.create_task(redraw())
+
     # ── /eoae (END OF AN ERA card) ──────────────────────────────────
     @app_commands.command(name="eoae", description="Make a card an END OF AN ERA card (retired player): years, jersey, ribbon")
     @app_commands.describe(
@@ -1953,14 +1996,23 @@ class CardMakerCog(commands.Cog):
     # Optional `panel`: also put that stats-panel overlay on every card first.
     @app_commands.command(
         name="refreshcards",
-        description="Redraw ALL cards with the latest design (optionally put one panel on every card)",
+        description="Redraw cards with the latest design (optional: one panel or one THEME for many cards at once)",
     )
     @app_commands.describe(
-        panel="(optional) put this stats panel on EVERY card before redrawing",
+        event="(optional) only the cards of this event. Empty = ALL cards",
+        theme="(optional) put this theme on the cards before redrawing",
+        players="(optional) only these cards, comma separated",
+        panel="(optional) put this stats panel on the cards before redrawing",
+        keep_special="With a theme: keep Signature / End of an Era / Halloween / Diwali / Rangoli cards as they are (default Yes, but No when an event is picked)",
     )
-    @app_commands.autocomplete(panel=panel_autocomplete)
+    @app_commands.choices(theme=THEME_CHOICES, keep_special=[
+        app_commands.Choice(name="Yes", value="yes"), app_commands.Choice(name="No", value="no")])
+    @app_commands.autocomplete(panel=panel_autocomplete, event=event_autocomplete)
     @is_owner()
-    async def refreshcards(self, interaction: discord.Interaction, panel: str | None = None):
+    async def refreshcards(self, interaction: discord.Interaction, event: str | None = None,
+                           theme: app_commands.Choice[str] | None = None, players: str | None = None,
+                           panel: str | None = None,
+                           keep_special: app_commands.Choice[str] | None = None):
         if self._refresh_running:
             await interaction.response.send_message(
                 "⏳ A refresh is already running. Wait for it to finish.", ephemeral=True
@@ -1975,14 +2027,53 @@ class CardMakerCog(commands.Cog):
             return
 
         names = list_playernames()
+        missing = []
+        if players and players.strip():
+            wanted = [p.strip() for p in players.split(",") if p.strip()]
+            names = []
+            for w in wanted:
+                c = get_card(w)
+                if c is None:
+                    missing.append(w)
+                else:
+                    names.append(c["playername"])
+        if event and event.strip():
+            ev = get_event(event)
+            if ev is None:
+                evs = ", ".join(e["eventname"] for e in list_events()) or "(none)"
+                await interaction.response.send_message(f"❌ No event named **{event}**.\nEvents: {evs}", ephemeral=True)
+                return
+            key = ev["event_key"]
+            in_event = [c["playername"] for c in list_all_cards()
+                        if str((c["event_key"] if "event_key" in c.keys() else "") or "").lower() == key]
+            # with `players` too: only the listed cards that are in this event
+            names = [n for n in names if n in set(in_event)] if (players and players.strip()) else in_event
+        skipped = []
+        # picking an event means "all of this event's cards", so its special cards are changed too
+        keep_default = "no" if (event and event.strip()) else "yes"
+        if theme is not None and (keep_special.value if keep_special else keep_default) == "yes":
+            special = {"signature", "eoae", "halloween", "diwali", "rangoli", "prestige_diwali"}
+            keep = []
+            for n in names:
+                c = get_card(n)
+                cur = str((c["s2_theme"] if c is not None and "s2_theme" in c.keys() else "") or "").lower()
+                (skipped if cur in special and cur != theme.value else keep).append(n)
+            names = keep
         if not names:
-            await interaction.response.send_message("❌ There are no cards to refresh.", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ No cards to refresh." + (f" Not found: {', '.join(missing)}" if missing else ""), ephemeral=True)
             return
 
         await interaction.response.defer()
         self._refresh_running = True
         total = len(names)
         note = f" + panel **{panel}** on every card" if panel else ""
+        if theme is not None:
+            note += f" + theme **{theme.name}**"
+        if skipped:
+            note += f" (kept {len(skipped)} special cards as they are)"
+        if missing:
+            note += f" (not found: {', '.join(missing[:10])})"
         progress = await interaction.followup.send(f"⏳ Refreshing **{total}** cards{note}...", wait=True)
         channel = interaction.channel
 
@@ -1993,6 +2084,8 @@ class CardMakerCog(commands.Cog):
                     try:
                         if panel is not None:
                             set_card_panel(name, panel)
+                        if theme is not None:
+                            _apply_theme(name, theme)
                         ok = await _regenerate_silently(name)
                     except Exception:
                         ok = False
