@@ -341,9 +341,6 @@ def calculate_outcome(
     bowler_levels: dict | None = None,
     batsman_levels: dict | None = None,
     intent: str | None = None,
-    line_fit: str | None = None,
-    power: str | None = None,
-    wide_line: bool = False,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -655,38 +652,6 @@ def calculate_outcome(
     _six_cap = BASE_WEIGHTS["6"] * (bat_factor ** 1.25) * _six_cap_mult
     if w["6"] > _six_cap:
         w["6"] = _six_cap
-
-    # ── Line + Power bowling ───────────────────────────────────────────────────
-    # Bowler's line vs the batter's direction: read it = runs, wrong side = edge / miss.
-    LINE_MULT = {
-        "good": {"4": 1.35, "6": 1.30, "W": 0.70},
-        "bad":  {"0": 1.35, "1": 0.85, "4": 0.55, "6": 0.55, "W": 1.80},
-    }
-    for k, m in LINE_MULT.get(line_fit or "", {}).items():
-        if k in w:
-            w[k] *= m
-    POWER_MULT = {
-        "Slow":   {"0": 1.10, "W": 0.90, "6": 1.10},
-        "Medium": {"Wd": 0.6, "NB": 0.5, "W": 0.95},
-        "Fast":   {"W": 1.35, "4": 0.85, "6": 0.85},
-        "MAX":    {"W": 1.25, "4": 1.05},
-    }
-    for k, m in POWER_MULT.get(power or "", {}).items():
-        if k in w:
-            w[k] *= m
-    if power or wide_line:
-        from data import MAX_NO_BALL_CHANCE, WIDE_LEFT_CHANCE
-        if power == "MAX":                    # the red NB zone: ~15% no-balls
-            rest = sum(v for k, v in w.items() if k != "NB")
-            w["NB"] = rest * MAX_NO_BALL_CHANCE / (1 - MAX_NO_BALL_CHANCE)
-        if wide_line:
-            if shot_internal == "Defend":     # left alone outside the line: often called wide
-                rest = sum(v for k, v in w.items() if k != "Wd")
-                w["Wd"] = rest * WIDE_LEFT_CHANCE / (1 - WIDE_LEFT_CHANCE)
-            else:                             # chasing a wide one: a bit more edges
-                w["Wd"] = w.get("Wd", 0) * 1.5
-                if "W" in w:
-                    w["W"] *= 1.15
 
     # Split no-balls deterministically into a 70:30 NB vs NB+1 ratio.
     # ~30% of no-balls also score a single off the free hit (NB+1), the rest

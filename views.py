@@ -312,7 +312,6 @@ from data import (
     is_two_stage, get_two_stage_buttons, get_spin_buttons, button_label,
     BATTING_BUTTONS, SHOT_BUTTON_MAP, bat_label, delivery_label,
     BAT_DIRECTIONS, BAT_INTENTS, BAT_INTENT_LABEL, intent_to_shot,
-    BOWL_LINES, BOWL_LINE_LABEL, BOWL_POWERS, BOWL_POWER_LABEL, WIDE_LINES, line_fit, line_power_delivery,
     get_delivery_speed, resolve_delivery, BOWLING_TYPE_ICON,
     DELIVERY_BUTTON_MAP,
     FAST_SHOT_GUIDE, SPIN_SHOT_GUIDE,
@@ -653,9 +652,6 @@ async def _auto_fast_bowl(view, make):
 
 
 async def _auto_spin_bowl(view, make):
-    if hasattr(view, "_stage1_btns"):          # Line + Power (same as pace)
-        await _auto_fast_bowl(view, make)
-        return
     btns = [c for c in view.children if isinstance(c, ui.Button) and not c.disabled]
     if btns:
         await random.choice(btns).callback(make())
@@ -1394,9 +1390,6 @@ async def _process_delivery(
 
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
     _bat_intent       = game.__dict__.pop("pending_intent", None)   # Push / Hit / Loft (Direction + Intent buttons)
-    _bowl_line        = game.__dict__.pop("pending_line", None)     # Line + Power bowling
-    _bowl_power       = game.__dict__.pop("pending_power", None)
-    _bat_direction    = game.__dict__.pop("pending_direction", None)
     delivery_button   = game.pending_delivery
     delivery_internal = game.pending_delivery_internal
     bowler            = game.current_bowler
@@ -1486,9 +1479,6 @@ async def _process_delivery(
             bowler_levels=player_attr_levels(bowler),
             batsman_levels=player_attr_levels(striker),
             intent=_bat_intent,
-            line_fit=line_fit(_bowl_line, _bat_direction),
-            power=_bowl_power,
-            wide_line=_bowl_line in WIDE_LINES,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1524,10 +1514,6 @@ async def _process_delivery(
     )
     if commentary_suffix:
         commentary = _comm.add_lines(commentary, commentary_suffix)
-    if _bowl_line:   # reveal the bowler's hidden line + power, and whether the batter read it
-        _fit = line_fit(_bowl_line, _bat_direction)
-        _fit_txt = {"good": "  ·  line read!", "bad": "  ·  wrong side!"}.get(_fit or "", "")
-        commentary = _comm.add_lines(commentary, f"{_bowl_line} line  ·  {_bowl_power}{_fit_txt}")
     _anim = _comm.pop_animation(game)   # rare suspense frames for this ball ([] usually)
 
     # BUG FIX #8: bowler_stats[bname] is initialised inside BowlerSelectView
@@ -2453,123 +2439,197 @@ _MEDIUM_STAGE2_STYLES = {
 }
 
 
-class _LinePowerBowling:
-    """Bowling = 2 rows on one message (all bowler types):
-       row 1  LINE   Wide Off / Off / Stumps / Pads / Wide Leg   (picked first, then it greys out)
-       row 2  POWER  Slow / Medium / Fast / MAX (NB risk)        (opens after the line)
-    The pair becomes one of the existing deliveries (data.line_power_delivery), so speeds,
-    the shot guide and the matchups keep working. The LINE is hidden from the batter and is
-    checked against his direction after the ball (logic: line_fit)."""
+class FastBowlStage1View(_TimeoutMixin, ui.View):
+    """Fast bowling — ONE message, two rows.
 
-    _POWER_STYLE = {
-        "Slow": discord.ButtonStyle.primary, "Medium": discord.ButtonStyle.success,
-        "Fast": discord.ButtonStyle.primary, "MAX": discord.ButtonStyle.danger,
-    }
+    Row 0 (swing/speed) is active first; row 1 (line/length) is greyed out.
+    Once row 0 is picked, row 0 turns grey/disabled and row 1 becomes active.
+    Picking row 1 triggers the actual delivery.
+    """
 
-    def _build_line_power(self, game: GameState, is_free_hit: bool):
-        self.game = game
-        self.is_free_hit = is_free_hit
-        self.btype = (game.current_bowler or {}).get("bowling_type", "Fast")
-        self.line: str | None = None
+    def __init__(self, game: GameState, is_free_hit: bool = False):
+        super().__init__(timeout=VIEW_TIMEOUT)
+        self.game          = game
+        self.is_free_hit   = is_free_hit
         self.stage1_choice = ""
-        self._stage1_btns: list[ui.Button] = []     # lines  (autoplay picks one of these first)
-        self._stage2_btns: list[ui.Button] = []     # powers (then one of these)
-        for ln in BOWL_LINES:
-            b = ui.Button(label=BOWL_LINE_LABEL.get(ln, ln), style=discord.ButtonStyle.secondary,
-                          row=0, custom_id=f"bowlline_{ln}")
-            b.callback = self._make_line(ln)
-            self._stage1_btns.append(b)
-            self.add_item(b)
-        for pw in BOWL_POWERS:
-            b = ui.Button(label=BOWL_POWER_LABEL.get(pw, pw), style=discord.ButtonStyle.secondary,
-                          row=1, custom_id=f"bowlpow_{pw}", disabled=True)
-            b.callback = self._make_power(pw)
-            self._stage2_btns.append(b)
-            self.add_item(b)
+        self._stage1_btns: list[ui.Button] = []
+        self._stage2_btns: list[ui.Button] = []
+        self._stage2_keys: list[str] = []   # original (logic) names, same order as _stage2_btns
 
-    async def _ok_bowler(self, interaction) -> bool:
-        if interaction.user.id != self.game.bowling_user_id:
-            await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
-            return False
-        return True
+        # Fast bowler and Medium pacer share this view; only the buttons / colours differ.
+        self.btype = (game.current_bowler or {}).get("bowling_type", "Fast")
+        stage1_labels, stage2_labels = get_two_stage_buttons(self.btype)
+        if self.btype == "Medium Pacer":
+            self._s1_styles, self._s2_styles = _MEDIUM_STAGE1_STYLES, _MEDIUM_STAGE2_STYLES
+        else:
+            self._s1_styles, self._s2_styles = _FAST_STAGE1_STYLES, _FAST_STAGE2_STYLES
 
-    def _make_line(self, ln: str):
+        for label in stage1_labels:
+            style = self._s1_styles.get(label, discord.ButtonStyle.secondary)
+            btn   = ui.Button(label=button_label(self.btype, label), style=style, row=0)
+            btn.callback = self._make_stage1_callback(label)
+            self._stage1_btns.append(btn)
+            self.add_item(btn)
+
+        for label in stage2_labels:
+            # Locked + grey until step 1 is chosen
+            btn = ui.Button(label=button_label(self.btype, label), style=discord.ButtonStyle.secondary, row=1, disabled=True)
+            btn.callback = self._make_stage2_callback(label)
+            self._stage2_btns.append(btn)
+            self._stage2_keys.append(label)
+            self.add_item(btn)
+
+    def _make_stage1_callback(self, stage1_label: str):
         async def callback(interaction: discord.Interaction):
-            if not await self._ok_bowler(interaction):
+            if interaction.user.id != self.game.bowling_user_id:
+                await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
                 return
-            if self.line is not None:
-                await interaction.response.defer()
+            if self.stage1_choice:  # already picked — ignore double taps
+                try:
+                    await interaction.response.defer()
+                except Exception:
+                    pass
                 return
-            self.line = ln
-            self.stage1_choice = ln
-            for b in self._stage1_btns:      # top row: grey + locked, the chosen line stays green
+            self.stage1_choice = stage1_label
+
+            # Row 0 -> grey + disabled
+            for b in self._stage1_btns:
                 b.disabled = True
-                b.style = discord.ButtonStyle.success if b.custom_id == f"bowlline_{ln}" else discord.ButtonStyle.secondary
-            for b, pw in zip(self._stage2_btns, BOWL_POWERS):
-                b.disabled = False
-                b.style = self._POWER_STYLE.get(pw, discord.ButtonStyle.secondary)
+                b.style    = discord.ButtonStyle.secondary
+            # Row 1 -> unlock with the normal colours
+            # (a limited ball like Toe Crusher stays grey once used 2 times this over)
+            for b, key in zip(self._stage2_btns, self._stage2_keys):
+                if self.game.special_ball_left(key):
+                    b.disabled = False
+                    b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
+                else:
+                    b.disabled = True
+                    b.style    = discord.ButtonStyle.secondary
+
             try:
+                # view only — keeps the existing message text/embed as it is
                 await interaction.response.edit_message(view=self)
             except Exception as e:
-                print(f"[bowl] line edit failed ({type(e).__name__}: {e})")
+                print(f"[fast bowl] stage1 edit failed ({type(e).__name__}: {e})")
         return callback
 
-    def _make_power(self, pw: str):
+    def _make_stage2_callback(self, delivery_button: str):
         async def callback(interaction: discord.Interaction):
-            if not await self._ok_bowler(interaction):
+            if interaction.user.id != self.game.bowling_user_id:
+                await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
                 return
-            if self.line is None:
-                await interaction.response.send_message("Pick a line first (top row).", ephemeral=True)
+            if not self.stage1_choice:
+                await interaction.response.send_message("Pehle swing/speed choose karo.", ephemeral=True)
                 return
-            if getattr(self, "_bowled", False):
-                await interaction.response.defer()
+            if not self.game.special_ball_left(delivery_button):
+                await interaction.response.send_message(
+                    f"Is over mein **{button_label(self.btype, delivery_button)}** ki limit poori ho gayi.",
+                    ephemeral=True,
+                )
                 return
-            self._bowled = True
             self.stop()
-            game, btype, line = self.game, self.btype, self.line
-            stage1, delivery_button = line_power_delivery(btype, line, pw, left=game.special_ball_left)
-            if btype in ("Fast", "Medium Pacer"):
-                delivery_internal = DELIVERY_BUTTON_MAP.get(delivery_button, delivery_button)
-                label = delivery_label(btype, stage1, delivery_button)
-            else:
-                delivery_internal = resolve_delivery(delivery_button, btype)
-                label = button_label(btype, delivery_button)
-            game.pending_delivery          = delivery_button
-            game.pending_delivery_internal = delivery_internal
-            game.__dict__["pending_line"]  = line
-            game.__dict__["pending_power"] = pw
-            game.phase = "bat_select"
-            speed = random.uniform(*get_delivery_speed(delivery_button, btype))
-            if pw == "MAX":
-                speed += 4
-            game.pending_delivery_speed = speed
-            game.pending_stage1_choice  = stage1
-            channel = _ch(interaction, game)
-            batting_view = BattingView(game, stage1_choice=stage1, is_free_hit=self.is_free_hit)
+            delivery_internal = DELIVERY_BUTTON_MAP.get(delivery_button, delivery_button)
+            self.game.pending_delivery          = delivery_button
+            self.game.pending_delivery_internal = delivery_internal
+            self.game.phase = "bat_select"
+
+            speed    = random.uniform(*get_delivery_speed(delivery_button, self.btype))
+            combined = delivery_label(self.btype, self.stage1_choice, delivery_button)
+            # Cached so a failed send can be retried (or _resume_prompt used)
+            # with the exact same speed/label instead of losing it.
+            self.game.pending_delivery_speed  = speed
+            self.game.pending_stage1_choice   = self.stage1_choice
+
+            channel = _ch(interaction, self.game)
+            batting_view = BattingView(self.game, stage1_choice=self.stage1_choice, is_free_hit=self.is_free_hit)
             batting_view._channel = channel
             await _post_delivery_prompt(
-                interaction, channel, game,
-                content=_delivery_announcement(f"{pw} {label}", speed, game.batting_user, free_hit=self.is_free_hit),
+                interaction, channel, self.game,
+                content=_delivery_announcement(combined, speed, self.game.batting_user, free_hit=self.is_free_hit),
                 view=batting_view,
-                allowed_ids=_match_ids(game),
+                allowed_ids=_match_ids(self.game),
             )
         return callback
 
 
-class FastBowlStage1View(_LinePowerBowling, _TimeoutMixin, ui.View):
-    """Pace bowling (Fast / Medium Pacer): Line + Power."""
+# ─────────────────────────────────────────────────────────────────────────────
+# Spin bowling — single step
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SPIN_STYLES = {
+    "Offspin":  discord.ButtonStyle.primary,
+    "Carrom":   discord.ButtonStyle.danger,
+    "Arm Ball": discord.ButtonStyle.success,
+    "Doosra":   discord.ButtonStyle.danger,
+    "Topspin":  discord.ButtonStyle.success,
+    "Legspin":  discord.ButtonStyle.primary,
+    "Googly":   discord.ButtonStyle.danger,
+    "Flipper":  discord.ButtonStyle.success,
+    "Drifter":  discord.ButtonStyle.danger,
+    "Slider":   discord.ButtonStyle.success,
+}
+
+# Orthodox spinner — own colour set
+_ORTHODOX_STYLES = {
+    "Arm Ball":    discord.ButtonStyle.primary,
+    "Top Spinner": discord.ButtonStyle.danger,
+    "Doosra":      discord.ButtonStyle.success,
+    "Carrom":      discord.ButtonStyle.primary,
+    "Slider":      discord.ButtonStyle.success,
+}
+
+
+class BowlingView(_TimeoutMixin, ui.View):
+    """Single-step bowling view for Off Spin and Leg Spin."""
 
     def __init__(self, game: GameState, is_free_hit: bool = False):
         super().__init__(timeout=VIEW_TIMEOUT)
-        self._build_line_power(game, is_free_hit)
+        self.game        = game
+        self.is_free_hit = is_free_hit
+        self._add_buttons()
 
+    def _add_buttons(self):
+        btype   = self.game.current_bowler.get("bowling_type", "Off Spin") if self.game.current_bowler else "Off Spin"
+        buttons = get_spin_buttons(btype)
+        styles  = _ORTHODOX_STYLES if btype == "Orthodox" else _SPIN_STYLES
+        for i, label in enumerate(buttons):
+            style = styles.get(label, discord.ButtonStyle.secondary)
+            left  = self.game.special_ball_left(label)   # Mystery Turn: max 2 per over
+            btn   = ui.Button(label=button_label(btype, label),
+                              style=style if left else discord.ButtonStyle.secondary,
+                              row=i // 3, disabled=not left)
+            btn.callback = self._make_callback(label)
+            self.add_item(btn)
 
-class BowlingView(_LinePowerBowling, _TimeoutMixin, ui.View):
-    """Spin bowling (Off Spin / Leg Spin / Orthodox): Line + Power."""
+    def _make_callback(self, delivery_button: str):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.game.bowling_user_id:
+                await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
+                return
+            if not self.game.special_ball_left(delivery_button):
+                await interaction.response.send_message("Is over mein is ball ki limit poori ho gayi.", ephemeral=True)
+                return
+            self.stop()
+            btype             = self.game.current_bowler.get("bowling_type", "Off Spin")
+            delivery_internal = resolve_delivery(delivery_button, btype)
+            self.game.pending_delivery          = delivery_button
+            self.game.pending_delivery_internal = delivery_internal
+            self.game.phase = "bat_select"
 
-    def __init__(self, game: GameState, is_free_hit: bool = False):
-        super().__init__(timeout=VIEW_TIMEOUT)
-        self._build_line_power(game, is_free_hit)
+            speed = random.uniform(*get_delivery_speed(delivery_button, btype))
+            self.game.pending_delivery_speed = speed
+            self.game.pending_stage1_choice  = ""
+
+            channel = _ch(interaction, self.game)
+            batting_view = BattingView(self.game, is_free_hit=self.is_free_hit)
+            batting_view._channel = channel
+            await _post_delivery_prompt(
+                interaction, channel, self.game,
+                content=_delivery_announcement(button_label(btype, delivery_button), speed, self.game.batting_user, free_hit=self.is_free_hit),
+                view=batting_view,
+                allowed_ids=_match_ids(self.game),
+            )
+        return callback
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2670,7 +2730,6 @@ class BattingView(_TimeoutMixin, ui.View):
         self._resolved = True
         shot = self._shot_for(direction, intent)
         self.game.__dict__["pending_intent"] = intent if intent in ("Push", "Hit", "Loft") else None
-        self.game.__dict__["pending_direction"] = None if intent == "Block" else direction
         self.stop()
         await _process_delivery(
             interaction, self.game, shot,
