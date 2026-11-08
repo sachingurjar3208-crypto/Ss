@@ -11,3 +11,9 @@ foregrounds/
 generated/
 panels/
 playstyle_logos/
+
+# made by the bot on the VPS (never push these)
+country_logos/
+playstyle_badges/
+signatures/
+spawn_cache/
