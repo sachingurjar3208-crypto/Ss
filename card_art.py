@@ -81,149 +81,80 @@ def _glass(canvas, box, radius, tint=(8, 12, 28, 150)):
     ImageDraw.Draw(canvas).rounded_rectangle(box, radius, outline=(255, 255, 255, 70), width=2 * S)
 
 
-# OVR tier colours: 90+ gold, 80-89 silver, below 80 bronze
-TIERS = [(90, (240, 202, 110), (255, 232, 160)),
-         (80, (196, 204, 220), (236, 242, 252)),
-         (0, (200, 132, 78), (240, 186, 140))]
-ROLE_LONG = {"BAT": "BATTER", "BOWL": "BOWLER", "AR": "ALL-ROUNDER", "WK": "WICKETKEEPER"}
-
-
-def _tier(ovr: int):
-    for lo, col, hi in TIERS:
-        if ovr >= lo:
-            return col, hi
-    return TIERS[-1][1], TIERS[-1][2]
-
-
-def _country_code(country: str) -> str:
-    """Short code when there is no flag: 'Papua New Guinea' -> PNG, 'India' -> IND."""
-    words = [w for w in str(country or "").replace("-", " ").split() if w]
-    if not words:
-        return ""
-    if len(words) > 1:
-        return "".join(w[0] for w in words[:3]).upper()
-    return words[0][:3].upper()
-
-
 def build(card_row, fg_image, role: str) -> io.BytesIO:
-    """Full artwork + hanging tag + frosted glass panel (the Artwork look)."""
+    """Frosted glass panel + hanging tag (the Artwork look)."""
     canvas = _artwork(card_row, fg_image)
-    try:
-        ovr = int(ci._col(card_row, "ovr", 0) or 0)
-    except (TypeError, ValueError):
-        ovr = 0
-    acc, acc_hi = _tier(ovr)
 
-    # soft vignette (edges) + dark fade at the bottom so the panel reads on any artwork
-    vg = Image.new("L", (CW, CH), 0)
-    ImageDraw.Draw(vg).rounded_rectangle(_q(-40, -40, W + 40, H + 40), 120 * S, outline=255, width=110 * S)
-    dark = Image.new("RGBA", (CW, CH), (0, 0, 0, 255))
-    dark.putalpha(vg.filter(ImageFilter.GaussianBlur(70 * S)).point(lambda v: int(v * 0.55)))
-    canvas.alpha_composite(dark)
+    # soft dark fade at the bottom so the glass panel reads on any artwork
     fade = Image.new("L", (1, CH), 0)
-    for y in range(int(CH * 0.58), CH):
-        fade.putpixel((0, y), int(185 * max(0.0, (y - CH * 0.58) / (CH * 0.42)) ** 1.3))
+    for y in range(int(CH * 0.62), CH):
+        fade.putpixel((0, y), int(150 * max(0.0, (y - CH * 0.62) / (CH * 0.38)) ** 1.4))
     dark = Image.new("RGBA", (CW, CH), (0, 0, 0, 255))
     dark.putalpha(fade.resize((CW, CH)))
     canvas.alpha_composite(dark)
 
-    # ── bottom glass panel: name, role line, 6 stats ───────────────────────────
-    px0, py0, px1, py1 = 40, 1060, W - 40, H - 40
-    _glass(canvas, _q(px0, py0, px1, py1), 34 * S, tint=(6, 10, 24, 165))
-    # diagonal sheen on the glass
-    sheen = Image.new("L", canvas.size, 0)
-    ImageDraw.Draw(sheen).polygon([_q(px0 + 120, py0), _q(px0 + 330, py0), _q(px0 + 150, py1), _q(px0 - 60, py1)], fill=26)
-    pm = Image.new("L", canvas.size, 0)
-    ImageDraw.Draw(pm).rounded_rectangle(_q(px0, py0, px1, py1), 34 * S, fill=255)
-    sh = Image.new("RGBA", canvas.size, (255, 255, 255, 255))
-    sh.putalpha(ImageChops.multiply(sheen.filter(ImageFilter.GaussianBlur(20 * S)), pm))
-    canvas.alpha_composite(sh)
-    # coloured light along the top edge of the panel
-    glow = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    ImageDraw.Draw(glow).line((*_q(px0 + 70, py0), *_q(px1 - 70, py0)), fill=acc + (230,), width=6 * S)
-    canvas.alpha_composite(glow.filter(ImageFilter.GaussianBlur(8 * S)))
+    # ── bottom glass panel: name + 6 stats ─────────────────────────────────────
+    px0, py0, px1, py1 = 40, 1088, W - 40, H - 40
+    _glass(canvas, _q(px0, py0, px1, py1), 34 * S)
     d = ImageDraw.Draw(canvas)
-    d.line((*_q(px0 + 90, py0), *_q(px1 - 90, py0)), fill=acc_hi, width=2 * S)
-
     name = str(ci._col(card_row, "displayname", "") or ci._col(card_row, "playername", "")).upper()
-    f = _fit(d, name, "display_bold.ttf", 90 * S, (px1 - px0 - 80) * S)
-    d.text(_q((px0 + px1) / 2, py0 + 70), name, font=f, fill=IVORY, anchor="mm")
-    hand = str(ci._col(card_row, "batting_hand", "") or "").strip().upper()[:1]
-    sub = ROLE_LONG.get(role, role)
-    if hand in ("L", "R"):
-        sub += "  ·  " + ("LEFT" if hand == "L" else "RIGHT") + " HAND BAT"
-    d.text(_q((px0 + px1) / 2, py0 + 128), " ".join(sub).replace("·", "·"), font=_font("label.ttf", 21 * S),
-           fill=acc_hi, anchor="mm")
-    d.line((*_q(px0 + 60, py0 + 160), *_q(px1 - 60, py0 + 160)), fill=(255, 255, 255, 60), width=S)
+    f = _fit(d, name, "display_bold.ttf", 86 * S, (px1 - px0 - 80) * S)
+    d.text(_q((px0 + px1) / 2, py0 + 66), name, font=f, fill=IVORY, anchor="mm")
+    d.line((*_q(px0 + 60, py0 + 118), *_q(px1 - 60, py0 + 118)), fill=GOLD + (220,), width=2 * S)
     rows = card_stat_rows(card_row)[:6]
     colw = (px1 - px0 - 60) / 3
     for k, (lab, val) in enumerate(rows):
         cx = px0 + 30 + colw * (k % 3) + colw / 2
-        top = py0 + 176 + (k // 3) * 112
-        d.text(_q(cx, top + 62), str(val), font=_font("display_bold.ttf", 70 * S), fill=acc_hi, anchor="ms")
-        d.text(_q(cx, top + 92), " ".join(str(lab).upper()[:3]), font=_font("label.ttf", 20 * S), fill=DIM, anchor="ms")
+        cy = py0 + 178 + (k // 3) * 110
+        d.text(_q(cx - 8, cy), str(val), font=_font("display_bold.ttf", 66 * S), fill=GOLD_HI, anchor="rm")
+        d.text(_q(cx + 4, cy + 4), str(lab).upper()[:4], font=_font("label.ttf", 30 * S), fill=DIM, anchor="lm")
     for i in (1, 2):                                    # thin column dividers
         x = px0 + 30 + colw * i
-        d.line((*_q(x, py0 + 186), *_q(x, py1 - 34)), fill=(255, 255, 255, 45), width=S)
-    d.line((*_q(px0 + 80, py0 + 288), *_q(px1 - 80, py0 + 288)), fill=(255, 255, 255, 35), width=S)
+        d.line((*_q(x, py0 + 140), *_q(x, py1 - 30)), fill=(255, 255, 255, 50), width=S)
 
-    # double border in the tier colour (drawn before the tag, so the tag hangs over it)
-    d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle((*_q(10, 10), *_q(W - 10, H - 10)), (RADIUS - 6) * S, outline=acc + (230,), width=3 * S)
-    d.rounded_rectangle((*_q(20, 20), *_q(W - 20, H - 20)), (RADIUS - 14) * S, outline=(255, 255, 255, 60), width=S)
-
-    # ── top-left hanging tag: OVR, role, flag (or country code), playstyles ──────
-    tx0, tx1, ty1 = 56, 228, 392
-    tag = [_q(tx0, 0), _q(tx1, 0), _q(tx1, ty1), _q((tx0 + tx1) / 2, ty1 + 40), _q(tx0, ty1)]
-    tag_box = (*_q(tx0, 0), *_q(tx1, ty1 + 40))
+    # ── top-left hanging tag: OVR, role, flag ─────────────────────────────────
+    tx0, tx1, ty1 = 60, 220, 360
+    tag = [_q(tx0, 0), _q(tx1, 0), _q(tx1, ty1), _q((tx0 + tx1) / 2, ty1 + 34), _q(tx0, ty1)]
+    tag_box = (*_q(tx0, 0), *_q(tx1, ty1 + 34))
     region = canvas.crop(tag_box).filter(ImageFilter.GaussianBlur(16 * S))
-    region.alpha_composite(Image.new("RGBA", region.size, (6, 10, 24, 185)))
+    region.alpha_composite(Image.new("RGBA", region.size, (8, 12, 28, 165)))
     m = Image.new("L", canvas.size, 0)
     ImageDraw.Draw(m).polygon(tag, fill=255)
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     layer.paste(region, tag_box[:2])
     layer.putalpha(ImageChops.multiply(layer.getchannel("A"), m))
-    tsh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    tsh.putalpha(m.filter(ImageFilter.GaussianBlur(12 * S)).point(lambda v: int(v * 0.5)))
-    canvas.alpha_composite(tsh, (0, 6 * S))
     canvas.alpha_composite(layer)
     d = ImageDraw.Draw(canvas)
-    d.line(tag[1:] + [tag[0]], fill=acc, width=4 * S)
-    inner = [_q(tx0 + 12, 0), _q(tx1 - 12, 0), _q(tx1 - 12, ty1 - 8), _q((tx0 + tx1) / 2, ty1 + 24), _q(tx0 + 12, ty1 - 8)]
-    d.line(inner[1:] + [inner[0]], fill=acc + (90,), width=S)
+    d.line(tag[1:] + [tag[0]], fill=GOLD, width=3 * S)
     cx = (tx0 + tx1) / 2
-    d.text(_q(cx, 104), str(ci._col(card_row, "ovr", "")), font=_font("display_bold.ttf", 124 * S), fill=acc_hi, anchor="mm")
-    d.text(_q(cx, 186), ROLE_WORD.get(role, role), font=_font("display_bold.ttf", 50 * S), fill=IVORY, anchor="mm")
-    d.line((*_q(tx0 + 30, 222), *_q(tx1 - 30, 222)), fill=acc + (200,), width=2 * S)
+    d.text(_q(cx, 98), str(ci._col(card_row, "ovr", "")), font=_font("display_bold.ttf", 118 * S), fill=GOLD_HI, anchor="mm")
+    d.text(_q(cx, 178), ROLE_WORD.get(role, role), font=_font("display_bold.ttf", 48 * S), fill=IVORY, anchor="mm")
+    d.line((*_q(tx0 + 30, 214), *_q(tx1 - 30, 214)), fill=GOLD + (200,), width=2 * S)
     flag_done = False
     try:
         flag = ci._load_country_logo(ci._col(card_row, "country"))
         if flag is not None:
-            ci._draw_logo(canvas, flag, _q(cx, 280), 0, 0, 100, box=104 * S)
+            ci._draw_logo(canvas, flag, _q(cx, 272), 0, 0, 100, box=104 * S)
             flag_done = True
     except Exception:
         flag_done = False
     d = ImageDraw.Draw(canvas)
     if not flag_done:
-        code = _country_code(ci._col(card_row, "country", ""))
-        d.text(_q(cx, 280), code, font=_fit(d, code, "display_bold.ttf", 54 * S, (tx1 - tx0 - 30) * S),
-               fill=IVORY, anchor="mm")
-    d.line((*_q(tx0 + 30, 336), *_q(tx1 - 30, 336)), fill=acc + (200,), width=2 * S)
-    y = 492
-    for slot in (1, 2):                                 # playstyle logos under the tag, on a dark disc
+        c = str(ci._col(card_row, "country", "") or "").upper()[:10]
+        d.text(_q(cx, 272), c, font=_fit(d, c, "label.ttf", 28 * S, (tx1 - tx0 - 24) * S), fill=IVORY, anchor="mm")
+    y = 440
+    for slot in (1, 2):                                 # playstyle logos under the tag
         try:
             logo = ci._load_playstyle_badge(card_row, slot)
             if logo is not None:
-                disc = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-                ImageDraw.Draw(disc).ellipse(_q(cx - 52, y - 52) + _q(cx + 52, y + 52), fill=(6, 10, 24, 150),
-                                             outline=acc + (160,), width=2 * S)
-                canvas.alpha_composite(disc)
-                ci._draw_logo(canvas, logo, _q(cx, y), 0, 0, 100, box=80 * S)
-                y += 118
+                ci._draw_logo(canvas, logo, _q(cx, y), 0, 0, 100, box=86 * S)
+                y += 100
         except Exception:
             pass
 
-    # ── rounded card ───────────────────────────────────────────────────────────
+    # ── rounded card + thin light border ──────────────────────────────────────
+    d = ImageDraw.Draw(canvas)
+    d.rounded_rectangle((*_q(16, 16), *_q(W - 16, H - 16)), (RADIUS - 10) * S, outline=(255, 255, 255, 90), width=2 * S)
     mask = Image.new("L", canvas.size, 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, CW - 1, CH - 1), RADIUS * S, fill=255)
     canvas.putalpha(ImageChops.multiply(canvas.getchannel("A"), mask))
