@@ -511,6 +511,66 @@ def translate_shot(height: str, direction_key: str, delivery_internal: str) -> s
     return "Defend"  # unreachable with a valid key — safe fallback
 
 
+# ── Line + Power bowling (the bowling buttons) ──────────────────────────────
+# Row 1: where the ball goes (line).  Row 2: how hard (power).  The pair becomes one of the
+# existing deliveries (so speeds, the shot guide and matchups keep working); the line is
+# also matched against the batter's direction in logic.calculate_outcome.
+BOWL_LINES = ["Wide Off", "Off", "Stumps", "Pads", "Wide Leg"]
+BOWL_LINE_LABEL = {"Wide Off": "\u2b05 Wide Off", "Off": "\u2196 Off", "Stumps": "\u2b06 Stumps",
+                   "Pads": "\u2197 Pads", "Wide Leg": "\u27a1 Wide Leg"}
+BOWL_POWERS = ["Slow", "Medium", "Fast", "MAX"]
+BOWL_POWER_LABEL = {"Slow": "Slow", "Medium": "Medium", "Fast": "Fast", "MAX": "MAX (NB risk)"}
+WIDE_LINES = ("Wide Off", "Wide Leg")
+MAX_NO_BALL_CHANCE = 0.15          # MAX power: this share of balls are no-balls (free hit next)
+WIDE_LEFT_CHANCE = 0.35            # wide line + the batter blocks: this share become wides
+
+# line vs the batter's direction: good = he read it (more runs), bad = wrong side (edge / miss)
+LINE_FIT = {
+    "Wide Off": {"Off Side": "good", "Behind": "ok", "Straight": "bad", "Leg Side": "bad"},
+    "Off":      {"Off Side": "good", "Straight": "ok", "Behind": "ok", "Leg Side": "bad"},
+    "Stumps":   {"Straight": "good", "Off Side": "ok", "Leg Side": "ok", "Behind": "bad"},
+    "Pads":     {"Leg Side": "good", "Behind": "good", "Straight": "ok", "Off Side": "bad"},
+    "Wide Leg": {"Behind": "good", "Leg Side": "ok", "Straight": "bad", "Off Side": "bad"},
+}
+
+
+def line_fit(line: str | None, direction: str | None) -> str | None:
+    if not line or not direction:
+        return None
+    return LINE_FIT.get(line, {}).get(direction)
+
+
+def line_power_delivery(bowling_type: str, line: str, power: str, left=lambda k: True) -> tuple[str, str]:
+    """(line, power) -> (stage1 choice, delivery button) of the existing delivery system.
+    `left(key)` = is this limited ball (Yorker / Googly) still allowed this over."""
+    off_side = line in ("Wide Off", "Off")
+    full_line = line in ("Stumps", "Pads")
+    if bowling_type in ("Fast", "Medium Pacer"):
+        med = bowling_type == "Medium Pacer"
+        good = "Good Length" if med else "Good"
+        swing = "Outswing" if off_side else "Inswing"
+        if power == "Slow":
+            return ("Slower" if med else "Slow"), good
+        if power == "Medium":
+            return swing, good
+        if power == "Fast":
+            return ("Cutter" if med else "Fast"), "Full"
+        # MAX: toe-crusher at the stumps / pads, a bouncer otherwise
+        if full_line and left("Yorker"):
+            return (swing if med else "Fast"), "Yorker"
+        return (swing if med else "Fast"), "Bouncer"
+    if bowling_type == "Off Spin":
+        table = {"Slow": "Offspin", "Medium": "Topspin", "Fast": "Arm Ball",
+                 "MAX": "Doosra" if (off_side or line == "Stumps") else "Carrom"}
+    elif bowling_type == "Orthodox":
+        table = {"Slow": "Top Spinner", "Medium": "Slider", "Fast": "Arm Ball",
+                 "MAX": "Doosra" if (off_side or line == "Stumps") else "Carrom"}
+    else:   # Leg Spin
+        table = {"Slow": "Drifter", "Medium": "Legspin", "Fast": "Flipper",
+                 "MAX": "Googly" if left("Googly") else "Slider"}
+    return "", table.get(power, table["Medium"])
+
+
 # ── Direction + Intent batting (the batting buttons) ────────────────────────
 # Row 1: where to hit.  Row 2: how hard.  The pair becomes one of BATTING_BUTTONS,
 # so the shot guide, matchups and commentary keep working unchanged.
