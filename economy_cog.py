@@ -976,10 +976,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             if res.get("empty"):
                 await ctx.send("🎴 No player cards are available to claim yet. Try again later.")
                 return
-            msg = f"⏳ Your next card is ready in **{fmt_wait(res['wait'])}**."
-            if not premium:
-                msg += "\n💎 Premium members can claim every **35 min**."
-            await ctx.send(msg)
+            await ctx.send(f"⏳ Your next card is ready in **{fmt_wait(res['wait'])}**.")
             return
 
         card = card_db.get_card(res["card"])
