@@ -19,7 +19,10 @@ import math
 from functools import lru_cache
 from pathlib import Path
 
-import numpy as np
+try:                      # numpy makes the nicest marble; without it a simpler PIL marble is used
+    import numpy as np
+except Exception:         # pragma: no cover
+    np = None
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 import card_image as ci
@@ -58,9 +61,34 @@ def _noise(shape, cell, rng):
     return np.asarray(img, dtype=np.float32)[cell:cell + h, cell:cell + w] / 255.0
 
 
+def _marble_pil(seed: int, festive: bool) -> Image.Image:
+    """Same idea as the numpy marble, only with PIL (used when numpy isn't installed)."""
+    import random
+    rnd = random.Random(seed)
+    w, h = CW // 2, CH // 2
+
+    def noise(cell):
+        gw, gh = w // cell + 3, h // cell + 3
+        g = Image.frombytes("L", (gw, gh), bytes(rnd.getrandbits(8) for _ in range(gw * gh)))
+        return g.resize((w + 2 * cell, h + 2 * cell), Image.BICUBIC).crop((cell, cell, cell + w, cell + h))
+    n = Image.blend(Image.blend(noise(340), noise(150), 0.3 / 0.85), noise(60), 0.15)
+    warp = Image.blend(noise(260), noise(90), 0.3)
+    v = Image.blend(n, warp, 1.4 / 2.6)                     # (n*1.2 + warp*1.4) / 2.6
+    vein_lut = [int(255 * max(0.0, 1 - abs(math.sin(p / 255 * 2.6 * math.pi * 2.2)) / 0.12) ** 1.3) for p in range(256)]
+    smoke_lut = [int(255 * max(0.0, min(1.0, (p / 255 - 0.46) * 3.2)) ** 1.3 * 0.95) for p in range(256)]
+    veins = v.point(vein_lut).filter(ImageFilter.GaussianBlur(0.8))
+    smoke = warp.point(smoke_lut)
+    cloud = (168, 98, 34) if festive else (150, 104, 38)
+    img = Image.composite(Image.new("RGB", (w, h), tuple(10 + c for c in cloud)), Image.new("RGB", (w, h), (10, 8, 6)), smoke)
+    img = Image.composite(Image.new("RGB", (w, h), (236, 190, 100)), img, veins)
+    return img.resize((CW, CH), Image.BICUBIC)
+
+
 @lru_cache(maxsize=32)
 def _marble(seed: int, festive: bool = False) -> Image.Image:
     """Black marble with gold smoke and thin gold veins (made at half size, then scaled up)."""
+    if np is None:
+        return _finish_marble(_marble_pil(seed, festive), festive)
     w, h = CW // 2, CH // 2
     rng = np.random.default_rng(seed)
     n = (_noise((h, w), 340, rng) * 0.55 + _noise((h, w), 150, rng) * 0.3 + _noise((h, w), 60, rng) * 0.15)
@@ -76,6 +104,10 @@ def _marble(seed: int, festive: bool = False) -> Image.Image:
     rgb = rgb * (1 - veins[..., None]) + vein * veins[..., None]
     rgb = rgb + vein * fine[..., None] * smoke[..., None]
     img = Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8), "RGB").resize((CW, CH), Image.BICUBIC)
+    return _finish_marble(img, festive)
+
+
+def _finish_marble(img: Image.Image, festive: bool) -> Image.Image:
     # darken the middle a little so the player stands out
     img = img.convert("RGBA")
     vg = Image.new("RGBA", (CW, CH), (0, 0, 0, 0))
