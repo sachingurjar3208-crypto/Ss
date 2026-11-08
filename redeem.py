@@ -310,7 +310,7 @@ def redeem(user_id, code: str) -> dict:
         if conn.execute("SELECT 1 FROM redeem_claims WHERE code = ? AND user_id = ?", (code, uid)).fetchone():
             return {"ok": False, "reason": "already"}
         if c["max_uses"] and c["used"] >= c["max_uses"]:
-            return {"ok": False, "reason": "used_up"}
+            return {"ok": False, "reason": "used_up", "max": int(c["max_uses"])}
         economy._ensure_pending_table(conn)
         lines, pending, cache = [], False, []
         for r in json.loads(c["rewards"]):

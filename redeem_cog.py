@@ -84,6 +84,12 @@ class RedeemCog(commands.Cog):
             return
         res = await asyncio.to_thread(redeem.redeem, ctx.author.id, code)
         if not res["ok"]:
+            if res["reason"] == "used_up":
+                n = res.get("max", 0)
+                await ctx.send(f"❌ **Maximum users reached.** This code could be redeemed by only **{n:,}** "
+                               f"player{'s' if n != 1 else ''} and all of them have claimed it. "
+                               "It can't be claimed anymore.")
+                return
             await ctx.send(REASON_TEXT.get(res["reason"], "❌ Couldn't redeem that code."))
             return
         embed = discord.Embed(title=f"🎁 Code {res['code']} redeemed!",
