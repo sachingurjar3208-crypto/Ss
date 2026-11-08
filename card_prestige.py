@@ -36,9 +36,9 @@ GOLD = (226, 184, 96)
 GOLD_HI = (255, 226, 150)
 CREAM = (250, 236, 205)
 RADIUS = 30
-FRAME = (84, 236, W - 128, 1426)      # inner gold frame (wider gap on the right for the name)
+FRAME = (84, 236, W - 84, 1426)       # inner gold frame
 STEP = 46                             # size of the stepped corners
-FADE_Y0, FADE_Y1 = 1150, 1290         # player fades out above the stats strip
+FADE_Y0, FADE_Y1 = 900, 1030          # player fades out just above the name
 
 
 @lru_cache(maxsize=8)
@@ -160,9 +160,9 @@ def _ribbons():
                           ((640, -80), (1100, 40), (900, 480), (1100, 980))), lines=30, twist=2.0, phase=0.6, width=3)
     side = _ribbon_layer((((-60, 560), (300, 720), (40, 1000), (330, 1200)),
                           ((-90, 780), (190, 820), (330, 1060), (20, 1280))), lines=24, twist=1.7, phase=1.4, width=3)
-    front = _ribbon_layer((((-40, 1230), (300, 1120), (640, 1330), (1080, 1150)),
-                           ((-60, 1330), (360, 1230), (700, 1420), (1090, 1250))), lines=26, twist=2.6, phase=0.2,
-                          alpha=240, width=3)
+    front = _ribbon_layer((((-40, 960), (300, 860), (640, 1060), (1080, 900)),
+                           ((-60, 1060), (360, 960), (700, 1150), (1090, 990))), lines=26, twist=2.6, phase=0.2,
+                          alpha=200, width=3)
     return back, side, front
 
 
@@ -296,8 +296,14 @@ def build(card_row, fg_image, role: str, festive: bool = False) -> io.BytesIO:
     if festive:
         _festive_frame(canvas)
 
+    canvas.alpha_composite(front)                 # low ribbon: behind the player's fade, above the marble
     _player(canvas, card_row, fg_image)
-    canvas.alpha_composite(front)
+    shade = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    sdr = ImageDraw.Draw(shade)
+    for y in range(1000 * S, 1430 * S):
+        a = min(170, int(170 * (y - 1000 * S) / (110 * S)))
+        sdr.line((FRAME[0] * S + 8 * S, y, FRAME[2] * S - 8 * S, y), fill=(6, 4, 2, a))
+    canvas.alpha_composite(shade.filter(ImageFilter.GaussianBlur(10 * S)))
 
     # title (drawn after the player, so a raised bat never covers it)
     title = " ".join(FESTIVE_TITLE if festive else TITLE)
@@ -351,27 +357,28 @@ def build(card_row, fg_image, role: str, festive: bool = False) -> io.BytesIO:
             except Exception:
                 pass
 
-    # vertical name on the right
+    # name (horizontal, under the player) + gold rule
     name = str(ci._col(card_row, "displayname", "") or ci._col(card_row, "playername", "")).upper()
-    _vertical_text(canvas, name, _font("display_bold.ttf", 84 * S), GOLD_HI, _q((FRAME[2] + W) / 2, 830), 1000 * S)
+    d = ImageDraw.Draw(canvas)
+    nf = _fit(d, name, "display_bold.ttf", 100 * S, 760 * S)
+    nl = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(nl).text(_q(W / 2, 1082), name, font=nf, fill=GOLD_HI, anchor="ms",
+                            stroke_width=3 * S, stroke_fill=(0, 0, 0, 190))
+    canvas.alpha_composite(nl)
+    d = ImageDraw.Draw(canvas)
+    d.line((*_q(190, 1112), *_q(W - 190, 1112)), fill=GOLD + (200,), width=2 * S)
 
-    # stats strip
-    d = ImageDraw.Draw(canvas)
-    sx0, sy0, sx1, sy1 = FRAME[0] + 26, 1296, FRAME[2] - 26, 1400
-    strip = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    ImageDraw.Draw(strip).rounded_rectangle(_q(sx0, sy0) + _q(sx1, sy1), 18 * S, fill=(8, 6, 4, 205),
-                                            outline=GOLD + (200,), width=2 * S)
-    canvas.alpha_composite(strip)
-    d = ImageDraw.Draw(canvas)
+    # six stats: two columns of three ("92 BAT"), thin divider in the middle
     rows = card_stat_rows(card_row)[:6]
-    cw = (sx1 - sx0) / max(1, len(rows))
-    for i, (lab, val) in enumerate(rows):
-        x = sx0 + cw * (i + 0.5)
-        d.text(_q(x, sy0 + 54), str(val), font=_font("display_bold.ttf", 54 * S), fill=GOLD_HI, anchor="ms")
-        d.text(_q(x, sy0 + 88), str(lab).upper()[:3], font=_font("label.ttf", 22 * S), fill=CREAM, anchor="ms")
-        if i:
-            xx = sx0 + cw * i
-            d.line((*_q(xx, sy0 + 20), *_q(xx, sy1 - 20)), fill=GOLD + (110,), width=S)
+    fv, fl = _font("display_bold.ttf", 74 * S), _font("display_bold.ttf", 64 * S)
+    for k, (lab, val) in enumerate(rows):
+        col, r_ = k // 3, k % 3
+        x = 238 if col == 0 else 588
+        y = 1196 + r_ * 84
+        d.text(_q(x + 86, y), str(val), font=fv, fill=GOLD_HI, anchor="rs")
+        d.text(_q(x + 104, y), str(lab).upper()[:3], font=fl, fill=CREAM, anchor="ls")
+    d.line((*_q(W / 2, 1134), *_q(W / 2, 1374)), fill=GOLD + (150,), width=2 * S)
+    d.line((*_q(W / 2 - 56, 1400), *_q(W / 2 + 56, 1400)), fill=GOLD + (200,), width=2 * S)
 
     # bottom line
     d.text(_q(W / 2, 1470), " ".join("RUSH CRICKET"), font=_cinzel(26 * S, 600), fill=GOLD, anchor="mm")
