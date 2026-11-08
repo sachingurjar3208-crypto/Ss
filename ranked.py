@@ -88,8 +88,8 @@ BOT_PROFILES = {
     "Bronze":    {"ovr": (60, 70), "skill": 0.10},   # easy
     "Silver":    {"ovr": (66, 76), "skill": 0.30},
     "Gold":      {"ovr": (72, 82), "skill": 0.50},
-    "Platinum":  {"ovr": (78, 88), "skill": 0.70},
-    "Legendary": {"ovr": (85, 94), "skill": 0.85},
+    "Platinum":  {"ovr": (80, 90), "skill": 0.80},   # harder
+    "Legendary": {"ovr": (89, 97), "skill": 0.95},   # much harder
     "Ruby":      {"ovr": (90, 99), "skill": 1.00},   # very hard: best cards + always the smart choice
 }
 
