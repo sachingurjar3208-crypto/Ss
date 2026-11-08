@@ -6,7 +6,7 @@ How a spawn happens (per server; messages in ANY channel count, the card appears
   * AND at least MIN_GAP (10 min) since the last spawn: after that, the message that completes
     the 5-7 spawns the card
   * dead server: if DEAD_AFTER (1 hour) has passed since the last spawn, the very next message spawns
-  * never more than MAX_PER_DAY a day, never while the last spawn is still uncaught
+  * no daily limit (MAX_PER_DAY = 0); never while the last spawn is still uncaught
 The spawn: "A wild cricketer appeared!" + the card with the NAME BLURRED + a "Catch me" button.
 Button -> type the name. Right name = the card (squad full / duplicate -> the normal keep/sell/replace).
 Event cards: "Virat Kohli (S1)" is caught with just "Virat Kohli" (the short card name works too).
@@ -46,7 +46,7 @@ SPAWN_MESSAGES = (5, 7)      # each spawn needs a random 5 to 7 messages
 MIN_GAP = 600                # seconds: at least 10 minutes between two spawns
 DEAD_AFTER = 3600            # 1 hour since the last spawn -> the next single message spawns
 MIN_MEMBERS = 40             # a server needs at least 40 members to set a spawn channel / get spawns
-MAX_PER_DAY = 30             # spawns per server per day (India time)
+MAX_PER_DAY = 0              # spawns per server per day (India time); 0 = unlimited
 SPAWN_TIMEOUT = 300          # seconds the "Catch me" button stays (5 min), then the cricketer runs away
 COUNT_EVERY = 3              # at most one message counted every 3 seconds (spam doesn't help)
 HEADER = "**A wild cricketer appeared!**"
@@ -54,8 +54,10 @@ HEADER = "**A wild cricketer appeared!**"
 # OVR odds.
 # 80-99: exact chances in % (as asked).
 SPAWN_EXACT: list[tuple[int, int, float]] = [
-    (99, 99, 0.001), (98, 98, 0.002), (97, 97, 0.005), (96, 96, 0.010), (95, 95, 0.050), (94, 94, 0.090),
-    (93, 93, 0.50), (92, 92, 0.90), (91, 91, 1.0), (90, 90, 1.50), (89, 89, 2.0), (88, 88, 2.50),
+    # 90-99: extremely rare (together ~0.4%, about 1 in 250 spawns)
+    (99, 99, 0.0001), (98, 98, 0.0002), (97, 97, 0.0005), (96, 96, 0.001), (95, 95, 0.005), (94, 94, 0.009),
+    (93, 93, 0.05), (92, 92, 0.09), (91, 91, 0.10), (90, 90, 0.15),
+    (89, 89, 2.0), (88, 88, 2.50),
     (87, 87, 3.0), (86, 86, 3.50), (85, 85, 4.0), (84, 84, 4.50), (83, 83, 5.0), (82, 82, 5.50),
     (81, 81, 6.0), (80, 80, 6.50),
 ]
@@ -347,7 +349,7 @@ class SpawnCog(commands.Cog):
         ready = (c.points >= c.target and waited >= MIN_GAP) or waited >= DEAD_AFTER
         if not ready or self.active.get(g.id) or g.id in self.busy:
             return
-        if await asyncio.to_thread(spawn_db.spawns_today, g.id) >= MAX_PER_DAY:
+        if MAX_PER_DAY and await asyncio.to_thread(spawn_db.spawns_today, g.id) >= MAX_PER_DAY:
             return
         channel = g.get_channel(int(cfg["channel_id"]))
         if channel is None:
@@ -472,7 +474,7 @@ class SpawnCog(commands.Cog):
         await interaction.response.send_message(
             f"Channel: {('<#' + str(cfg['channel_id']) + '>') if cfg.get('channel_id') else 'not set'}\n"
             f"Spawning: **{'on' if cfg.get('enabled') else 'off'}**\n"
-            f"Today: {today} / {MAX_PER_DAY} (admin spawns not counted)\nLive now: {len(self.active.get(g.id, ()))}\n"
+            f"Today: {today}{(' / ' + str(MAX_PER_DAY)) if MAX_PER_DAY else ' (no limit)'} (admin spawns not counted)\nLive now: {len(self.active.get(g.id, ()))}\n"
             f"Last: {last_txt}\nProgress: {prog}",
             ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
