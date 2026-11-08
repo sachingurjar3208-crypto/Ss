@@ -587,8 +587,9 @@ class SquadCog(commands.Cog, name="Squad"):
             buf = await asyncio.to_thread(build_team_image, xi, user["team_name"], team_ovr)
         except Exception as e:
             print(f"[rcstarterpack] collage failed: {e}")
-        if buf is not None:      # only the XI image, no text above or below
-            await ctx.send(file=discord.File(buf, filename=TEAM_IMG_NAME))
+        if buf is not None:
+            embed.set_image(url=f"attachment://{TEAM_IMG_NAME}")
+            await ctx.send(embed=embed, file=discord.File(buf, filename=TEAM_IMG_NAME))
         else:   # image failed -> still show the players as text
             show_emoji = _is_premium(ctx.author)   # premium role only
             embed.description += "\n\n" + "\n".join(_card_line(c, emojis=show_emoji) for c in xi)
@@ -838,9 +839,8 @@ class SquadCog(commands.Cog, name="Squad"):
                                         user["captain_key"])
         except Exception as e:
             print(f"[rcovr] collage failed: {e}")
-        if buf is not None:
-            embed.set_image(url=f"attachment://{TEAM_IMG_NAME}")
-            await ctx.send(embed=embed, file=discord.File(buf, filename=TEAM_IMG_NAME))
+        if buf is not None:      # only the XI image, no text above or below
+            await ctx.send(file=discord.File(buf, filename=TEAM_IMG_NAME))
         else:   # image failed -> show the normal text XI instead
             await ctx.send(embed=_xi_embed(ctx.author, user))
 
