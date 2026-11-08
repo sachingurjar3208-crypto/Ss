@@ -133,9 +133,16 @@ def _player(canvas, card_row, fg, clip):
                                           int(ci._col(card_row, "scale_pct", 100)))
         layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         layer.paste(resized, pos, resized)
+        # fade the photo out at the bottom. If the photo itself ends higher up (cut at the waist),
+        # fade over ITS last part instead, so there is no hard straight edge.
+        y0, y1 = FADE_Y0 * S, FADE_Y1 * S
+        bb = layer.getchannel("A").point(lambda v: 255 if v > 40 else 0).getbbox()
+        if bb and bb[3] < y1:
+            y1 = bb[3]
+            y0 = min(y0, y1 - 160 * S)
         ramp = Image.new("L", (1, CH), 255)
-        for y in range(FADE_Y0 * S, CH):
-            t = min(1.0, (y - FADE_Y0 * S) / ((FADE_Y1 - FADE_Y0) * S))
+        for y in range(max(0, y0), CH):
+            t = min(1.0, (y - y0) / max(1, y1 - y0))
             ramp.putpixel((0, y), int(255 * (1 - t * t * (3 - 2 * t))))
         a = ImageChops.multiply(layer.getchannel("A"), ramp.resize((CW, CH)))
         layer.putalpha(ImageChops.multiply(a, clip))
