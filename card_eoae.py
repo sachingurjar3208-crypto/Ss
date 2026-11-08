@@ -8,7 +8,7 @@ The look: "the sun sets on a career"
   - gold OVR inside a laurel wreath, role, flag / country, playstyle badges (same left column
     as every Style 2 card, in gold / ivory)
   - name, career years ("2012 — 2026"), a gold-foil "END OF AN ERA" ribbon, the 6 stats
-  - frame: dark band + double gold foil lines, small gold diamonds on the corners, a gold sun
+  - frame: dark band + double gold foil lines, small gold diamonds on the corners and
     on the top spike, "FAREWELL · LEGEND" at the bottom
 
 Per card (set with /eoae): eoae_start, eoae_end (years), eoae_jersey, eoae_ribbon (text).
