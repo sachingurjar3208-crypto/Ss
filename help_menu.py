@@ -36,6 +36,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Daily", "rcdaily", "Daily coins and a random player (50-99 OVR, high OVR is rare). Every 7th day gives a streak bonus."),
         ("Weekly", "rcweekly", "Premium only. Weekly coins and a random player (83-99 OVR)."),
         ("Monthly", "rcmonthly", "Monthly coins and a random player (88-99 OVR)."),
+        ("Redeem Code", "rcredeem <code>", "Got a code from an event or announcement? Type it here to get its rewards. Each code works once per player."),
         ("Claim", "rcclaim", "A free random player every hour."),
         ("Cooldowns", "rccd", "Shows when daily, weekly, monthly and claim are ready again."),
         ("Quests", "rcquest", "Your daily quests and progress. Finishing a quest gives a voucher."),
