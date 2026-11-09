@@ -614,6 +614,12 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
         with _RENDER_LOCK:
             return card_art.build(card_row, fg_image, role)
 
+    # SHOWCASE: the shield with a 16:9 artwork box (card_showcase.py, artwork from /showcase).
+    if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "showcase":
+        import card_showcase
+        with _RENDER_LOCK:
+            return card_showcase.build(card_row, fg_image, role)
+
     # PRESTIGE: marble + ribbons collector design (card_prestige.py).
     if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() in ("prestige", "prestige_diwali"):
         import card_prestige

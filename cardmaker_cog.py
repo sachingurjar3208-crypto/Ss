@@ -1367,6 +1367,58 @@ class CardMakerCog(commands.Cog):
             file = discord.File(card["image_path"], filename="eoae_card.png")
         await interaction.followup.send(msg, file=file) if file else await interaction.followup.send(msg)
 
+    # ── /showcase ────────────────────────────────────────────────────
+    @app_commands.command(
+        name="showcase",
+        description="Put your own 16:9 artwork in a box on a card (Showcase look), or turn it off",
+    )
+    @app_commands.describe(
+        playername="The card",
+        artwork="Your edited artwork, 16:9 works best (e.g. 1920x1080). Not needed to turn it off/on again",
+        active="True = Showcase on (default) · False = back to the normal card (artwork is kept)",
+    )
+    @app_commands.autocomplete(playername=playername_autocomplete)
+    @is_owner()
+    async def showcase(self, interaction: discord.Interaction, playername: str,
+                       artwork: discord.Attachment | None = None, active: bool = True):
+        await interaction.response.defer()
+        import card_showcase
+        card = get_card(playername)
+        if card is None:
+            await interaction.followup.send(f"❌ No card named `{playername}`. Pick one from the list.")
+            return
+        name = card["playername"]
+        if artwork is not None:
+            if artwork.size > 10 * 1024 * 1024:
+                await interaction.followup.send("❌ That file is too big (max 10 MB).")
+                return
+            try:
+                data = await artwork.read()
+                await asyncio.to_thread(card_showcase.save_art, name, data)
+            except Exception as e:
+                await interaction.followup.send(f"❌ Couldn't use that file as artwork: `{e}`")
+                return
+        if active:
+            if not card_showcase.art_path(name).exists():
+                await interaction.followup.send(f"❌ **{name}** has no artwork yet. Add one with `artwork:`.")
+                return
+            set_card_style(name, "style2")
+            set_style2_options(name, theme="showcase")
+        else:
+            cur = str(card["s2_theme"] or "").lower() if "s2_theme" in card.keys() else ""
+            if cur == "showcase":
+                set_style2_options(name, theme=None)
+        ok = await _regenerate_silently(name)
+        card = get_card(name)
+        msg = (f"✅ **{name}** is now a Showcase card." if active
+               else f"✅ Showcase is off for **{name}**, it is back to the normal card (the artwork is kept).")
+        if not ok:
+            msg += " The image will refresh on the next edit (the background or foreground could not be loaded)."
+        file = None
+        if ok and card["image_path"] and os.path.exists(card["image_path"]):
+            file = discord.File(card["image_path"], filename="showcase_card.png")
+        await interaction.followup.send(msg, file=file) if file else await interaction.followup.send(msg)
+
     # ── /signatureadd  /signatureremove ─────────────────────────────
     @app_commands.command(
         name="signatureadd",
@@ -2052,7 +2104,7 @@ class CardMakerCog(commands.Cog):
         # picking an event means "all of this event's cards", so its special cards are changed too
         keep_default = "no" if (event and event.strip()) else "yes"
         if theme is not None and (keep_special.value if keep_special else keep_default) == "yes":
-            special = {"signature", "eoae", "halloween", "diwali", "rangoli", "prestige_diwali"}
+            special = {"signature", "eoae", "halloween", "diwali", "rangoli", "prestige_diwali", "showcase"}
             keep = []
             for n in names:
                 c = get_card(n)

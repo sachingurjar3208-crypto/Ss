@@ -651,7 +651,7 @@ def set_card_obtainable(playername: str, obtainable: bool) -> bool:
 # ── Style 2 card design: style switch + extra stats ──────────────────────
 
 CARD_STYLES = ("classic", "style2")
-CARD_THEMES = ("halloween", "signature", "diwali", "eoae", "arena", "art", "crest", "rangoli", "prestige", "prestige_diwali")   # Style 2 themes (NULL in the database = normal card)
+CARD_THEMES = ("halloween", "signature", "diwali", "eoae", "arena", "art", "crest", "rangoli", "prestige", "prestige_diwali", "showcase")   # Style 2 themes (NULL in the database = normal card)
 
 
 def set_card_style(playername: str, style: str) -> bool:
