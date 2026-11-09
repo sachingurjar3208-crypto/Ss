@@ -85,6 +85,13 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Your Catches", "rcspawns", "How many cricketers you caught. Every 30 catches gives 1 Draft Voucher.", "rcspawns"),
         ("Spawn Channel", "/spawn channel", "Slash command. Pick the channel where cricketers spawn in your server (needs Manage Server and at least 40 members in the server)."),
     ]),
+    "career": ("Career", "Your own cricketer, from Club to the top", [
+        ("Start", "rccareer start <name>", "Make your own cricketer: Batter, Bowler or All-rounder. He starts at Club Cricket."),
+        ("Your Player", "rccareer", "Stats, stamina, form, stage and career record.", "rccareer"),
+        ("Career Match", "rccareer play", "Play only your own player, ball by ball. Attack scores more but costs more stamina. Good matches raise your stats and promote you."),
+        ("Training", "rccareer train", "Costs 15 stamina. Pick Batting, Bowling or Fitness, then the right drill for double XP."),
+        ("Drinks", "rcdrink", "Stamina refills on its own (about 10 hours). Water +20, Energy Drink +50, Power Shot +100. Max 3 drinks a day. Water 100k, Energy Drink 500k. Buy: rcdrink buy water", "rcdrink"),
+    ]),
     "ranked": ("Ranked", "Ranked mode, tiers and rewards", [
         ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "rcmp ranked"),
         ("Your Rank", "rcrank [@user]", "Your tier, stars and season record as a card.", "rcrank"),
@@ -114,7 +121,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     ]),
 }
 
-ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "spawn", "auction", "ranked", "events", "other", "premium"]
+ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "spawn", "career", "auction", "ranked", "events", "other", "premium"]
 
 
 # ── Packs page (live from squad_logic.PACKS) ────────────────────────────────
