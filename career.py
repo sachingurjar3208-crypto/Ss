@@ -1,13 +1,21 @@
-"""Career Mode (data + rules). One own cricketer per player who grows from Club cricket upwards.
+"""Career Mode (data + rules). One own cricketer per player.
 
-Stamina 0-100 refills on its own (about 10 hours from 0 to full, faster with a high FITNESS).
-A career match costs 10 stamina to start plus a little per ball (aggressive shots and hard deliveries
-cost more). Training costs 15. Drinks give stamina back (max 3 drinks a day).
-Low stamina (< 30) = -10% performance and a 10% injury chance.
+He gets stronger ONLY from real matches: `rcmp ranked` and `rcmp @user` (practice / CPU matches don't count).
+It is slow on purpose: a player who hits the daily max EVERY day needs about 4.5 months to reach OVR 85
+(about 11 months at 4 matches a day).
+
+  * Every counted match costs the career player 25 stamina and gives XP: 10 for playing, +10 for a win.
+  * Bonus XP: +10 on the first match of the day, +5 per win from 3 wins in a row.
+  * Max 150 career XP a day (All-rounder gets x1.5). Non-ranked matches: max 3 a day vs the same opponent count.
+  * No stamina (< 25) = the match still plays normally, but the career player gets no XP.
+  * Stamina refills on its own: +10 an hour (faster with high FITNESS). Drinks: Water +20, Energy +50,
+    Power Shot +100 (max 3 drinks a day).
+  * XP goes into the role's stats: Batter 70% BAT / 30% FITNESS, Bowler 70% BOWL / 30% FITNESS,
+    All-rounder 35% BAT / 35% BOWL / 30% FITNESS. Each stat point costs more XP the higher it is.
+  * Stages by OVR: Club 0, State 65, T20 League 72, National A 80, International 85 (coins on promotion).
 """
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -18,31 +26,36 @@ IST = timezone(timedelta(hours=5, minutes=30))
 ROLES = {"bat": "Batter", "bowl": "Bowler", "ar": "All-rounder"}
 START_STATS = {"bat": (62, 35, 55), "bowl": (35, 62, 55), "ar": (55, 55, 55)}   # bat, bowl, fit
 STAT_CAP = 99
+SPLIT = {"bat": {"bat": 0.7, "fit": 0.3}, "bowl": {"bowl": 0.7, "fit": 0.3},
+         "ar": {"bat": 0.35, "bowl": 0.35, "fit": 0.3}}
 
 MAX_STAMINA = 100.0
 REGEN_PER_HOUR = 10.0                # at FITNESS 55; +1% speed per FITNESS point above 55
-MATCH_START_COST = 10
-MATCH_MIN_STAMINA = 25
-TRAIN_COST = 15
-LOW_STAMINA = 30
-INJURY_CHANCE = 0.10
-INJURY_HOURS = 24
+MATCH_COST = 25
+XP_PLAY, XP_WIN = 10, 10
+XP_FIRST_OF_DAY = 10                 # bonus on the first counted match of the day
+XP_STREAK = 5                        # bonus per win once you have 3+ wins in a row
+STREAK_FROM = 3
+DAILY_XP_CAP = 150
+XP_MULT = {"bat": 1.0, "bowl": 1.0, "ar": 1.5}   # all-rounder trains 3 stats, so gets more XP
+PER_OPP_CAP = 3
+MIN_OVERS = 2
 DRINKS_PER_DAY = 3
 
 DRINKS = {
     "water":  {"label": "Water",        "stamina": 20,  "price": 100_000, "boost": 0},
     "energy": {"label": "Energy Drink", "stamina": 50,  "price": 500_000, "boost": 0},
-    "power":  {"label": "Power Shot",   "stamina": 100, "price": 0,     "boost": 5},   # events / codes only
+    "power":  {"label": "Power Shot",   "stamina": 100, "price": 0,       "boost": 0},   # events / codes only
 }
 START_DRINKS = {"water": 3, "energy": 1}
 
-# stage: name, balls you bat, balls you bowl, opponent rating range, needs to move up (ovr, matches)
-STAGES = [
-    {"name": "Club Cricket", "bat_balls": 18, "bowl_balls": 12, "opp": (52, 64), "up": (65, 5), "reward": 5_000},
-    {"name": "State Team",   "bat_balls": 24, "bowl_balls": 18, "opp": (62, 74), "up": (72, 10), "reward": 10_000},
-    {"name": "T20 League",   "bat_balls": 30, "bowl_balls": 24, "opp": (70, 82), "up": None, "reward": 0},
+STAGES = [   # name, OVR needed, coins on promotion
+    ("Club Cricket", 0, 0),
+    ("State Team", 65, 10_000),
+    ("T20 League", 72, 25_000),
+    ("National A", 80, 50_000),
+    ("International", 85, 100_000),
 ]
-LAST_OPEN_STAGE = 1                  # League not open yet in this version
 
 
 def _ensure(conn):
@@ -60,8 +73,14 @@ def _ensure(conn):
         "CREATE TABLE IF NOT EXISTS career_drinks ("
         "user_id INTEGER NOT NULL, drink TEXT NOT NULL, qty INTEGER NOT NULL DEFAULT 0,"
         "PRIMARY KEY (user_id, drink))")
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS career_drink_day (user_id INTEGER PRIMARY KEY, day TEXT, used INTEGER)")
+    conn.execute("CREATE TABLE IF NOT EXISTS career_drink_day (user_id INTEGER PRIMARY KEY, day TEXT, used INTEGER)")
+    conn.execute("CREATE TABLE IF NOT EXISTS career_xp_day (user_id INTEGER PRIMARY KEY, day TEXT, xp INTEGER)")
+    try:
+        conn.execute("ALTER TABLE career_players ADD COLUMN streak INTEGER DEFAULT 0")
+    except Exception:
+        pass
+    conn.execute("CREATE TABLE IF NOT EXISTS career_opp_day ("
+                 "user_id INTEGER, opp_id INTEGER, day TEXT, n INTEGER, PRIMARY KEY (user_id, opp_id, day))")
 
 
 def init():
@@ -99,20 +118,21 @@ def ovr(p: dict) -> int:
     return round(v)
 
 
-def form_avg(p: dict) -> float | None:
-    f = json.loads(p.get("form") or "[]")
-    return sum(f) / len(f) if f else None
-
-
-def form_bonus(p: dict) -> int:
-    a = form_avg(p)
-    if a is None or len(json.loads(p["form"])) < 3:
-        return 0
-    return 3 if a >= 7.5 else (-3 if a < 4.5 else 0)
+def stage_for(o: int) -> int:
+    s = 0
+    for i, (_, need, _) in enumerate(STAGES):
+        if o >= need:
+            s = i
+    return s
 
 
 def xp_need(stat: int) -> int:
-    return 40 + max(0, stat - 50) * 4
+    return 100 + max(0, stat - 50) * 18
+
+
+def _xp_today(conn, uid) -> int:
+    r = conn.execute("SELECT day, xp FROM career_xp_day WHERE user_id = ?", (uid,)).fetchone()
+    return r["xp"] if r and r["day"] == _today() else 0
 
 
 def get(uid: int) -> dict | None:
@@ -124,14 +144,33 @@ def get(uid: int) -> dict | None:
                 "SELECT drink, qty FROM career_drinks WHERE user_id = ?", (uid,))}
             d = conn.execute("SELECT day, used FROM career_drink_day WHERE user_id = ?", (uid,)).fetchone()
             p["drinks_today"] = d["used"] if d and d["day"] == _today() else 0
+            p["xp_today"] = _xp_today(conn, uid)
         return p
 
 
+def top(limit: int = 10) -> list[dict]:
+    with economy._tx() as conn:
+        _ensure(conn)
+        rows = [dict(r) for r in conn.execute("SELECT * FROM career_players")]
+    rows.sort(key=lambda p: (-ovr(p), -(p["bat"] + p["bowl"] + p["fit"]), -p["wins"], p["created"] or 0))
+    return rows[:limit]
+
+
+def rank_of(uid: int) -> int | None:
+    with economy._tx() as conn:
+        _ensure(conn)
+        rows = [dict(r) for r in conn.execute("SELECT * FROM career_players")]
+    rows.sort(key=lambda p: (-ovr(p), -(p["bat"] + p["bowl"] + p["fit"]), -p["wins"], p["created"] or 0))
+    for i, p in enumerate(rows, 1):
+        if p["user_id"] == uid:
+            return i
+    return None
+
+
 # ── writing ──────────────────────────────────────────────────────────────────
-def _set_stamina(conn, uid, p, value, now=None):
-    now = now or time.time()
+def _set_stamina(conn, uid, value, now=None):
     conn.execute("UPDATE career_players SET stamina = ?, stamina_ts = ? WHERE user_id = ?",
-                 (max(0.0, min(MAX_STAMINA, value)), now, uid))
+                 (max(0.0, min(MAX_STAMINA, value)), now or time.time(), uid))
 
 
 def create(uid: int, name: str, role: str) -> str | None:
@@ -192,150 +231,103 @@ def use_drink(uid: int, drink: str) -> tuple[str | None, float]:
         if used >= DRINKS_PER_DAY:
             return f"You already had {DRINKS_PER_DAY} drinks today. Come back tomorrow.", 0
         s = stamina_now(p)
-        if s >= MAX_STAMINA - 0.5 and not d["boost"]:
+        if s >= MAX_STAMINA - 0.5:
             return "Your stamina is already full.", s
         new = min(MAX_STAMINA, s + d["stamina"])
-        _set_stamina(conn, uid, p, new)
+        _set_stamina(conn, uid, new)
         conn.execute("UPDATE career_drinks SET qty = qty - 1 WHERE user_id = ? AND drink = ?", (uid, drink))
         conn.execute("INSERT OR REPLACE INTO career_drink_day VALUES (?, ?, ?)", (uid, _today(), used + 1))
-        if d["boost"]:
-            conn.execute("UPDATE career_players SET boost = ? WHERE user_id = ?", (d["boost"], uid))
     return None, new
 
 
-def can_act(p: dict, cost: float) -> str | None:
-    now = time.time()
-    if p["injured_until"] and p["injured_until"] > now:
-        h = (p["injured_until"] - now) / 3600
-        return f"Your player is injured. Back in about {h:.0f}h {int((h % 1) * 60)}m."
-    s = stamina_now(p, now)
-    if s < cost:
-        need = (cost - s) / regen_rate(p["fit"]) * 60
-        return (f"Not enough stamina ({s:.0f}/100, need {cost:.0f}). It refills on its own in about "
-                f"{need:.0f} min, or drink something: `rcdrink`.")
-    return None
-
-
-def _level_up(p: dict, stat: str, xp_gain: int) -> tuple[int, int, int]:
-    """Returns (new stat, new xp, points gained)."""
-    v, xp, gained = p[stat], p["xp_" + stat] + max(0, xp_gain), 0
-    while v < STAT_CAP and xp >= xp_need(v):
-        xp -= xp_need(v)
+def _add_xp(p: dict, stat: str, xp: int) -> int:
+    """Adds xp to p[stat] in place, returns stat points gained."""
+    v, x, gained = p[stat], p["xp_" + stat] + max(0, xp), 0
+    while v < STAT_CAP and x >= xp_need(v):
+        x -= xp_need(v)
         v += 1
         gained += 1
-    return v, xp, gained
+    p[stat], p["xp_" + stat] = v, x
+    return gained
 
 
-def train(uid: int, stat: str, perfect: bool) -> tuple[str | None, dict]:
+def award_match(uid: int, won: bool, opp_id: int | None, ranked: bool) -> dict | None:
+    """One counted real match for this user. None = no career player."""
+    now = time.time()
     with economy._tx() as conn:
         _ensure(conn)
         p = _row(conn, uid)
         if not p:
-            return "Make your career player first: `rccareer start <name>`.", {}
-        err = can_act(p, TRAIN_COST)
-        if err:
-            return err, {}
-        xp = 70 if perfect else 35
-        v, nxp, gained = _level_up(p, stat, xp)
-        _set_stamina(conn, uid, p, stamina_now(p) - TRAIN_COST)
-        conn.execute(f"UPDATE career_players SET {stat} = ?, xp_{stat} = ? WHERE user_id = ?", (v, nxp, uid))
-        return None, {"xp": xp, "gained": gained, "value": v, "xp_now": nxp, "need": xp_need(v)}
+            return None
+        day = _today()
+        if not ranked and opp_id is not None:
+            r = conn.execute("SELECT n FROM career_opp_day WHERE user_id = ? AND opp_id = ? AND day = ?",
+                             (uid, opp_id, day)).fetchone()
+            if r and r["n"] >= PER_OPP_CAP:
+                return {"skipped": "opp_cap"}
+            conn.execute("INSERT INTO career_opp_day VALUES (?, ?, ?, 1) ON CONFLICT(user_id, opp_id, day) "
+                         "DO UPDATE SET n = n + 1", (uid, opp_id, day))
+        s = stamina_now(p, now)
+        if s < MATCH_COST:
+            return {"skipped": "tired", "stamina": s}
+        today_xp = _xp_today(conn, uid)
+        if today_xp >= DAILY_XP_CAP:
+            return {"skipped": "cap"}
+        streak = ((p.get("streak") or 0) + 1) if won else 0
+        bonus = []
+        raw = XP_PLAY + (XP_WIN if won else 0)
+        if today_xp == 0:
+            raw += XP_FIRST_OF_DAY
+            bonus.append(f"first match today +{XP_FIRST_OF_DAY}")
+        if streak >= STREAK_FROM:
+            raw += XP_STREAK
+            bonus.append(f"{streak} wins in a row +{XP_STREAK}")
+        base = min(raw, DAILY_XP_CAP - today_xp)
+        xp = round(base * XP_MULT[p["role"]])
+        old_ovr, old_stage = ovr(p), p["stage"]
+        ups = {}
+        split = SPLIT[p["role"]]
+        given = 0
+        items = list(split.items())
+        for i, (stat, share) in enumerate(items):
+            part = xp - given if i == len(items) - 1 else round(xp * share)
+            given += part
+            g = _add_xp(p, stat, part)
+            if g:
+                ups[stat] = g
+        new_ovr = ovr(p)
+        stage = max(old_stage, stage_for(new_ovr))
+        coins = sum(STAGES[i][2] for i in range(old_stage + 1, stage + 1))
+        conn.execute("UPDATE career_players SET bat=?, bowl=?, fit=?, xp_bat=?, xp_bowl=?, xp_fit=?, stage=?,"
+                     " matches = matches + 1, wins = wins + ?, streak = ? WHERE user_id = ?",
+                     (p["bat"], p["bowl"], p["fit"], p["xp_bat"], p["xp_bowl"], p["xp_fit"], stage,
+                      1 if won else 0, streak, uid))
+        _set_stamina(conn, uid, s - MATCH_COST, now)
+        conn.execute("INSERT OR REPLACE INTO career_xp_day VALUES (?, ?, ?)", (uid, day, today_xp + base))
+        if coins:
+            economy._apply_coins(conn, uid, coins, "career promotion")
+        return {"xp": xp, "ups": ups, "ovr": new_ovr, "ovr_up": new_ovr - old_ovr, "stamina": s - MATCH_COST,
+                "xp_today": today_xp + base, "stage_up": STAGES[stage][0] if stage > old_stage else None,
+                "coins": coins, "name": p["name"], "bonus": bonus}
 
 
-def start_match(uid: int) -> tuple[str | None, dict]:
-    """Takes the start cost. Returns the player + whether he started tired."""
-    with economy._tx() as conn:
-        _ensure(conn)
-        p = _row(conn, uid)
-        if not p:
-            return "Make your career player first: `rccareer start <name>`.", {}
-        err = can_act(p, MATCH_MIN_STAMINA)
-        if err:
-            return err, {}
-        s = stamina_now(p)
-        _set_stamina(conn, uid, p, s - MATCH_START_COST)
-        conn.execute("UPDATE career_players SET boost = 0 WHERE user_id = ?", (uid,))
-        p["stamina_start"] = s
-        p["stamina"] = s - MATCH_START_COST
-        return None, p
-
-
-def rating(bat: dict | None, bowl: dict | None) -> float:
-    pts = 0.0
-    if bat and bat["balls"]:
-        sr = bat["runs"] * 100 / bat["balls"]
-        pts += bat["runs"] * 0.09 + (sr - 120) / 60 - (0.8 if bat["out"] and bat["runs"] < 10 else 0)
-    if bowl and bowl["balls"]:
-        econ = bowl["runs"] * 6 / bowl["balls"]
-        pts += bowl["wkts"] * 1.3 + (8.0 - econ) * 0.3
-    return round(max(1.0, min(10.0, 4.5 + pts)), 1)
-
-
-def finish_match(uid: int, res: dict) -> dict:
-    """res: bat/bowl dicts, stamina_left, won, tired_start. Saves everything, pays out. Returns summary."""
-    import random
-    out = {"coins": 0, "ups": {}, "stage_up": None, "injured": False, "water": False, "milestones": []}
-    with economy._tx() as conn:
-        _ensure(conn)
-        p = _row(conn, uid)
-        bat, bowl, won = res.get("bat"), res.get("bowl"), res["won"]
-        r = res["rating"]
-        form = (json.loads(p["form"] or "[]") + [r])[-5:]
-        flags = set(json.loads(p["flags"] or "[]"))
-        upd = {"form": json.dumps(form), "matches": p["matches"] + 1, "wins": p["wins"] + (1 if won else 0),
-               "stage_matches": p["stage_matches"] + 1}
-        coins = 300 + (700 if won else 0)
-        xp = {"bat": 0, "bowl": 0, "fit": 8}
-        if bat and bat["balls"]:
-            upd["runs"] = p["runs"] + bat["runs"]
-            upd["balls"] = p["balls"] + bat["balls"]
-            upd["outs"] = p["outs"] + (1 if bat["out"] else 0)
-            coins += bat["runs"] * 15
-            xp["bat"] = bat["runs"] + bat["balls"] // 2
-            best = int((p["best_bat"] or "0").rstrip("*") or 0)
-            if bat["runs"] > best:
-                upd["best_bat"] = f"{bat['runs']}{'' if bat['out'] else '*'}"
-            if bat["runs"] >= 50 and "first50" not in flags:
-                flags.add("first50"); coins += 3_000; out["milestones"].append("First fifty! +3,000 coins")
-        if bowl and bowl["balls"]:
-            upd["wickets"] = p["wickets"] + bowl["wkts"]
-            upd["conceded"] = p["conceded"] + bowl["runs"]
-            upd["bowled"] = p["bowled"] + bowl["balls"]
-            coins += bowl["wkts"] * 250
-            xp["bowl"] = bowl["wkts"] * 15 + bowl["balls"] // 2
-            bw, br = bowl["wkts"], bowl["runs"]
-            if p["best_bowl"]:
-                ow, orr = map(int, p["best_bowl"].split("/"))
-            else:
-                ow, orr = -1, 999
-            if (bw, -br) > (ow, -orr):
-                upd["best_bowl"] = f"{bw}/{br}"
-            if bw >= 3 and "first3fer" not in flags:
-                flags.add("first3fer"); coins += 2_000; out["milestones"].append("First 3-wicket haul! +2,000 coins")
-        upd["flags"] = json.dumps(sorted(flags))
-        for stat in ("bat", "bowl", "fit"):
-            if xp[stat]:
-                v, nxp, gained = _level_up({**p, **upd}, stat, xp[stat])
-                upd[stat], upd["xp_" + stat] = v, nxp
-                if gained:
-                    out["ups"][stat] = gained
-        if res.get("tired_start") and random.random() < INJURY_CHANCE:
-            upd["injured_until"] = time.time() + INJURY_HOURS * 3600
-            out["injured"] = True
-        cols = ", ".join(f"{k} = ?" for k in upd)
-        conn.execute(f"UPDATE career_players SET {cols} WHERE user_id = ?", (*upd.values(), uid))
-        _set_stamina(conn, uid, p, res["stamina_left"])
-        if won and random.random() < 0.30:
-            conn.execute("INSERT INTO career_drinks VALUES (?, 'water', 1) ON CONFLICT(user_id, drink) "
-                         "DO UPDATE SET qty = qty + 1", (uid,))
-            out["water"] = True
-        # stage up?
-        p2 = _row(conn, uid)
-        st = STAGES[p2["stage"]]
-        if st["up"] and p2["stage"] < LAST_OPEN_STAGE and ovr(p2) >= st["up"][0] and p2["stage_matches"] >= st["up"][1]:
-            conn.execute("UPDATE career_players SET stage = stage + 1, stage_matches = 0 WHERE user_id = ?", (uid,))
-            coins += st["reward"]
-            out["stage_up"] = STAGES[p2["stage"] + 1]["name"]
-        economy._apply_coins(conn, uid, coins, "career match")
-        out["coins"] = coins
+def on_match_end(game, uid_a, uid_b, runs_a, runs_b) -> dict:
+    """Called once when a real match finishes (views._save_match_record). uid_a batted first.
+    Returns {user_id: result} for users who have a career player."""
+    ranked = bool(getattr(game, "ranked", False))
+    if not ranked and (getattr(game, "is_bot_match", False) or getattr(game, "cpu_difficulty", None) is not None):
+        return {}
+    try:
+        if int(getattr(game, "overs", 0) or 0) < MIN_OVERS:
+            return {}
+        a, b = int(uid_a), int(uid_b)
+    except (TypeError, ValueError):
+        return {}
+    if a == b:
+        return {}
+    out = {}
+    for me, opp, won in ((a, b, runs_a > runs_b), (b, a, runs_b > runs_a)):
+        r = award_match(me, won, opp, ranked)
+        if r is not None:
+            out[me] = r
     return out

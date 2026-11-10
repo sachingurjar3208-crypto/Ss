@@ -799,11 +799,8 @@ class SquadCog(commands.Cog, name="Squad"):
     @commands.command(name="rcxi", aliases=["rcbattingorder"])
     @commands.cooldown(1, 4, commands.BucketType.user)
     async def rcxi(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        """Show your playing XI in batting order."""
-        target = member or ctx.author
-        if target.id != ctx.author.id and not _is_premium(ctx.author):
-            await ctx.send("💎 Only **Premium members** can see another player's XI. You can still use `rcxi` for your own XI.")
-            return
+        """Show your playing XI in batting order. `rcxi @user` shows another player's XI."""
+        target = member or ctx.author            # anyone can look at another player's XI
         user = economy.get_user(target.id)
         if user is None:
             await ctx.send(f"**{esc(target.display_name)}** hasn't debuted yet.")

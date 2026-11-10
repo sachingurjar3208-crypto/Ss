@@ -440,6 +440,14 @@ async def _ranked_credits_announce(channel, game):
         print(f"[starpass] ranked credits announce failed: {type(e).__name__}: {e}")
 
 
+async def _career_announce(channel, game):
+    try:
+        import career_cog
+        await career_cog.announce(channel, game)
+    except Exception as e:
+        print(f"[career] announce failed: {type(e).__name__}: {e}")
+
+
 def _save_match_record(game):
     """Derive winner/loser and persist to match_records. Ignores ties."""
     if game.__dict__.get("_record_saved"):          # BUG FIX: records / coins / quests only once
@@ -458,6 +466,12 @@ def _save_match_record(game):
         quest.on_match_end(game, inn1_uid, inn2_uid, t1, t2)
     except Exception as e:
         print(f"[quest] match tracking failed: {type(e).__name__}: {e}")
+    # Career Mode: the career player grows from real matches (ties count as played)
+    try:
+        import career
+        game.career_results = career.on_match_end(game, inn1_uid, inn2_uid, t1, t2)
+    except Exception as e:
+        print(f"[career] match tracking failed: {type(e).__name__}: {e}")
     # Star Pass credits for finished RANKED matches (once per game; ties count as played).
     if getattr(game, "ranked", False) and not game.__dict__.get("_ranked_credits_done"):
         game._ranked_credits_done = True
@@ -1738,6 +1752,7 @@ async def _process_delivery(
                 await _send_match_summary(channel, game)   # right after the result, not at the very end
                 await _ranked_announce(channel, game)
                 await _ranked_credits_announce(channel, game)
+                await _career_announce(channel, game)
                 await _flush_quest_notes(channel, game)
                 active_games.pop(channel.id, None)
             return
@@ -1815,6 +1830,7 @@ async def _handle_wicket_fall(channel, game: GameState):
             await _send_match_summary(channel, game)   # (this path used to send no summary at all)
             await _ranked_announce(channel, game)
             await _ranked_credits_announce(channel, game)
+            await _career_announce(channel, game)
             await _flush_quest_notes(channel, game)
             active_games.pop(channel.id, None)
         return
