@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from pathlib import Path
 
 import discord
 from discord import ui
@@ -25,6 +26,47 @@ GREEN = discord.Color.from_rgb(46, 204, 113)
 CARD_COOLDOWN = 20                   # seconds between career card images per user
 _card_used: dict[int, float] = {}
 NAMES = {"bat": "BAT", "bowl": "BOWL", "fit": "FITNESS"}
+
+
+MANNEQUIN = Path(__file__).parent / "career_mannequin.png"
+
+
+async def refresh_card(uid: int, force: bool = False) -> dict | None:
+    """Create / update the career player's card and redraw its image when the stats changed.
+    Never raises. Returns career.sync_card()'s result."""
+    try:
+        res = await asyncio.to_thread(cr.sync_card, uid)
+        if not res or not (res["render"] or force):
+            return res
+        import card_cache
+        import card_db
+        import card_image
+        from card_style2 import build_card_style2
+        from PIL import Image
+
+        def draw():
+            card = card_db.get_card(res["key"])
+            fg = Image.open(MANNEQUIN).convert("RGBA")
+            try:                                     # so any other redraw of this card finds the photo
+                local = card_image._foreground_file(cr.FOREGROUND_LINK)
+                if not local.exists():
+                    local.parent.mkdir(parents=True, exist_ok=True)
+                    fg.save(local, "PNG")
+            except Exception:
+                pass
+            buf = build_card_style2(card, fg)
+            card_db.GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+            out = card_db.GENERATED_DIR / f"career_{uid}.png"
+            out.write_bytes(buf.getvalue())
+            card_db.set_card_image_path(card["playername"], str(out))
+            return str(out)
+
+        path = await asyncio.to_thread(draw)
+        await card_cache.warm(path)
+        return res
+    except Exception as e:
+        print(f"[career] card refresh failed for {uid}: {type(e).__name__}: {e}")
+        return None
 
 
 def bar(v: float, n: int = 10) -> str:
@@ -52,7 +94,10 @@ class RolePick(OwnedView):
             e.title = f"{esc(self.name)} starts at Club Cricket"
             await interaction.response.edit_message(
                 content="He gets stronger every time you play `rcmp ranked` or `rcmp @user`. "
-                        "You got 3 Water and 1 Energy Drink to start.", embed=e, view=None)
+                        "You got 3 Water and 1 Energy Drink to start.\n"
+                        "His card is now in your squad (`rcsquad`). Put him in your XI with `rcswap`.",
+                embed=e, view=None)
+            await refresh_card(interaction.user.id)
         return cb
 
 
@@ -104,6 +149,8 @@ async def announce(channel, game) -> None:
             if sk == "opp_cap":
                 lines.append(f"{who.mention}: no career XP, already {cr.PER_OPP_CAP} matches vs this player today.")
                 continue
+            if r["ups"] or r["stage_up"]:
+                await refresh_card(who.id)           # his card in the squad grows with him
             txt = f"{who.mention}: **{esc(r['name'])}** +{r['xp']} XP"
             if r.get("bonus"):
                 txt += " (" + ", ".join(r["bonus"]) + ")"
@@ -147,6 +194,9 @@ class CareerCog(commands.Cog):
                 return await ctx.send("Give your cricketer a name: `rccareer start <name>` (3-24 letters).")
             if await asyncio.to_thread(cr.get, uid):
                 return await ctx.send("You already have a career player. Type `rccareer`.")
+            import card_db
+            if await asyncio.to_thread(card_db.get_card, name) is not None:
+                return await ctx.send("❌ That name is already used by a card. Pick another name for your cricketer.")
             v = RolePick(uid, name)
             e = discord.Embed(title=f"Create {esc(name)}", color=GREEN, description=(
                 "Pick his role:\n**Batter**: BAT 62 · BOWL 35\n**Bowler**: BAT 35 · BOWL 62\n"
@@ -176,6 +226,8 @@ class CareerCog(commands.Cog):
             return await ctx.send(
                 "**Career Mode**: make your own cricketer. He grows every time you play `rcmp ranked` "
                 "or `rcmp @user`.\nStart: `rccareer start <name>`")
+        if target.id == uid:
+            await refresh_card(uid)                  # makes his squad card if he has none yet
         left = CARD_COOLDOWN - (time.monotonic() - _card_used.get(uid, -1e9))
         if left > 0:
             return await ctx.send(f"⏳ The career card is on cooldown. Try again in **{left:.0f}s**.",
@@ -193,6 +245,8 @@ class CareerCog(commands.Cog):
             tip = (f"Rank #{rank} · " if rank else "") + \
                 f"Each `rcmp ranked` / `rcmp @user` match: -{cr.MATCH_COST} stamina, +{cr.XP_PLAY} XP " \
                 f"(+{cr.XP_WIN} win) · `rccareer top` · `rcdrink`"
+            if target.id == uid:
+                tip += f"\nHis card is in your squad: `rcview {p['name']}`. Put him in your XI with `rcswap`."
             await ctx.send(tip, file=discord.File(buf, "career.png"))
         except Exception as e:
             print(f"[career] card failed: {type(e).__name__}: {e}")

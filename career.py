@@ -75,10 +75,11 @@ def _ensure(conn):
         "PRIMARY KEY (user_id, drink))")
     conn.execute("CREATE TABLE IF NOT EXISTS career_drink_day (user_id INTEGER PRIMARY KEY, day TEXT, used INTEGER)")
     conn.execute("CREATE TABLE IF NOT EXISTS career_xp_day (user_id INTEGER PRIMARY KEY, day TEXT, xp INTEGER)")
-    try:
-        conn.execute("ALTER TABLE career_players ADD COLUMN streak INTEGER DEFAULT 0")
-    except Exception:
-        pass
+    for ddl in ("streak INTEGER DEFAULT 0", "card_key TEXT"):
+        try:
+            conn.execute(f"ALTER TABLE career_players ADD COLUMN {ddl}")
+        except Exception:
+            pass
     conn.execute("CREATE TABLE IF NOT EXISTS career_opp_day ("
                  "user_id INTEGER, opp_id INTEGER, day TEXT, n INTEGER, PRIMARY KEY (user_id, opp_id, day))")
 
@@ -165,6 +166,60 @@ def rank_of(uid: int) -> int | None:
         if p["user_id"] == uid:
             return i
     return None
+
+
+# ── the career player as a real card (usable in the XI) ─────────────────────────
+CARD_ROLE = {"bat": "BAT", "bowl": "BOWL", "ar": "AR"}
+STAGE_TAG = ["CLUB", "STATE", "LEAGUE", "NATIONAL A", "INTL"]      # printed where the country goes
+FOREGROUND_LINK = "career://mannequin"
+
+
+def _free_card_name(name: str, uid: int) -> str:
+    import card_db
+    for suffix in ("", " II", " III", " IV", " V", " VI", " VII", " VIII", " IX", " X"):
+        cand = (name + suffix).strip()
+        row = card_db.get_card(cand)
+        if row is None or card_db._rget(row, "career_owner") == uid:
+            return cand
+    return f"{name} {uid % 100000}"
+
+
+def sync_card(uid: int) -> dict | None:
+    """Make sure the career player exists as a card with today's stats and sits in the owner's squad.
+    Returns {"key", "render"} (render = the image must be drawn again) or None (no career player)."""
+    import card_db
+    with economy._tx() as conn:
+        _ensure(conn)
+        p = _row(conn, uid)
+    if not p:
+        return None
+    o, tag = max(1, min(99, ovr(p))), STAGE_TAG[min(p["stage"], len(STAGE_TAG) - 1)]
+    key = p.get("card_key")
+    card = card_db.get_card(key) if key else None
+    render = False
+    if card is None or card_db._rget(card, "career_owner") != uid:
+        name = _free_card_name(p["name"], uid)
+        if card_db.get_card(name) is None:
+            card_db.create_card(
+                playername=name, displayname=p["name"], foreground_link=FOREGROUND_LINK, background="career",
+                ovr=o, bat=p["bat"], bowl=p["bowl"], country=tag, country_emoji="🏏", created_by=uid,
+                role=CARD_ROLE[p["role"]], batting_hand="R",
+                bowling_type=None if p["role"] == "bat" else "Fast", obtainable=False)
+            card_db.set_card_style(name, "style2")
+        card_db.set_career_owner(name, uid)
+        key, render = name.strip().lower(), True
+        with economy._tx() as conn:
+            conn.execute("UPDATE career_players SET card_key = ? WHERE user_id = ?", (key, uid))
+    elif (int(card["ovr"]), int(card["bat"]), int(card["bowl"]), card["country"]) != (o, p["bat"], p["bowl"], tag):
+        card_db.update_card(card["playername"], ovr=o, bat=p["bat"], bowl=p["bowl"], country=tag)
+        render = True
+    card = card_db.get_card(key)
+    if not render and not card_db._rget(card, "image_path"):
+        render = True
+    with economy._tx() as conn:                      # always in the squad (even above the squad limit)
+        if economy._own_qty(conn, uid, key) <= 0:
+            economy._add_copy(conn, uid, key, fill_xi=False)
+    return {"key": key, "render": render, "name": card["playername"]}
 
 
 # ── writing ──────────────────────────────────────────────────────────────────

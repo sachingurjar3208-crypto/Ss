@@ -111,6 +111,9 @@ _NEW_CARD_COLUMNS = [
     ("eoae_end",    "INTEGER"),    # last year, e.g. 2026
     ("eoae_jersey", "TEXT"),       # jersey number shown big behind the player
     ("eoae_ribbon", "TEXT"),       # ribbon text, NULL = "END OF AN ERA"
+    # Career Mode: a player's own cricketer as a card. NULL = normal card, else the owner's user id.
+    # Career cards are hidden from every list / search / pack / spawn and can't be sold or traded.
+    ("career_owner", "INTEGER"),
 ]
 
 
@@ -811,21 +814,46 @@ def effective_bowling_type(card) -> str | None:
 
 
 def list_all_cards() -> list[sqlite3.Row]:
+    """Every normal card (Career Mode cards are never listed)."""
     with _conn() as conn:
-        return conn.execute("SELECT * FROM cards ORDER BY ovr DESC, playername").fetchall()
+        return conn.execute(
+            "SELECT * FROM cards WHERE career_owner IS NULL ORDER BY ovr DESC, playername").fetchall()
 
 
-def find_cards(query: str, limit: int = 10) -> list[sqlite3.Row]:
-    """Cards whose name contains `query` (case-insensitive), best match first."""
+def is_career(card) -> bool:
+    """True for a Career Mode card (a player's own cricketer)."""
+    return card is not None and _rget(card, "career_owner") is not None
+
+
+def is_career_key(player_key: str) -> bool:
+    try:
+        return is_career(get_card(player_key))
+    except Exception:
+        return False
+
+
+def set_career_owner(playername: str, owner_id: int) -> None:
+    with _conn() as conn:
+        conn.execute("UPDATE cards SET career_owner = ?, obtainable = 0 WHERE playername_key = ?",
+                     (int(owner_id), playername.strip().lower()))
+        conn.commit()
+
+
+def find_cards(query: str, limit: int = 10, owner: int | None = None) -> list[sqlite3.Row]:
+    """Cards whose name contains `query` (case-insensitive), best match first.
+    Career Mode cards are left out, except the one that belongs to `owner`."""
     q = query.strip().lower()
     if not q:
         return []
+    who = int(owner) if owner is not None else -1
     with _conn() as conn:
-        exact = conn.execute("SELECT * FROM cards WHERE playername_key = ?", (q,)).fetchall()
+        exact = conn.execute(
+            "SELECT * FROM cards WHERE playername_key = ? AND (career_owner IS NULL OR career_owner = ?)",
+            (q, who)).fetchall()
         like = conn.execute(
             "SELECT * FROM cards WHERE playername_key LIKE ? ESCAPE '\\' AND playername_key != ? "
-            "ORDER BY ovr DESC LIMIT ?",
-            ("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", q, limit),
+            "AND (career_owner IS NULL OR career_owner = ?) ORDER BY ovr DESC LIMIT ?",
+            ("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", q, who, limit),
         ).fetchall()
     return list(exact) + list(like)
 
@@ -1004,7 +1032,8 @@ def set_card_image_path(playername: str, image_path: str) -> None:
 
 def list_playernames() -> list[str]:
     with _conn() as conn:
-        rows = conn.execute("SELECT playername FROM cards ORDER BY playername").fetchall()
+        rows = conn.execute(
+            "SELECT playername FROM cards WHERE career_owner IS NULL ORDER BY playername").fetchall()
         return [r["playername"] for r in rows]
 
 

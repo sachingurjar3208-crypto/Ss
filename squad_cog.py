@@ -700,7 +700,7 @@ class SquadCog(commands.Cog, name="Squad"):
     async def rcview(self, ctx: commands.Context, *, player: str):
         """Show a card you own, with YOUR career batting/bowling stats on it."""
         query = security.clean_input(player)
-        found = await asyncio.to_thread(card_db.find_cards, query, 8)
+        found = await asyncio.to_thread(card_db.find_cards, query, 8, ctx.author.id)
         if not found:
             await ctx.send(f"❌ No player found matching `{sl.discord_safe(query)}`.")
             return

@@ -89,6 +89,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Start", "rccareer start <name>", "Make your own cricketer: Batter, Bowler or All-rounder. He starts at Club Cricket."),
         ("Your Player", "rccareer [@user]", "His card: OVR, stats, XP, stamina and stage.", "rccareer"),
         ("Top Players", "rccareer top", "The 10 best career players."),
+        ("In Your XI", "rcswap", "Your career player is a real card in your squad and grows with him. Put him in your XI with rcswap. He can't be sold or traded."),
         ("How He Grows", "rcmp ranked / rcmp @user", "Every real match: -25 stamina, +10 XP, +10 more for a win. Bonus: +10 on your first match of the day, +5 per win from 3 wins in a row. Max 150 career XP a day. Practice matches don't count. Reaching OVR 85 takes months."),
         ("Drinks", "rcdrink", "No stamina = no career XP. Stamina refills on its own (+10 an hour). Water +20 (100k), Energy Drink +50 (500k), Power Shot +100 (events only). Max 3 drinks a day.", "rcdrink"),
     ]),
