@@ -13,8 +13,12 @@ Meaning of the labels:
     KEE wicketkeeping    CAT catching
 
 Every label except BAT and BOW is an "extra stat". Extra stats are saved with
-/cardstats. If one was never set, a value is DERIVED from the card's other
-numbers, so old cards always render.
+/cardstats. If one was never set, a random value just below OVR is used (fixed per
+card, so it is the same on every redraw).
+
+Rules for what the card SHOWS (the match engine still uses the card's real BAT / BOWL):
+  * no stat is ever shown above the card's OVR
+  * a bowler's RUN is about OVR - 60
 """
 
 from __future__ import annotations
@@ -51,18 +55,36 @@ DERIVE_BASE: dict[str, str] = {
 
 MIN_STAT, MAX_STAT = 1, 150
 
+# Shown stats are never above the card's OVR. Unset stats are random (but fixed per card):
+# OVR minus RANDOM_LOW..RANDOM_HIGH. A bowler's RUN (running between wickets) is OVR minus
+# about BOWLER_RUN_DROP, because bowlers are poor runners / batters.
+RANDOM_LOW, RANDOM_HIGH = 1, 8
+BOWLER_RUN_DROP = 60          # e.g. OVR 90 bowler -> RUN around 26-30
+BOWLER_RUN_SPREAD = 4
+
 
 def _clamp(value: int) -> int:
     return max(MIN_STAT, min(MAX_STAT, int(value)))
 
 
-def _wiggle(card, label: str) -> int:
-    """Small fixed variation (-4..+4): same card + same stat = same number every redraw."""
+def _seed(card, label: str) -> int:
+    """Fixed number for this card + stat: the same 'random' value comes back on every redraw."""
     try:
         key = card["playername_key"]
     except (IndexError, KeyError):
         key = ""
-    return zlib.crc32(f"{key}:{label.lower()}".encode("utf-8")) % 9 - 4
+    return zlib.crc32(f"{key}:{label.lower()}".encode("utf-8"))
+
+
+def _ovr(card) -> int:
+    try:
+        return int(card["ovr"])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return MAX_STAT
+
+
+def _bowler_run(card) -> int:
+    return max(MIN_STAT, _ovr(card) - BOWLER_RUN_DROP - _seed(card, "run") % (BOWLER_RUN_SPREAD + 1))
 
 
 def stat_set_name(card) -> str:
@@ -83,19 +105,23 @@ def card_stat_details(card) -> list[tuple[str, int, bool]]:
     set_name = stat_set_name(card)
     labels = STAT_SETS[set_name]
     extra = get_extra_stats(card)
+    top = _ovr(card)
+    is_bowler = set_name in ("BOWL", "SPIN")
     rows: list[tuple[str, int, bool]] = []
     for label in labels:
+        if label == "RUN" and is_bowler:                     # bowlers: always far below OVR
+            rows.append((label, _clamp(_bowler_run(card)), True))
+            continue
         if label in CORE_LABELS:
-            rows.append((label, _clamp(card[CORE_LABELS[label]]), False))
+            rows.append((label, _clamp(min(card[CORE_LABELS[label]], top)), False))
             continue
         key = label.lower()
         if key in extra:
-            rows.append((label, _clamp(extra[key]), False))
+            rows.append((label, _clamp(min(extra[key], top)), False))
             continue
-        # Bowlers bat badly, so their RUN is worked out from OVR instead of BAT.
-        base_key = "ovr" if label == "RUN" and set_name in ("BOWL", "SPIN") else DERIVE_BASE[label]
-        base = card[base_key]
-        rows.append((label, _clamp(base + _wiggle(card, label)), True))
+        # not set: random but fixed, OVR - (RANDOM_LOW..RANDOM_HIGH)
+        drop = RANDOM_LOW + _seed(card, label) % (RANDOM_HIGH - RANDOM_LOW + 1)
+        rows.append((label, _clamp(top - drop), True))
     return rows
 
 
@@ -119,7 +145,7 @@ def allowed_extra_keys(role: str) -> list[str]:
 
 def random_extra_stats(card, reroll: bool = False, low: int = 1, high: int = 8, rng=None) -> dict:
     """Random values for the card's extra stats, each OVR - (low..high).
-    Example: OVR 78 -> every stat is somewhere between 70 and 77.
+    Example: OVR 78 -> every stat is somewhere between 70 and 77. A bowler's RUN is OVR - ~60.
     Stats that are already saved are kept unless reroll=True."""
     rng = rng or random
     saved = get_extra_stats(card)
@@ -130,6 +156,9 @@ def random_extra_stats(card, reroll: bool = False, low: int = 1, high: int = 8, 
             continue                      # BAT / BOW are the card's own numbers
         key = label.lower()
         if key in saved and not reroll:
+            continue
+        if label == "RUN" and stat_set_name(card) in ("BOWL", "SPIN"):
+            out[key] = _clamp(ovr - BOWLER_RUN_DROP - rng.randint(0, BOWLER_RUN_SPREAD))
             continue
         out[key] = _clamp(ovr - rng.randint(low, high))
     return out
