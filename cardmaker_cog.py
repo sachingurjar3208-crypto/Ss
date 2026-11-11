@@ -566,11 +566,14 @@ class CardMakerCog(commands.Cog):
         theme=THEME_HELP,
         image="Player cutout picture: just upload it here (PNG with transparent background works best)",
         foregroundlink="OR a direct link to the player cutout image (old way)",
+        design="Card design. Default: New design (Style 2)",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
         narrative1=NARRATIVE_CHOICES, narrative2=NARRATIVE_CHOICES,
         bowlingtype=BOWLTYPE_CHOICES, theme=THEME_CHOICES,
+        design=[app_commands.Choice(name="New design (Style 2)", value="style2"),
+                app_commands.Choice(name="Old design (Classic)", value="classic")],
     )
     @app_commands.autocomplete(background=background_autocomplete, countryflag=country_autocomplete,
                                event=event_autocomplete)
@@ -596,6 +599,7 @@ class CardMakerCog(commands.Cog):
         theme: app_commands.Choice[str] | None = None,
         image: discord.Attachment | None = None,
         foregroundlink: str | None = None,
+        design: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer()
 
@@ -657,6 +661,8 @@ class CardMakerCog(commands.Cog):
             obtainable=obtainable,
             player_group=player,
         )
+        # New cards use the new design (Style 2) unless Classic was picked
+        set_card_style(playername, design.value if design is not None else "style2")
         _apply_theme(playername, theme, bg["pathname"])
 
         try:
