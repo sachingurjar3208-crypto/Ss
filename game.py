@@ -211,6 +211,7 @@ class GameState:
         self.runs: list[int] = [0, 0]
         self.wickets: list[int] = [0, 0]
         self.legal_balls: list[int] = [0, 0]
+        self.boundaries: list[int] = [0, 0]      # 4s + 6s per innings (tie-breaker)
 
         # Stats
         self.batsman_stats: dict[str, dict] = {}
@@ -481,11 +482,22 @@ class GameState:
         if key:
             self.batsman_stats.setdefault(key, {"r": 0, "b": 0, "4s": 0, "6s": 0})
 
+    def striker_balls_faced(self) -> int:
+        """Balls the batter on strike has faced this innings (0 for a batter who just walked in).
+        The engine uses it for the 'new batter is vulnerable' rule, so a set batter who comes on
+        strike after a wicket at the other end is NOT treated as new, and openers are."""
+        key = self._player_key(self.striker) if self.striker else None
+        st = self.batsman_stats.get(key) if key else None
+        return int(st.get("b", st.get("balls", 0))) if st else 0
+
     def _ensure_bowl_stats(self, name: str) -> None:
         self.bowler_stats.setdefault(name, {"b": 0, "r": 0, "w": 0, "m": 0})
 
     def add_runs(self, r: int) -> None:
         self.runs[self.innings - 1] += r
+        if r in (4, 6):
+            b = self.__dict__.setdefault("boundaries", [0, 0])
+            b[self.innings - 1] += 1
         if self.striker:
             self._ensure_bat_stats_for_player(self.striker)
             sk = self._player_key(self.striker)
@@ -1188,13 +1200,28 @@ class GameState:
             },
         }
 
-    def _set_winner(self) -> None:
+    def tie_break(self) -> tuple[int | None, str]:
+        """Scores level: who wins? (0 = team batting first, 1 = chasing team, None = a real tie)
+        1) more boundaries (4s + 6s) wins, 2) then fewer wickets lost, 3) else it stays a tie."""
+        b = self.__dict__.get("boundaries") or [0, 0]
+        if b[0] != b[1]:
+            return (0 if b[0] > b[1] else 1), f"on boundary count ({max(b)} vs {min(b)})"
+        w = self.wickets
+        if w[0] != w[1]:
+            return (0 if w[0] < w[1] else 1), f"on fewer wickets lost ({min(w)} vs {max(w)})"
+        return None, ""
+
+    def winner_index(self) -> int | None:
+        """0 = team batting first won, 1 = chasing team won, None = tie (after the tie-breaker)."""
         if self.runs[1] > self.runs[0]:
-            self.winner_id = self.batting_user_id
-        elif self.runs[0] > self.runs[1]:
-            self.winner_id = self.bowling_user_id
-        else:
-            self.winner_id = None
+            return 1
+        if self.runs[0] > self.runs[1]:
+            return 0
+        return self.tie_break()[0]
+
+    def _set_winner(self) -> None:
+        i = self.winner_index()
+        self.winner_id = None if i is None else (self.batting_user_id if i == 1 else self.bowling_user_id)
 
     def populate_summary_stats(self) -> None:
         def _display_name_for_key(game, key: str) -> str:
@@ -1338,4 +1365,7 @@ class GameState:
             diff = t1 - t2
             return f"**{team_first}** won by **{diff}** run{'s' if diff != 1 else ''}!"
         else:
-            return "Match tied! What a game!"
+            idx, why = self.tie_break()
+            if idx is None:
+                return "Match tied! What a game!"
+            return f"Scores level! **{team_second if idx == 1 else team_first}** won {why}!"

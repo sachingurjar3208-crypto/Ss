@@ -33,7 +33,9 @@ intents.members = True      # Star Pass: needed to see when the Premium role is 
 # chunk_guilds_at_startup=False: don't download the member list of EVERY server at start
 # (that hits Discord's gateway limit and delays "Logged in" by minutes). Only the main
 # server is loaded (squad_cog.on_ready), which is all the Premium role sync needs.
-bot = commands.Bot(command_prefix="", intents=intents, tree_cls=GuardedTree, chunk_guilds_at_startup=False)
+# case_insensitive: phones capitalise the first letter ("Rcdebut"), it must still work
+bot = commands.Bot(command_prefix="", intents=intents, tree_cls=GuardedTree, chunk_guilds_at_startup=False,
+                   case_insensitive=True)
 bot.add_check(maintenance_prefix_check)
 
 COGS_DIR = Path(__file__).parent
@@ -102,6 +104,7 @@ async def load_cogs():
         "auction_cog",
         "spawn_cog",
         "redeem_cog",
+        "backup_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:

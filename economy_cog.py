@@ -58,8 +58,6 @@ ECONOMY_COOLDOWN = 5
 CONFIRM_TIMEOUT = 10.0
 CONFIRM_COOLDOWN = 15.0
 
-# The free debut pack can only be opened in this server.
-DEBUT_PACK_GUILD_ID = 1556644438917382150
 # rcbuy / rcsell only need a 2 second gap. rcms (multi sell) has its own
 # 15 second cooldown per user, the same in every server and channel.
 BUYSELL_COOLDOWN = 2
@@ -1105,9 +1103,6 @@ class EconomyCog(commands.Cog, name="Economy"):
         key = security.clean_input(pack, 12).lower()
         if key not in have:
             await ctx.send("❌ You don't have that pack.")
-            return
-        if key == "debut" and (ctx.guild is None or ctx.guild.id != DEBUT_PACK_GUILD_ID):
-            await ctx.send("🔒 The `debut pack` can only be opened in the main server.")
             return
         spec = sl.PACKS[key]
         rolled = sl.roll_pack(key)

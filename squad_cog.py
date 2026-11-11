@@ -540,7 +540,8 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(
                 f"{ctx.author.mention} your team **{esc(default)}** is created with "
                 f"**{economy.fmt_coins(economy.START_PURSE)}** {JOIN_MAIN_LINK}\n"
-                f"You also got 1 `debut pack`. Open it with `rcopen debut` in the main server.",
+                f"**Next:** `rcstarterpack` to get your first players, then `rcxi` to see your XI.\n"
+                f"You also got 1 `debut pack`. Open it with `rcopen debut`.",
                 file=discord.File(buf, filename=DEBUT_IMG_NAME),
                 allowed_mentions=discord.AllowedMentions(users=[ctx.author]),
             )
@@ -548,8 +549,8 @@ class SquadCog(commands.Cog, name="Squad"):
         await ctx.send(
             f"Welcome, **{esc(ctx.author.display_name)}**! Your team **{esc(default)}** is created "
             f"with **{economy.fmt_coins(economy.START_PURSE)}** {JOIN_MAIN_LINK}\n"
-            f"You also got 1 `debut pack`. Open it with `rcopen debut` in the main server.\n"
-            f"Next: `rcstarterpack` to get your first players, then `rcxi` to see your XI.\n"
+            f"**Next:** `rcstarterpack` to get your first players, then `rcxi` to see your XI.\n"
+            f"You also got 1 `debut pack`. Open it with `rcopen debut`.\n"
             f"Change your team name with `rcteamname <name>`."
         )
 

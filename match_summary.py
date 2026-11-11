@@ -132,7 +132,8 @@ def pick_potm(game, inn_data: dict) -> str | None:
     """inn_data: {team_uid: {"batters": [...], "bowlers": [...]}} (both innings merged)."""
     t1, t2 = game.runs[0], game.runs[1]
     first, second = _team_uids(game)
-    winner = first if t1 > t2 else (second if t2 > t1 else None)
+    _wi = game.winner_index() if hasattr(game, "winner_index") else (0 if t1 > t2 else (1 if t2 > t1 else None))
+    winner = None if _wi is None else (second if _wi == 1 else first)
     totals = {first: t1, second: t2}
     scores: dict[str, float] = {}
     for uid, d in inn_data.items():
@@ -198,7 +199,8 @@ def _theme_for(game):
         import summary_theme
         first, second = _team_uids(game)
         t1, t2 = game.runs[0], game.runs[1]
-        order = [second, first] if t2 > t1 else [first, second]      # winner first (tie: batting first)
+        _wi = game.winner_index() if hasattr(game, "winner_index") else (1 if t2 > t1 else 0)
+        order = [second, first] if _wi == 1 else [first, second]      # winner first (tie: batting first)
         hit = summary_theme.pick_for_match(order)
         return hit if hit else (None, None)
     except Exception as e:                                             # the normal summary always works

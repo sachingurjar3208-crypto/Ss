@@ -414,9 +414,10 @@ def on_match_end(game, inn1_uid, inn2_uid, t1: int, t2: int) -> None:
     except (TypeError, ValueError):
         overs = 0
     winner = None
-    if t2 > t1:
+    _wi = game.winner_index() if hasattr(game, "winner_index") else (1 if t2 > t1 else (0 if t1 > t2 else None))
+    if _wi == 1:
         winner = int(inn2_uid)
-    elif t1 > t2:
+    elif _wi == 0:
         winner = int(inn1_uid)
     for uid in (int(inn1_uid), int(inn2_uid)):
         if not gate.get(uid):

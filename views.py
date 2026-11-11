@@ -467,12 +467,13 @@ def _save_match_record(game):
                 game.ranked_credits = starpass.award_ranked_match_credits([inn1_uid, inn2_uid])
         except Exception as e:
             print(f"[starpass] ranked credits failed: {type(e).__name__}: {e}")
-    if t1 == t2:
-        if getattr(game, "ranked", False):   # ranked tie: no star change
+    idx = game.winner_index()                # scores level -> boundary count, then fewer wickets lost
+    if idx is None:
+        if getattr(game, "ranked", False):   # a real tie (everything level): no star change
             game.ranked_result = {}
             game._ranked_done = True
         return  # tie — don't record
-    if t2 > t1:
+    if idx == 1:
         winner_id, loser_id = inn2_uid, inn1_uid
         winner_score, loser_score = t2, t1
     else:
@@ -1466,7 +1467,7 @@ async def _process_delivery(
             innings=game.innings,
             current_over=current_over,
             rrr=game.rrr(),
-            balls_since_wicket=game.balls_since_wicket,
+            balls_since_wicket=game.striker_balls_faced(),   # balls THIS batter has faced (new batter rule)
             partnership_runs=game.partnership_runs,
             is_recommended_shot=is_recommended_shot,
             guide_entry_exists=guide_entry_exists,

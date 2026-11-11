@@ -352,7 +352,7 @@ def calculate_outcome(
 
     Extra parameters vs original:
       rrr               – required run rate (innings 2 only); drives chase pressure
-      balls_since_wicket– balls faced by current batsman; <8 = new bat vulnerability
+      balls_since_wicket– balls the batter on strike has faced this innings; <8 = new bat vulnerability
       partnership_runs  – runs in current partnership; ≥30 = momentum boost
       total_overs       – match length; used to scale phase boundaries so that
                           short matches (e.g. 5-over) still have a death phase.
@@ -435,9 +435,11 @@ def calculate_outcome(
     # ── Chase pressure (innings 2 only) ─────────────────────────────────────
     if innings == 2 and rrr > 0:
         if rrr > 12:
-            # Panic mode: more boundaries attempted, far more wickets
-            w["6"]  = w["6"]  * 1.35
-            w["4"]  = w["4"]  * 1.15
+            # Panic mode: the batter swings more, but it costs far more wickets. The six bonus is small
+            # on purpose: in short matches the RRR is nearly always above 12, and a big bonus made
+            # chasing easier than batting first.
+            w["6"]  = w["6"]  * 1.10
+            w["4"]  = w["4"]  * 1.05
             w["W"]  = w["W"]  * 1.40
             w["0"]  = w["0"]  * 1.15
         elif rrr < 6:

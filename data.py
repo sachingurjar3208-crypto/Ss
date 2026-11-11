@@ -552,19 +552,6 @@ def intent_to_shot(direction: str, intent: str, delivery_button: str, delivery_i
     return "Drive"
 
 
-# ── Phase 2 (optional): direction matters for lofted shots too ────────────
-# Square Leg and the three "V" sectors (Straight, Cover, Mid-wicket) are
-# neutral; the four behind-square angles (Point, Third Man, Fine Leg,
-# Behind) are the hardest to clear and the riskiest to attempt — sixes are
-# rarer and the wicket chance is a bit higher there, mirroring how a mistimed
-# lap/upper-cut is far more likely to pick out a fielder than a straight loft.
-LOFT_DIRECTION_RISK: dict[str, dict[str, float]] = {
-    "L":  {"six_mult": 0.7, "wkt_mult": 1.15},   # Point
-    "UL": {"six_mult": 0.7, "wkt_mult": 1.15},   # Third Man
-    "UR": {"six_mult": 0.7, "wkt_mult": 1.15},   # Fine Leg
-    "U":  {"six_mult": 0.7, "wkt_mult": 1.15},   # Behind
-}
-USE_LOFT_DIRECTION_RISK = True
 
 # ── Shot guide ────────────────────────────────────────────────────────────────
 # Maps delivery combination → list of recommended shot BUTTON labels.
