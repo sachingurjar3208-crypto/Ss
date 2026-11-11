@@ -89,8 +89,11 @@ BOT_PROFILES = {
     "Silver":    {"ovr": (66, 76), "skill": 0.30},
     "Gold":      {"ovr": (72, 82), "skill": 0.50},
     "Platinum":  {"ovr": (80, 90), "skill": 0.80},   # harder
-    "Legendary": {"ovr": (89, 97), "skill": 0.95},   # much harder
-    "Ruby":      {"ovr": (90, 99), "skill": 1.00},   # very hard: best cards + always the smart choice
+    # bowl_boost = extra BOWL points for every bot bowler (max 99): their bowlers take more wickets
+    # and give away fewer runs and sixes.
+    # elite = the bowlers also get the hidden "Elite Spell" playstyle (logic.py): tighter, far fewer sixes.
+    "Legendary": {"ovr": (92, 99), "skill": 1.00, "bowl_boost": 7, "elite": True},    # very hard
+    "Ruby":      {"ovr": (93, 99), "skill": 1.00, "bowl_boost": 9, "elite": True},    # hardest: best cards + always the smart choice
 }
 
 
@@ -766,11 +769,21 @@ def build_bot_team(tier: str, bot_name: str, overs: int = RANKED_OVERS) -> dict 
     for c in xi:
         countries[c["country"]] = countries.get(c["country"], 0) + 1
     team_name = random.choice([f"{bot_name} XI", f"{bot_name}'s XI", f"Team {bot_name}"])
+    players = [_player_dict(c) for c in xi]
+    boost = int(prof.get("bowl_boost", 0))
+    if boost:
+        for p in players:
+            if p.get("bowling_type"):
+                p["bowl"] = min(99, int(p["bowl"]) + boost)
+    if prof.get("elite"):
+        for p in players:
+            if p.get("bowling_type"):
+                p["attributes"] = list(p.get("attributes") or []) + ["Elite Spell"]
     return {
         "name": team_name[:24],
         "ovr": sl.average_ovr(xi),
         "chem": min(99, 70 + 3 * max(countries.values(), default=0)),
-        "players": [_player_dict(c) for c in xi],
+        "players": players,
         "captain": None,
     }
 

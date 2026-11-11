@@ -229,6 +229,11 @@ ATTR_EFFECTS = {
     "Spell Finisher":  {"wkt_mult":         1.25,   # +25% wickets in the bowler's final over(s)
                         "run_reduce":       0.90},  # -10% runs in the bowler's final over(s)
     "Mind Games":      {"wkt_mult":         1.25},  # +25% wickets when the delivery type changes
+    # Elite Spell: only the bowlers of the hardest ranked BOTS get this (ranked.py). Never shown to users.
+    "Elite Spell":     {"run_reduce":       0.84,   # -16% 1s/2s/3s/4s
+                        "six_reduce":       0.65,   # sixes 35% rarer
+                        "wkt_mult":         1.20,   # +20% wickets
+                        "wkt_cap_add":      0.045}, # and the wicket limit is a little higher against them
     # Breakthrough (Maxwell / Russell / Pollard type game changer). Never shown to users.
     "Breakthrough":    {"chase_six_mult":   1.30,   # +30% sixes while chasing (2nd innings)
                         "chase_death_mult": 1.30,   # +30% 1s/2s/3s/4s in the last overs of a chase (match winner)
@@ -374,7 +379,9 @@ def calculate_outcome(
     bat_factor  = min(3.0,  max(0.08, math.exp((batsman_bat - 70) * 0.025)))
     wkt_factor  = min(3.0,  max(0.08, math.exp((bowler_bowl - 70) * 0.032)))
     # a good bowler also dries up the scoring, a poor one gets hit more
-    run_squeeze = min(1.35, max(0.70, wkt_factor ** -0.30))
+    run_squeeze = min(1.40, max(0.55, wkt_factor ** -0.45))
+    # sixes need a bad ball: a top bowler gives away far fewer of them, a weak one more
+    six_squeeze = min(1.25, max(0.55, wkt_factor ** -0.30))
     # batting skill makes it harder to get out
     bat_safety  = min(1.6,  max(0.65, bat_factor ** -0.40))
 
@@ -386,6 +393,7 @@ def calculate_outcome(
         w[k] = max(0.05, w[k] * m["bat"] * bat_factor * run_squeeze)
     for k in ("4", "6"):
         w[k] = max(0.02, w[k] * m["bat"] * (bat_factor ** 1.25) * run_squeeze)
+    w["6"] = max(0.02, w["6"] * six_squeeze)
 
     # Dot balls: inverse of bat — weak batters face far more dots
     w["0"] = max(1.0, w["0"] / bat_factor / run_squeeze)
@@ -630,6 +638,15 @@ def calculate_outcome(
             w["W"] = w["W"] * sf["wkt_mult"]
             for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * sf["run_reduce"]
 
+    # ELITE SPELL (hard ranked bots only): tighter, fewer sixes, more wickets
+    _wkt_cap_add = 0.0
+    if "Elite Spell" in bowler_attrs:
+        es = AE_BOWL["Elite Spell"]
+        for k in ("1", "2", "3", "4"): w[k] = w[k] * es["run_reduce"]
+        w["6"] = w["6"] * es["six_reduce"]
+        w["W"] = w["W"] * es["wkt_mult"]
+        _wkt_cap_add = es["wkt_cap_add"]
+
     # LOW BOWLING QUALITY: sixes/fours are easy, wickets very unlikely
     _six_cap_mult = 2.0
     if "Low Bowling Quality" in bowler_attrs:
@@ -685,11 +702,18 @@ def calculate_outcome(
     INTENT_MULT = {
         "Push":  {"0": 0.9, "1": 1.45, "2": 1.3, "3": 1.0, "4": 0.40, "6": 0.0,  "W": 0.55},
         "Hit":   {"0": 1.0, "1": 0.95, "2": 1.0, "3": 1.0, "4": 1.20, "6": 0.40, "W": 1.0},
-        "Loft": {"0": 1.05, "1": 0.5, "2": 0.55, "3": 0.6, "4": 1.0, "6": 4.0, "W": 1.8},
+        "Loft": {"0": 1.15, "1": 0.5, "2": 0.55, "3": 0.6, "4": 1.0, "6": 2.9, "W": 2.0},
     }
     for k, m in INTENT_MULT.get(intent or "", {}).items():
         if k in w:
             w[k] *= m
+
+    # ── Final six limit ──────────────────────────────────────────────────────
+    # However many playstyles, phases and the Loft intent stack up, a six can never be more
+    # than about 1 ball in 4 (a weak "Low Bowling Quality" bowler is the one exception).
+    if "Low Bowling Quality" not in bowler_attrs:
+        _others = sum(v for k, v in w.items() if k != "6")
+        w["6"] = min(w["6"], _others * 0.32)                 # 0.32 / 1.32 ≈ 24%
 
     # ── DEFEND is a defensive shot: it can NEVER give a 4, a 6 or a 3 ────────
     # (a defended ball only dies for 0 / a quick single / 2, or the batter is
@@ -702,8 +726,11 @@ def calculate_outcome(
     # ── Global wicket cap ─────────────────────────────────────────────────────
     # No matter how stacked the multipliers get, P(W) cannot exceed ~14%.
     # This keeps good-stats players from losing wickets on every single ball.
+    # A lofted shot is a real gamble, so its cap is higher (~19%): going over the top every ball
+    # must cost wickets, like in real cricket.
     other_total = sum(v for k, v in w.items() if k != "W")
-    w["W"] = min(w["W"], other_total * 0.165)   # 0.165 / 1.165 ≈ 14%
+    _wkt_cap = (0.235 if intent == "Loft" else 0.165) + _wkt_cap_add   # ≈ 19% lofted, ≈ 14% otherwise
+    w["W"] = min(w["W"], other_total * _wkt_cap)
 
     # ── Stadium effect — only GROUND_EFFECT_PCT (15%) ────────────────────────
     # Applied AFTER the global wicket cap so the full 15% always shows up.
