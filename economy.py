@@ -567,18 +567,6 @@ def _remove_copies(conn: sqlite3.Connection, uid: int, key: str, n: int = 1) -> 
     return int(slot_row["slot"]) if slot_row is not None else None
 
 
-CAREER_LOCK_MSG = "Your career player can't be sold, traded or replaced."
-
-
-def _career_locked(key: str) -> bool:
-    """True for a Career Mode card (the player's own cricketer): it never leaves the squad."""
-    try:
-        import card_db
-        return bool(card_db.is_career_key(key))
-    except Exception:
-        return False
-
-
 def _event_disabled(key: str) -> bool:
     """True if this card belongs to an event that was switched off (/eventdisable):
     nobody may be given it. Never raises (a card-database hiccup must not break the economy)."""
@@ -682,8 +670,6 @@ def resolve_pending(user_id, new_key: str, action: str, replace_key: str | None 
         if action == "replace":
             if not replace_key or _own_qty(conn, uid, replace_key) <= 0:
                 return "You don't own the player you picked to replace."
-            if _career_locked(replace_key):
-                return CAREER_LOCK_MSG
             freed = _remove_copies(conn, uid, replace_key, 1)
             _pending_take(conn, uid, new_key)
             if _add_copy(conn, uid, new_key, fill_xi=False) and freed is not None \
@@ -1146,8 +1132,6 @@ def sell_card(user_id, player_key: str, value: int, replacement_key: str | None)
     the XI, the `replacement_key` (a bench player) takes its batting spot."""
     if AUCTION_LOCK:
         return AUCTION_LOCK_MSG
-    if _career_locked(player_key):
-        return CAREER_LOCK_MSG
     uid = _uid(user_id)
     with _tx() as conn:
         if _own_qty(conn, uid, player_key) <= 0:
@@ -1183,8 +1167,6 @@ def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) ->
     want: dict[str, int] = {}
     for k, _ in items:
         want[k] = want.get(k, 0) + 1
-    if any(_career_locked(k) for k in want):
-        return CAREER_LOCK_MSG, 0
     with _tx() as conn:
         for k, n in want.items():
             if _own_qty(conn, uid, k) < n:
@@ -1688,8 +1670,6 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
         return "You can't trade with yourself."
     if _event_disabled(a_key) or _event_disabled(b_key):
         return "A card of a disabled event can't be traded right now."
-    if _career_locked(a_key) or _career_locked(b_key):
-        return "A career player can't be traded."
     with _tx() as conn:
         if _own_qty(conn, a, a_key) <= 0 or _own_qty(conn, b, b_key) <= 0:
             return "One of the players is no longer available."

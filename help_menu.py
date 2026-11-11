@@ -85,14 +85,6 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Your Catches", "rcspawns", "How many cricketers you caught. Every 30 catches gives 1 Draft Voucher.", "rcspawns"),
         ("Spawn Channel", "/spawn channel", "Slash command. Pick the channel where cricketers spawn in your server (needs Manage Server and at least 40 members in the server)."),
     ]),
-    "career": ("Career", "Your own cricketer who grows from real matches", [
-        ("Start", "rccareer start <name>", "Make your own cricketer: Batter, Bowler or All-rounder. He starts at Club Cricket."),
-        ("Your Player", "rccareer [@user]", "His card: OVR, stats, XP, stamina and stage.", "rccareer"),
-        ("Top Players", "rccareer top", "The 10 best career players."),
-        ("In Your XI", "rcswap", "Your career player is a real card in your squad and grows with him. Put him in your XI with rcswap. He can't be sold or traded."),
-        ("How He Grows", "rcmp ranked / rcmp @user", "Every real match: -25 stamina, +10 XP, +10 more for a win. Bonus: +10 on your first match of the day, +5 per win from 3 wins in a row. Max 150 career XP a day. Practice matches don't count. Reaching OVR 85 takes months."),
-        ("Drinks", "rcdrink", "No stamina = no career XP. Stamina refills on its own (+10 an hour). Water +20 (100k), Energy Drink +50 (500k), Power Shot +100 (events only). Max 3 drinks a day.", "rcdrink"),
-    ]),
     "ranked": ("Ranked", "Ranked mode, tiers and rewards", [
         ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "rcmp ranked"),
         ("Your Rank", "rcrank [@user]", "Your tier, stars and season record as a card.", "rcrank"),
@@ -121,7 +113,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     ]),
 }
 
-ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "spawn", "career", "auction", "ranked", "events", "other", "premium"]
+ORDER = ["start", "rewards", "squad", "economy", "packs", "match", "spawn", "auction", "ranked", "events", "other", "premium"]
 
 
 # ── Packs page (live from squad_logic.PACKS) ────────────────────────────────

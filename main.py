@@ -102,7 +102,6 @@ async def load_cogs():
         "auction_cog",
         "spawn_cog",
         "redeem_cog",
-        "career_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:
@@ -125,6 +124,11 @@ def init_databases():
             print(f"✓ Database ready: {mod}")
         except Exception as e:
             print(f"✗ Database init failed ({mod}): {type(e).__name__}: {e}")
+    try:                                   # Career Mode was removed: take its cards out, refund drinks (runs once)
+        import career_cleanup
+        career_cleanup.run()
+    except Exception as e:
+        print(f"✗ Career cleanup failed: {type(e).__name__}: {e}")
 
 
 async def main():

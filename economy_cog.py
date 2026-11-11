@@ -630,8 +630,7 @@ class PendingCardView(OwnedView):
         if self.used:
             await interaction.response.defer()
             return
-        cards = sorted((c for c in sl.owned_cards(self.uid) if not card_db.is_career(c)),
-                       key=lambda c: (int(c["ovr"]), c["playername"]))[:25]   # a menu holds 25
+        cards = sorted(sl.owned_cards(self.uid), key=lambda c: (int(c["ovr"]), c["playername"]))[:25]   # a menu holds 25
         in_xi = set(economy.get_xi(self.uid).values())
         options = []
         for c in cards:
@@ -1214,9 +1213,6 @@ class EconomyCog(commands.Cog, name="Economy"):
         if card is None:
             await ctx.send(str(err))
             return
-        if card_db.is_career(card):
-            await ctx.send("❌ Your career player can't be sold.")
-            return
         uid, key = ctx.author.id, card["playername_key"]
         value = sl.sell_value(card)
 
@@ -1263,10 +1259,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if end > n:
             await refuse(f"Your squad has only {n} players. Check the numbers in `rcsquad`.")
             return
-        chosen = [c for c in cards[start - 1:end] if not card_db.is_career(c)]   # the career player is never sold
-        if not chosen:
-            await refuse("Your career player can't be sold.")
-            return
+        chosen = cards[start - 1:end]
         if n - len(chosen) < economy.MIN_SQUAD:
             can = max(0, n - economy.MIN_SQUAD)
             await refuse(f"You must keep at least {economy.MIN_SQUAD} players. Right now you can sell at most {can}.")
@@ -1360,9 +1353,6 @@ class EconomyCog(commands.Cog, name="Economy"):
         theirs, err = sl.resolve_owned(member.id, theirs_txt)
         if theirs is None:
             await ctx.send(f"❌ {esc(member.display_name)} doesn't own a player like that.")
-            return
-        if card_db.is_career(mine) or card_db.is_career(theirs):
-            await ctx.send("❌ A career player can't be traded.")
             return
         if economy.owns(member.id, mine["playername_key"]) or economy.owns(ctx.author.id, theirs["playername_key"]):
             await ctx.send("❌ One of you already owns the player you'd receive.")
