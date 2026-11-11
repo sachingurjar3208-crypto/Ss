@@ -344,6 +344,44 @@ def _rarity_summary_embed(cards) -> discord.Embed:
     return embed
 
 
+
+# ── Foreground from an uploaded picture (no link needed) ─────────────────────
+MAX_UPLOAD = 15 * 1024 * 1024
+
+
+async def _prepare_foreground(image: discord.Attachment | None, link: str | None) -> tuple[str | None, str | None]:
+    """An uploaded picture is saved in the permanent foregrounds folder under an `upload://...`
+    name (so it never expires like a copied Discord link does) and used exactly as it is.
+    No upload = the link is used as before. Returns (foreground_link, error)."""
+    if image is None:
+        return ((link or "").strip() or None), None
+    import hashlib
+    import card_image
+    name = (image.filename or "").lower()
+    if not ((image.content_type or "").startswith("image/") or name.endswith((".png", ".jpg", ".jpeg", ".webp"))):
+        return None, "That file is not a picture. Upload a PNG or JPG."
+    if image.size and image.size > MAX_UPLOAD:
+        return None, "That picture is too big (max 15 MB)."
+    try:
+        data = await image.read()
+
+        def save() -> str:
+            img = Image.open(io.BytesIO(data)).convert("RGBA")
+            buf = io.BytesIO()
+            img.save(buf, "PNG")
+            png = buf.getvalue()
+            key = "upload://" + hashlib.sha1(png).hexdigest()[:24]
+            path = card_image._foreground_file(key)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(png)
+            return key
+
+        return await asyncio.to_thread(save), None
+    except Exception as e:
+        print(f"[cardmaker] foreground upload failed: {type(e).__name__}: {e}")
+        return None, "Couldn't read that picture. Try another PNG / JPG."
+
+
 class RarityListView(discord.ui.View):
     """List mode: 20 cards per page, one line each. Summary mode: old OVR grouping."""
 
@@ -512,7 +550,6 @@ class CardMakerCog(commands.Cog):
     @app_commands.describe(
         playername="Full player name — the unique ID for this card, e.g. Virat Kohli",
         displayname="Short name shown big in the card corner, e.g. Kohli",
-        foregroundlink="Direct link to the player cutout image (PNG with transparent background works best)",
         background="Card background template (added via /bgadder)",
         ovr="Overall rating (1–150)",
         bat="Batting power (1–150)",
@@ -527,6 +564,8 @@ class CardMakerCog(commands.Cog):
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand. Default True",
         player="Real player this card belongs to, e.g. Virat Kohli. Many cards can share it; XI takes only one. Empty = same as playername",
         theme=THEME_HELP,
+        image="Player cutout picture: just upload it here (PNG with transparent background works best)",
+        foregroundlink="OR a direct link to the player cutout image (old way)",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
@@ -541,7 +580,6 @@ class CardMakerCog(commands.Cog):
         interaction: discord.Interaction,
         playername: str,
         displayname: str,
-        foregroundlink: str,
         background: str,
         ovr: app_commands.Range[int, 1, MAX_STAT],
         bat: app_commands.Range[int, 1, MAX_STAT],
@@ -556,8 +594,14 @@ class CardMakerCog(commands.Cog):
         obtainable: bool = True,
         player: str | None = None,
         theme: app_commands.Choice[str] | None = None,
+        image: discord.Attachment | None = None,
+        foregroundlink: str | None = None,
     ):
         await interaction.response.defer()
+
+        if image is None and not (foregroundlink or "").strip():
+            await interaction.followup.send("❌ Add the player photo: upload it in `image` (or give `foregroundlink`).")
+            return
 
         event_row = None
         if event is not None and event.strip():
@@ -591,6 +635,11 @@ class CardMakerCog(commands.Cog):
             names = list_backgrounds()
             hint = ", ".join(names) if names else "(none added yet — use `/bgadder` first)"
             await interaction.followup.send(f"❌ Unknown background `{background}`.\nAvailable: {hint}")
+            return
+
+        foregroundlink, fg_err = await _prepare_foreground(image, foregroundlink)
+        if fg_err:
+            await interaction.followup.send(f"❌ {fg_err}")
             return
 
         create_card(
@@ -746,6 +795,7 @@ class CardMakerCog(commands.Cog):
         event="Event of this card (from /eventmaker) — type none to remove it from its event",
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand",
         theme="Card theme. Halloween = Halloween frame + orange text. Normal = back to purple",
+        image="New player cutout picture: just upload it here (instead of a link)",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
@@ -780,6 +830,7 @@ class CardMakerCog(commands.Cog):
         event: str | None = None,
         obtainable: bool | None = None,
         theme: app_commands.Choice[str] | None = None,
+        image: discord.Attachment | None = None,
     ):
         await interaction.response.defer()
 
@@ -792,7 +843,13 @@ class CardMakerCog(commands.Cog):
         updates: dict = {}
         if displayname is not None:
             updates["displayname"] = displayname
-        if foregroundlink is not None:
+        if image is not None:
+            new_fg, fg_err = await _prepare_foreground(image, None)
+            if fg_err:
+                await interaction.followup.send(f"❌ {fg_err}")
+                return
+            updates["foreground_link"] = new_fg
+        elif foregroundlink is not None:
             updates["foreground_link"] = foregroundlink
         if background is not None:
             bg = get_background(background)
