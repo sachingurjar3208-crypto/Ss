@@ -372,9 +372,10 @@ def _draw_player(canvas, card_row, fg):
 
 
 def _head_width(player):
-    """Width of the head in the cutout (px). Rows are read from the top; each row's WIDEST solid
-    run counts (bats / sticks are separate runs). The head ends about 1.1 head-widths below its top,
-    so reading stops there, before the shoulders."""
+    """Width of the head in the cutout (px). Each row's widest solid run is read from the top down
+    (bats / sticks are separate runs). The head is about 1.25 head-widths tall, so reading stops
+    there. The MEDIAN row width is used, not the widest row, so a hand on the cap or a raised arm
+    touching the head (only a few rows) does not count as a huge head."""
     try:
         k = max(1, player.width // 300)
         a = player.getchannel("A").resize((max(1, player.width // k), max(1, player.height // k)))
@@ -383,10 +384,8 @@ def _head_width(player):
         top = next((y for y in range(h) if any(px[x, y] >= 40 for x in range(w))), None)
         if top is None:
             return None
-        hw = 0
+        widths = []
         for y in range(top, h):
-            if hw and y - top > 1.1 * hw:
-                break
             best, start = 0, None
             for x in range(w + 1):
                 solid = x < w and px[x, y] >= 40
@@ -395,7 +394,13 @@ def _head_width(player):
                 elif not solid and start is not None:
                     best = max(best, x - start)
                     start = None
-            hw = max(hw, best)
+            widths.append(best)
+            if len(widths) >= 8:
+                est = sorted(widths)[len(widths) // 2]
+                if len(widths) > 1.25 * est:
+                    break
+        core = widths[len(widths) // 5: max(len(widths) // 5 + 1, len(widths) * 4 // 5)]
+        hw = sorted(core)[len(core) // 2] if core else 0
         return hw * k if hw > 4 else None
     except Exception:
         return None
