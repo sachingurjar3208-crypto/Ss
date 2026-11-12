@@ -20,6 +20,7 @@ import io
 import math
 import random
 import threading
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
@@ -165,6 +166,45 @@ def _card_bg(card_row) -> Image.Image | None:
         return hit
     except Exception:
         return None
+
+
+# ── Rush Cricket logo watermark ──────────────────────────────────────────
+# A clean logo can be dropped next to this file as rush_logo.png (square, transparent
+# corners); otherwise the round logo is cut out of starter_bg.png (same as squad_image.py).
+LOGO_FILE = Path(__file__).with_name("rush_logo.png")
+LOGO_SRC = Path(__file__).with_name("starter_bg.png")
+LOGO_SRC_CIRCLE = (627, 117, 111)          # centre x, centre y, radius in starter_bg scaled to 1254 wide
+LOGO_CENTER = (635, 610)                   # output px (behind the player)
+LOGO_SIZE = 660                            # diameter, output px
+LOGO_OPACITY = 0.22                        # 0 = invisible, 1 = solid
+_LOGO: list = []
+
+
+def _logo_layer():
+    """(RGBA image, paste position) at working size, built once. None if no logo file."""
+    if _LOGO:
+        return _LOGO[0]
+    out = None
+    try:
+        if LOGO_FILE.exists():
+            lg = Image.open(LOGO_FILE).convert("RGBA")
+        else:
+            src = Image.open(LOGO_SRC).convert("RGB")
+            k = src.width / 1254
+            cx, cy, r = (v * k for v in LOGO_SRC_CIRCLE)
+            r *= 0.97                                  # stay inside the logo's own edge
+            lg = src.crop((int(cx - r), int(cy - r), int(cx + r), int(cy + r))).convert("RGBA")
+            m = Image.new("L", (lg.width * 4, lg.height * 4), 0)
+            ImageDraw.Draw(m).ellipse((0, 0, m.width - 1, m.height - 1), fill=255)
+            lg.putalpha(m.resize(lg.size, Image.LANCZOS))
+        size = LOGO_SIZE * S
+        lg = lg.resize((size, size), Image.LANCZOS).filter(ImageFilter.GaussianBlur(S * 0.8))
+        lg.putalpha(lg.getchannel("A").point(lambda v: int(v * LOGO_OPACITY)))
+        out = (lg, (int(LOGO_CENTER[0] * S - size / 2), int(LOGO_CENTER[1] * S - size / 2)))
+    except Exception as e:
+        print(f"[card_full] logo unavailable ({type(e).__name__}: {e})")
+    _LOGO.append(out)
+    return out
 
 
 # ── drawing helpers ──────────────────────────────────────────────────────
@@ -326,13 +366,10 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     accent = _accent(card_row["ovr"])
     canvas = (_card_bg(card_row) or st["bg"]).convert("RGBA")
 
-    # faint ring behind the player (own layer, so its transparency blends)
-    ring = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    rcx, rcy, rr = 635, 640, 400
-    ImageDraw.Draw(ring).ellipse((_q(rcx - rr, rcy - rr), _q(rcx + rr, rcy + rr)),
-                                 outline=(255, 255, 255, 24), width=26 * S)
-    canvas.alpha_composite(ring)
-    del ring
+    # Rush Cricket logo, faint, in the middle behind the player
+    logo = _logo_layer()
+    if logo is not None:
+        canvas.alpha_composite(logo[0], logo[1])
 
     _draw_player(canvas, card_row, fg_image)
     canvas.paste((4, 6, 16, 255), (0, 0), st["fade"])
