@@ -94,12 +94,13 @@ THEMES = {
     "crest":           {"bg": ((18, 70, 70), (3, 14, 16)),  "panel": ((14, 70, 72), (3, 14, 16)),   "accent": (90, 224, 204),  "tag": "CREST"},
     "arena":           {"bg": ((96, 22, 22), (14, 4, 6)),   "panel": ((96, 18, 20), (16, 4, 6)),    "accent": (255, 96, 74),   "tag": "ARENA"},
     "showcase":        {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((22, 34, 72), (5, 8, 20)),    "accent": None,            "tag": "SHOWCASE"},
+    "retro":           {"bg": ((96, 24, 140), (14, 4, 30)), "panel": ((58, 14, 92), (12, 3, 26)),   "accent": (255, 92, 214),  "tag": "RETRO STAR"},
 }
 
 # Cards with no theme get a look from their EVENT name first, then their background's name
 # (background or s2_bg): a name containing the word on the left uses the theme on the right.
 BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"), ("season", "season1"), ("s1", "season1"),
-                  ("diwali", "diwali"), ("halloween", "halloween"), ("end of an era", "eoae"), ("eoae", "eoae")]
+                  ("diwali", "diwali"), ("halloween", "halloween"), ("end of an era", "eoae"), ("eoae", "eoae"), ("retro", "retro")]
 
 
 def _event(card_row) -> dict | None:
