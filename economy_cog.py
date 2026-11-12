@@ -37,7 +37,7 @@ import squad_logic as sl
 import card_cache
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
-from squad_cog import _card_line, _in_match, _is_premium, _need_debut, squad_order, squad_entries
+from squad_cog import _card_line, price_line, _in_match, _is_premium, _need_debut, squad_order, squad_entries
 
 # ── One shared 5 second cooldown for ALL economy commands ────────────────────
 # Each command used to have its own timer, so spamming rcbal/rcopen/rcbuy one
@@ -704,9 +704,9 @@ async def send_next_pending(dest, user_id: int) -> bool:
         n, lim = info["count"], info["limit"]
         if info["owned"]:
             head = (f"♻️ **Duplicate card!** You already have **{info['owned']}** "
-                    f"cop{'y' if info['owned'] == 1 else 'ies'} of **{esc(card['playername'])}** ({card['ovr']} OVR).")
+                    f"cop{'y' if info['owned'] == 1 else 'ies'}.\n{price_line(card)}")
         else:
-            head = f"New card: **{esc(card['playername'])}** ({card['ovr']} OVR)"
+            head = price_line(card)
         if info["room"]:
             choice = (f"Keep it in your squad ({n}/{lim}), sell it for **{_plain_coins(sl.sell_value(card))}**, "
                       f"or replace one of your players with it.")
@@ -865,11 +865,11 @@ class EconomyCog(commands.Cog, name="Economy"):
         if res["card"]:
             card = card_db.get_card(res["card"])
             if res["dupe"]:
-                lines.append(f"🎴 {_card_line(card, '  ♻️ duplicate')} → **+{economy.fmt_coins(res['refund'])}**")
+                lines.append(f"🎴 {price_line(card)}  ♻️ duplicate → **+{economy.fmt_coins(res['refund'])}**")
             elif res.get("pending"):
-                lines.append(f"🎴 {_card_line(card, '  ⏳ waiting')} — choose below: keep, sell or replace.")
+                lines.append(f"🎴 {price_line(card)}  ⏳ choose below: keep, sell or replace.")
             else:
-                lines.append(f"🎴 New player: {_card_line(card, '  🆕')}")
+                lines.append(f"🎴 {price_line(card)}  🆕")
         else:
             lines.append(f"🎴 No player cards with rating {lo}-{hi} are available yet.")
         lines.append(f"Balance: **{economy.fmt_coins(res['balance'])}**")
@@ -980,11 +980,11 @@ class EconomyCog(commands.Cog, name="Economy"):
         card = card_db.get_card(res["card"])
         ovr = int(card["ovr"])
         if res["dupe"]:
-            body = f"{_card_line(card, '  ♻️ duplicate')}\n💰 Sold automatically for **+{economy.fmt_coins(res['refund'])}**"
+            body = f"{price_line(card)}\n♻️ Duplicate, sold automatically for **+{economy.fmt_coins(res['refund'])}**"
         elif res["pending"]:
-            body = f"{_card_line(card, '  ⏳ waiting')}\nChoose below: keep, sell or replace."
+            body = f"{price_line(card)}\n⏳ Choose below: keep, sell or replace."
         else:
-            body = _card_line(card, "  🆕")
+            body = f"{price_line(card)}  🆕"
         if ovr >= 84:
             title, color = "🌟 Rare Claim!", discord.Color.purple()
         elif ovr >= 76:
@@ -1123,9 +1123,18 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send(f"❌ {result}")
             return
         by_key = {c["playername_key"]: c for c in rolled}
-        lines = [_card_line(by_key[k], "  🆕") for k in result["new"]]
-        lines += [_card_line(by_key[k], "  ⏳ keep / sell?") for k in result.get("pending", [])]
-        lines += [_card_line(by_key[k], "  ♻️ duplicate") for k in result["dupes"]]
+        shown_key = rolled[0]["playername_key"]
+
+        def _line(k, extra):
+            # the card in the picture: prices only. Other cards of a multi-card pack keep their
+            # name, or nobody could tell which price belongs to which card.
+            if k == shown_key or len(rolled) == 1:
+                return price_line(by_key[k], extra)
+            return _card_line(by_key[k], extra)
+
+        lines = [_line(k, "  🆕") for k in result["new"]]
+        lines += [_line(k, "  ⏳ keep / sell?") for k in result.get("pending", [])]
+        lines += [_line(k, "  ♻️ duplicate") for k in result["dupes"]]
         if key == "debut":
             embed = discord.Embed(description="`Debut Pack` opened!\n\n" + "\n".join(lines), color=discord.Color.gold())
         else:

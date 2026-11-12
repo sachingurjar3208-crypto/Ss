@@ -99,6 +99,11 @@ def squad_entries(user_id: int) -> list:
     return out
 
 
+def price_line(card, extra: str = "") -> str:
+    """Only the card's prices: everything else (name, OVR, role, country) is on the card image."""
+    return f"Buy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**{extra}"
+
+
 def _card_line(card, extra: str = "", emojis: bool = True) -> str:
     role = ROLES.get(card_db.effective_role(card), "?")
     if emojis:
@@ -245,19 +250,8 @@ class AutoXiView(ui.View):
 def _show_embed(card) -> discord.Embed:
     """The embed body `rcshow` displays for one card (pulled out so the
     picker view below can rebuild it for whichever card is on screen)."""
-    styles = [s for s in (card["playstyle1"], card["playstyle2"]) if s]
-    desc = (
-        f"OVR **{card['ovr']}** · BAT **{card['bat']}** · BOWL **{card['bowl']}**\n"
-        f"{ROLES.get(card_db.effective_role(card), '?')}"
-        + (f" · {HANDS.get(card['batting_hand'], '')} bat" if card["batting_hand"] else "")
-        + (f" · {card_db.effective_bowling_type(card)}" if card_db.effective_bowling_type(card) else "")
-        + f"\n{card['country_emoji']} {esc(card['country'])}"
-    )
-    if styles:
-        desc += "\n\n**Playstyles**\n" + "\n".join(f"• **{esc(s)}**" for s in styles)
-    desc += f"\n\nBuy **{economy.fmt_coins(sl.buy_price(card))}** · Sell **{economy.fmt_coins(sl.sell_value(card))}**"
-    embed = discord.Embed(title=esc(card["playername"]), description=desc, color=discord.Color.gold())
-    return embed
+    # only the prices: name, OVR, role, country and playstyle are all on the card image
+    return discord.Embed(description=price_line(card), color=discord.Color.gold())
 
 
 class ShowPickerView(OwnedView):
