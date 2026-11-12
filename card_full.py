@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import io
 import math
-import random
 import threading
 from pathlib import Path
 
@@ -93,7 +92,7 @@ def _build_static() -> dict:
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=RADIUS * S, fill=255)
 
-    # built-in background: radial navy glow + faint diagonal strokes
+    # built-in background: plain smooth navy glow
     small = Image.new("RGB", (OUT_W // 4, OUT_H // 4))
     cx, cy = small.width * 0.55, small.height * 0.38
     maxd = math.hypot(small.width, small.height) * 0.62
@@ -104,15 +103,7 @@ def _build_static() -> dict:
             t = min(1.0, math.hypot(x - cx, y - cy) / maxd) ** 1.15
             px[x, y] = tuple(int(inner[i] + (outer[i] - inner[i]) * t) for i in range(3))
     bg = small.resize((W, H), Image.BICUBIC).convert("RGBA")
-    tex = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    td = ImageDraw.Draw(tex)
-    rnd = random.Random(11)
-    for _ in range(70):
-        x, y = rnd.randint(-100, OUT_W), rnd.randint(0, OUT_H)
-        ln = rnd.randint(150, 420)
-        td.line([_q(x, y), _q(x + ln, y - ln)], fill=(255, 255, 255, rnd.randint(4, 12)),
-                width=rnd.randint(2, 5) * S)
-    bg = Image.alpha_composite(bg, tex)
+    # plain: just the smooth navy glow, no stripes or shapes
 
     # bottom panel: straight top, rounded bottom corners, vertical gradient
     panel = Image.new("L", (W, H), 0)
@@ -171,6 +162,7 @@ def _card_bg(card_row) -> Image.Image | None:
 # ── Rush Cricket logo watermark ──────────────────────────────────────────
 # A clean logo can be dropped next to this file as rush_logo.png (square, transparent
 # corners); otherwise the round logo is cut out of starter_bg.png (same as squad_image.py).
+SHOW_LOGO = False                          # True = faint Rush Cricket logo behind the player
 LOGO_FILE = Path(__file__).with_name("rush_logo.png")
 LOGO_SRC = Path(__file__).with_name("starter_bg.png")
 LOGO_SRC_CIRCLE = (627, 117, 111)          # centre x, centre y, radius in starter_bg scaled to 1254 wide
@@ -260,6 +252,8 @@ def _draw_player(canvas, card_row, fg):
 
 def _draw_logo_behind(canvas, player, pos):
     """Faint Rush Cricket logo behind the player: fixed in the middle (default) or following the player."""
+    if not SHOW_LOGO:
+        return
     logo = _logo_layer()
     if logo is None:
         return
