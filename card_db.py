@@ -435,6 +435,9 @@ def _ensure_events(conn) -> None:
         conn.execute("ALTER TABLE events ADD COLUMN spawn_rate INTEGER")
     if "spawn_until" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN spawn_until REAL")
+    # 1 = while the window runs, this event's UNOB cards spawn too (only this event's)
+    if "spawn_unob" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN spawn_unob INTEGER NOT NULL DEFAULT 0")
 
 
 def _invalidate_events() -> None:
@@ -522,13 +525,14 @@ def set_event_bg(eventname: str, pathname: str | None) -> bool:
     return cur.rowcount > 0
 
 
-def set_event_spawn(eventname: str, rate: int | None, until: float | None) -> bool:
-    """Event spawn window: rate % (0 = off), until = unix time or None. False = no such event."""
+def set_event_spawn(eventname: str, rate: int | None, until: float | None, unob: bool = False) -> bool:
+    """Event spawn window: rate % (0 = off), until = unix time or None, unob = its unob cards spawn
+    too while the window runs. False = no such event."""
     key = (eventname or "").strip().lower()
     with _conn() as conn:
         _ensure_events(conn)
-        cur = conn.execute("UPDATE events SET spawn_rate = ?, spawn_until = ? WHERE event_key = ?",
-                           (rate, until, key))
+        cur = conn.execute("UPDATE events SET spawn_rate = ?, spawn_until = ?, spawn_unob = ? WHERE event_key = ?",
+                           (rate, until, 1 if unob else 0, key))
         conn.commit()
     _invalidate_events()
     return cur.rowcount > 0
@@ -548,6 +552,22 @@ def event_spawn_weight(ev: dict | None) -> float:
     if not ev or ev.get("spawn_rate") is None:
         return 1.0
     return int(ev["spawn_rate"]) / 100 if event_spawn_live(ev) else 0.0
+
+
+def list_spawnable_cards() -> list:
+    """Cards a wild spawn may pick: obtainable cards, plus the UNOB cards of an event whose spawn
+    window is running with "unob" on (only that event's; a disabled event still never spawns)."""
+    events = _events_map()
+    unob_events = {k for k, e in events.items() if e.get("spawn_unob") and event_spawn_live(e)}
+    out = []
+    for c in list_all_cards():
+        if is_obtainable(c):
+            out.append(c)
+        elif unob_events and not is_event_disabled(c):
+            key = str(_rget(c, "event_key", "") or "").lower()
+            if key in unob_events:
+                out.append(c)
+    return out
 
 
 def cards_in_event(event_key: str) -> list[str]:

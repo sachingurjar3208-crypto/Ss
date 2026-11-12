@@ -103,7 +103,7 @@ def catch_names(card) -> set[str]:
 def pick_card(exclude: set[str] | None = None):
     """Random spawnable card using SPAWN_ODDS. None if there are none."""
     blocked = spawn_db.blocked_keys() | (exclude or set())
-    pool = [c for c in card_db.list_obtainable_cards() if c["playername_key"] not in blocked]
+    pool = [c for c in card_db.list_spawnable_cards() if c["playername_key"] not in blocked]
     if not pool:
         return None
     # each card's weight inside its OVR band: normal card = 1, event card = the event's spawn rate
@@ -518,12 +518,13 @@ class SpawnCog(commands.Cog):
         enabled="On = start the spawn window, Off = its cards stop spawning",
         rate="Chance next to a normal card of the same OVR, in % (e.g. 33). Default 33",
         hours="How long it runs (0 = until you switch it off). Default 48",
+        unob="Also spawn this event's UNOB cards while it runs (only this event). Default off",
     )
     @app_commands.autocomplete(event=_event_autocomplete)
     @app_commands.check(_owner_check)
     async def a_eventspawn(self, interaction: discord.Interaction, event: str, enabled: bool,
                            rate: app_commands.Range[int, 1, 100] = 33,
-                           hours: app_commands.Range[int, 0, 720] = 48):
+                           hours: app_commands.Range[int, 0, 720] = 48, unob: bool = False):
         ev = card_db.get_event(event)
         if ev is None:
             await interaction.response.send_message(f"No event named `{event}`.", ephemeral=True)
@@ -534,14 +535,15 @@ class SpawnCog(commands.Cog):
                 f"**{ev['eventname']}** cards no longer spawn.", ephemeral=True)
             return
         until = time.time() + hours * 3600 if hours else None
-        await asyncio.to_thread(card_db.set_event_spawn, ev["eventname"], rate, until)
-        n = sum(1 for c in card_db.list_obtainable_cards()
+        await asyncio.to_thread(card_db.set_event_spawn, ev["eventname"], rate, until, unob)
+        n = sum(1 for c in card_db.list_spawnable_cards()
                 if str(card_db._rget(c, "event_key", "") or "").lower() == ev["event_key"])
         end = f"until <t:{int(until)}:f> (<t:{int(until)}:R>)" if until else "until you switch it off"
         note = "" if not ev.get("disabled") else "\n⚠️ This event is **disabled**, so its cards still can't spawn. Enable it first."
         await interaction.response.send_message(
             f"✨ **{ev['eventname']}** spawns are ON at **{rate}%** of a normal card's chance, {end}.\n"
-            f"{n} card(s) can spawn. They show the **NEW EDITION** message.{note}", ephemeral=True)
+            f"{n} card(s) can spawn{' (unob cards included)' if unob else ''}. "
+            f"They show the **NEW EDITION** message.{note}", ephemeral=True)
 
     @cricketer.command(name="spawn", description="(Owner) Spawn cricketers in this channel now")
     @app_commands.describe(
