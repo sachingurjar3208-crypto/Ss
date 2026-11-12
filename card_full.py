@@ -174,14 +174,16 @@ def _card_bg(card_row) -> Image.Image | None:
 LOGO_FILE = Path(__file__).with_name("rush_logo.png")
 LOGO_SRC = Path(__file__).with_name("starter_bg.png")
 LOGO_SRC_CIRCLE = (627, 117, 111)          # centre x, centre y, radius in starter_bg scaled to 1254 wide
-LOGO_CENTER = (635, 610)                   # output px (behind the player)
+LOGO_CENTER = (635, 610)                   # output px, used only if the player can't be measured
+# The logo follows the player: centred on the player's upper body (head + shoulders).
+LOGO_FOLLOW_Y = 0.36                       # logo centre at this fraction of the player's height from the top
 LOGO_SIZE = 660                            # diameter, output px
 LOGO_OPACITY = 0.22                        # 0 = invisible, 1 = solid
 _LOGO: list = []
 
 
 def _logo_layer():
-    """(RGBA image, paste position) at working size, built once. None if no logo file."""
+    """RGBA logo at working size, built once. None if no logo file."""
     if _LOGO:
         return _LOGO[0]
     out = None
@@ -200,7 +202,7 @@ def _logo_layer():
         size = LOGO_SIZE * S
         lg = lg.resize((size, size), Image.LANCZOS).filter(ImageFilter.GaussianBlur(S * 0.8))
         lg.putalpha(lg.getchannel("A").point(lambda v: int(v * LOGO_OPACITY)))
-        out = (lg, (int(LOGO_CENTER[0] * S - size / 2), int(LOGO_CENTER[1] * S - size / 2)))
+        out = lg
     except Exception as e:
         print(f"[card_full] logo unavailable ({type(e).__name__}: {e})")
     _LOGO.append(out)
@@ -242,6 +244,7 @@ def _draw_player(canvas, card_row, fg):
             int(ci._col(card_row, "offset_y", 0)) * S if manual else 0,
             int(ci._col(card_row, "scale_pct", 100)) if manual else 100,
         )
+        _draw_logo_behind(canvas, resized, pos)
         # soft glow behind the player
         glow = Image.new("L", canvas.size, 0)
         glow.paste(resized.getchannel("A"), pos)
@@ -250,6 +253,26 @@ def _draw_player(canvas, card_row, fg):
         canvas.alpha_composite(resized, pos)
     except Exception as e:
         print(f"[card_full] player skipped ({type(e).__name__}: {e})")
+
+
+def _draw_logo_behind(canvas, player, pos):
+    """Faint Rush Cricket logo always right behind the player's head and shoulders."""
+    logo = _logo_layer()
+    if logo is None:
+        return
+    size = logo.width
+    cx, cy = LOGO_CENTER[0] * S, LOGO_CENTER[1] * S
+    try:
+        a = player.getchannel("A").point(lambda v: 255 if v >= 40 else 0)
+        top_part = a.crop((0, 0, a.width, max(1, int(a.height * 0.20))))   # the head: arms / bats don't pull it sideways
+        bb = top_part.getbbox() or a.getbbox()
+        if bb:
+            cx = pos[0] + (bb[0] + bb[2]) / 2
+            cy = pos[1] + player.height * LOGO_FOLLOW_Y
+    except Exception:
+        pass
+    cy = min(cy, PANEL_TOP * S - size / 2 + 90 * S)      # never sink deep behind the stats panel
+    canvas.alpha_composite(logo, (int(cx - size / 2), int(cy - size / 2)))
 
 
 def _draw_name(canvas, card_row):
@@ -365,11 +388,6 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     st = _static()
     accent = _accent(card_row["ovr"])
     canvas = (_card_bg(card_row) or st["bg"]).convert("RGBA")
-
-    # Rush Cricket logo, faint, in the middle behind the player
-    logo = _logo_layer()
-    if logo is not None:
-        canvas.alpha_composite(logo[0], logo[1])
 
     _draw_player(canvas, card_row, fg_image)
     canvas.paste((4, 6, 16, 255), (0, 0), st["fade"])
