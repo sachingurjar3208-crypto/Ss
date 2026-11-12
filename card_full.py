@@ -44,6 +44,13 @@ FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
 # stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
 CENTER_ON_HEAD = True
 CARD_CX = OUT_W / 2
+# Same size for every player: the cutout is scaled so the HEAD is this wide (output px),
+# whatever the photo is (head-and-shoulders, half body, full body). False = old box fit.
+AUTO_HEAD_SIZE = True
+HEAD_W = 205                     # head width on the card (output px); bigger = bigger players
+HEAD_TOP_MIN = 150               # the head never goes higher than this (keeps clear of the top edge)
+HEAD_TOP_MAX = 420               # ...and never lower: a head-and-shoulders photo is enlarged up to here
+HEAD_SCALE_LIMITS = (0.45, 1.8)  # how much the head-size rule may shrink / grow the box-fit size
 
 # Bottom panel (output px): straight top edge, rounded bottom corners
 PANEL_TOP = 1150
@@ -330,6 +337,24 @@ def _draw_player(canvas, card_row, fg):
             int(ci._col(card_row, "offset_y", 0)) * S if manual else 0,
             int(ci._col(card_row, "scale_pct", 100)) * fsc // 100 if manual else fsc,
         )
+        if AUTO_HEAD_SIZE and not manual:
+            hw = _head_width(resized)
+            if hw:
+                k = max(HEAD_SCALE_LIMITS[0], min(HEAD_SCALE_LIMITS[1], HEAD_W * S * fsc / 100 / hw))
+                if abs(k - 1) > 0.02:
+                    resized = resized.resize((max(1, int(resized.width * k)), max(1, int(resized.height * k))),
+                                             Image.LANCZOS)
+                # short photo (head and shoulders): grow it until the head reaches HEAD_TOP_MAX
+                bottom = box["y"] + box["h"]
+                if bottom - resized.height > HEAD_TOP_MAX * S:
+                    k2 = (bottom - HEAD_TOP_MAX * S) / resized.height
+                    resized = resized.resize((max(1, int(resized.width * k2)), max(1, int(resized.height * k2))),
+                                             Image.LANCZOS)
+                # bottom stays on the panel; a big player slides down behind the panel
+                # instead of poking out of the top of the card
+                y = bottom - resized.height
+                y = max(y, HEAD_TOP_MIN * S)
+                pos = (box["x"] + (box["w"] - resized.width) // 2, y)
         if CENTER_ON_HEAD and not manual:
             hx = _head_center_x(resized)
             if hx is not None:
@@ -344,6 +369,36 @@ def _draw_player(canvas, card_row, fg):
         canvas.alpha_composite(resized, pos)
     except Exception as e:
         print(f"[card_full] player skipped ({type(e).__name__}: {e})")
+
+
+def _head_width(player):
+    """Width of the head in the cutout (px). Rows are read from the top; each row's WIDEST solid
+    run counts (bats / sticks are separate runs). The head ends about 1.1 head-widths below its top,
+    so reading stops there, before the shoulders."""
+    try:
+        k = max(1, player.width // 300)
+        a = player.getchannel("A").resize((max(1, player.width // k), max(1, player.height // k)))
+        w, h = a.size
+        px = a.load()
+        top = next((y for y in range(h) if any(px[x, y] >= 40 for x in range(w))), None)
+        if top is None:
+            return None
+        hw = 0
+        for y in range(top, h):
+            if hw and y - top > 1.1 * hw:
+                break
+            best, start = 0, None
+            for x in range(w + 1):
+                solid = x < w and px[x, y] >= 40
+                if solid and start is None:
+                    start = x
+                elif not solid and start is not None:
+                    best = max(best, x - start)
+                    start = None
+            hw = max(hw, best)
+        return hw * k if hw > 4 else None
+    except Exception:
+        return None
 
 
 def _head_center_x(player):
