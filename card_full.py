@@ -46,7 +46,12 @@ CENTER_ON_HEAD = True
 CARD_CX = OUT_W / 2
 # Same size for every player: the cutout is scaled so the HEAD is this wide (output px),
 # whatever the photo is (head-and-shoulders, half body, full body). False = old box fit.
-AUTO_HEAD_SIZE = True
+AUTO_HEAD_SIZE = False           # old "measure the head" rule (off: results changed from photo to photo)
+# FIXED rule (default): the top of the player is always at PLAYER_TOP and the photo is scaled so it
+# reaches down to the stats panel. Same result every time a card is drawn or edited.
+FILL_HEIGHT = True
+PLAYER_TOP = 205                 # output px from the top of the card where the head starts
+PLAYER_MAX_W = 1000              # a very wide photo (arms out) is not made wider than this
 HEAD_W = 240                     # face width on the card (output px); bigger = bigger players
 HEAD_PCT = 0.3                   # which row width counts as the face (0.5 = median, lower ignores caps / hands more)
 HEAD_TOP_MIN = 150               # the head never goes higher than this (keeps clear of the top edge)
@@ -338,7 +343,15 @@ def _draw_player(canvas, card_row, fg):
             int(ci._col(card_row, "offset_y", 0)) * S if manual else 0,
             int(ci._col(card_row, "scale_pct", 100)) * fsc // 100 if manual else fsc,
         )
-        if AUTO_HEAD_SIZE and not manual:
+        if FILL_HEIGHT and not manual:
+            bottom = (PANEL_TOP + 25) * S                 # a little under the panel's top line
+            k = (bottom - PLAYER_TOP * S) / resized.height
+            k = min(k, PLAYER_MAX_W * S / resized.width)
+            k *= fsc / 100                                # /foregroundfix size on top (bottom stays put)
+            resized = resized.resize((max(1, int(resized.width * k)), max(1, int(resized.height * k))),
+                                     Image.LANCZOS)
+            pos = (box["x"] + (box["w"] - resized.width) // 2, bottom - resized.height)
+        elif AUTO_HEAD_SIZE and not manual:
             hw = _head_width(resized)
             if hw:
                 k = max(HEAD_SCALE_LIMITS[0], min(HEAD_SCALE_LIMITS[1], HEAD_W * S * fsc / 100 / hw))
