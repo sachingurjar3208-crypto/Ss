@@ -111,6 +111,11 @@ _NEW_CARD_COLUMNS = [
     ("eoae_end",    "INTEGER"),    # last year, e.g. 2026
     ("eoae_jersey", "TEXT"),       # jersey number shown big behind the player
     ("eoae_ribbon", "TEXT"),       # ribbon text, NULL = "END OF AN ERA"
+    # Full Size design only (/foregroundfix while /cardshape = Full Size). Kept apart from
+    # offset_x / offset_y / scale_pct, which were tuned for the old shield cards.
+    ("full_dx",    "INTEGER NOT NULL DEFAULT 0"),
+    ("full_dy",    "INTEGER NOT NULL DEFAULT 0"),
+    ("full_scale", "INTEGER NOT NULL DEFAULT 100"),
 ]
 
 
@@ -420,6 +425,10 @@ def _ensure_events(conn) -> None:
         )
         """
     )
+    # background picked with /eventbg: every card of the event uses it (Full Size design)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(events)")}
+    if "bg" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN bg TEXT")
 
 
 def _invalidate_events() -> None:
@@ -489,6 +498,46 @@ def create_event(eventname: str, emoji_id: str, animated: bool, created_by: int)
 
 def get_event(eventname: str) -> dict | None:
     return _events_map().get((eventname or "").strip().lower())
+
+
+def set_event_bg(eventname: str, pathname: str | None) -> bool:
+    """Give an event a background (backgrounds.pathname), or None to remove it. False = no such event."""
+    key = (eventname or "").strip().lower()
+    with _conn() as conn:
+        _ensure_events(conn)
+        cur = conn.execute("UPDATE events SET bg = ? WHERE event_key = ?",
+                           ((pathname.strip() if pathname else None), key))
+        conn.commit()
+    _invalidate_events()
+    return cur.rowcount > 0
+
+
+def cards_in_event(event_key: str) -> list[str]:
+    with _conn() as conn:
+        rows = conn.execute("SELECT playername FROM cards WHERE event_key = ?",
+                            ((event_key or "").strip().lower(),)).fetchall()
+    return [r["playername"] for r in rows]
+
+
+def set_event_for_background(pathname: str, event_key: str) -> list[str]:
+    """Put every card whose background (Classic or Style 2) is `pathname` into the event.
+    Returns the playernames changed."""
+    names = cards_on_background_any(pathname)
+    with _conn() as conn:
+        for n in names:
+            conn.execute("UPDATE cards SET event_key = ?, updated_at = ? WHERE playername_key = ?",
+                         (event_key.strip().lower(), time.time(), n.strip().lower()))
+        conn.commit()
+    return names
+
+
+def update_card_full_offset(playername: str, dx: int, dy: int, scale: int) -> bool:
+    with _conn() as conn:
+        cur = conn.execute(
+            "UPDATE cards SET full_dx = ?, full_dy = ?, full_scale = ?, updated_at = ? WHERE playername_key = ?",
+            (dx, dy, scale, time.time(), playername.strip().lower()))
+        conn.commit()
+        return cur.rowcount > 0
 
 
 def list_events() -> list[dict]:

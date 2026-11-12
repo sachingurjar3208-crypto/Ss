@@ -57,6 +57,7 @@ from card_db import (
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
     set_card_event, set_card_obtainable, get_event, list_events, create_event, rename_event,
     set_event_disabled, parse_emoji_input, count_event_cards, event_emoji_str,
+    set_event_bg, cards_in_event, set_event_for_background, update_card_full_offset,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
 from card_image import generate_card_image, cache_all_foregrounds
@@ -1010,6 +1011,64 @@ class CardMakerCog(commands.Cog):
                     "or the bot can't use it (it must be a Developer Portal emoji or from a server the bot is in).")
         await interaction.followup.send(msg)
 
+    @app_commands.command(name="eventbg",
+                          description="Give an event a background: every card of the event uses it (Full Size)")
+    @app_commands.describe(eventname="Which event",
+                           background="Background from /bgadder, or none to remove the event's background")
+    @app_commands.autocomplete(eventname=event_autocomplete, background=background_autocomplete)
+    @is_owner()
+    async def eventbg(self, interaction: discord.Interaction, eventname: str, background: str):
+        await interaction.response.defer()
+        ev = get_event(eventname)
+        if ev is None:
+            await interaction.followup.send(f"❌ No event called `{eventname}`. See `/eventlist`.")
+            return
+        bg_name = None
+        if background.strip().lower() != "none":
+            bg = get_background(background)
+            if bg is None:
+                await interaction.followup.send(f"❌ Unknown background `{background}`. Add it with `/bgadder` first.")
+                return
+            bg_name = bg["pathname"]
+        set_event_bg(ev["eventname"], bg_name)
+        names = cards_in_event(ev["event_key"])
+        what = f"background **{bg_name}**" if bg_name else "no background (theme colours)"
+        await interaction.followup.send(
+            f"🖼️ Event **{ev['eventname']}** now uses {what}. Redrawing its **{len(names)}** card(s)…")
+        ok = 0
+        for n in names:
+            if await _regenerate_silently(n):
+                ok += 1
+            await asyncio.sleep(0.2)
+        await interaction.followup.send(f"✅ Done: {ok}/{len(names)} card(s) of **{ev['eventname']}** redrawn.")
+
+    @app_commands.command(name="eventfrombg",
+                          description="Put every card of one background into an event (e.g. ICONS cards -> Icon event)")
+    @app_commands.describe(background="Cards with this background (Classic or Style 2)",
+                           eventname="Event they all join (make it first with /eventmaker)")
+    @app_commands.autocomplete(background=background_autocomplete, eventname=event_autocomplete)
+    @is_owner()
+    async def eventfrombg(self, interaction: discord.Interaction, background: str, eventname: str):
+        await interaction.response.defer()
+        ev = get_event(eventname)
+        if ev is None:
+            await interaction.followup.send(f"❌ No event called `{eventname}`. Make it with `/eventmaker` first.")
+            return
+        bg = get_background(background)
+        if bg is None:
+            await interaction.followup.send(f"❌ Unknown background `{background}`.")
+            return
+        names = set_event_for_background(bg["pathname"], ev["event_key"])
+        await interaction.followup.send(
+            f"🏷️ **{len(names)}** card(s) on `{bg['pathname']}` are now in event **{ev['eventname']}** "
+            f"{event_emoji_str(ev)}. Redrawing them…")
+        ok = 0
+        for n in names:
+            if await _regenerate_silently(n):
+                ok += 1
+            await asyncio.sleep(0.2)
+        await interaction.followup.send(f"✅ Done: {ok}/{len(names)} card(s) redrawn.")
+
     @app_commands.command(name="eventdisable",
                           description="Switch an event off: nobody can get any card of it any more")
     @app_commands.describe(eventname="Which event to disable")
@@ -1624,12 +1683,23 @@ class CardMakerCog(commands.Cog):
             await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
             return
 
-        new_offset_x = card["offset_x"] - foregroundleft + foregroundright
-        new_offset_y = card["offset_y"] - foregroundup + foregrounddown
-        new_scale_pct = card["scale_pct"] + foregroundsizebig - foregroundsizesmall
-        new_scale_pct = max(MIN_SCALE_PCT, min(MAX_SCALE_PCT, new_scale_pct))
-
-        update_card_offset(playername, new_offset_x, new_offset_y, new_scale_pct)
+        import card_style2
+        if card_style2.CARD_SHAPE == "full":
+            # Full Size cards keep their own position/size (the shield values stay untouched)
+            keys = card.keys()
+            fx = (card["full_dx"] if "full_dx" in keys else 0) or 0
+            fy = (card["full_dy"] if "full_dy" in keys else 0) or 0
+            fs = (card["full_scale"] if "full_scale" in keys else 100) or 100
+            new_offset_x = fx - foregroundleft + foregroundright
+            new_offset_y = fy - foregroundup + foregrounddown
+            new_scale_pct = max(MIN_SCALE_PCT, min(MAX_SCALE_PCT, fs + foregroundsizebig - foregroundsizesmall))
+            update_card_full_offset(playername, new_offset_x, new_offset_y, new_scale_pct)
+        else:
+            new_offset_x = card["offset_x"] - foregroundleft + foregroundright
+            new_offset_y = card["offset_y"] - foregroundup + foregrounddown
+            new_scale_pct = card["scale_pct"] + foregroundsizebig - foregroundsizesmall
+            new_scale_pct = max(MIN_SCALE_PCT, min(MAX_SCALE_PCT, new_scale_pct))
+            update_card_offset(playername, new_offset_x, new_offset_y, new_scale_pct)
 
         try:
             await _regenerate_and_send(

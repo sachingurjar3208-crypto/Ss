@@ -77,20 +77,40 @@ THEMES = {
     "bronze":          {"bg": ((92, 52, 28), (14, 8, 5)),   "panel": ((40, 24, 14), (10, 6, 4)),  "accent": (214, 138, 80),  "tag": None},
 }
 
-# Cards with no theme get a look from their background's name (background or s2_bg):
-# a name containing the word on the left uses the theme on the right. Checked in order.
-BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze")]
+# Cards with no theme get a look from their EVENT name first, then their background's name
+# (background or s2_bg): a name containing the word on the left uses the theme on the right.
+BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"), ("diwali", "diwali"), ("halloween", "halloween")]
+
+
+def _event(card_row) -> dict | None:
+    """The card's event row (eventname, bg ...) or None."""
+    key = ci._col(card_row, "event_key")
+    if not key:
+        return None
+    try:
+        from card_db import get_event
+        return get_event(key)
+    except Exception:
+        return None
 
 
 def _theme(card_row) -> dict:
+    """Theme colours. Event cards show the EVENT NAME as their tag (Diwali 2026, Icon ...)."""
     key = str(ci._col(card_row, "s2_theme", "") or "").strip().lower() or None
+    ev = _event(card_row)
+    ev_tag = str(ev["eventname"]).upper() if ev else None
     if key and key in THEMES:
-        return THEMES[key]
-    names = " ".join(str(ci._col(card_row, c, "") or "") for c in ("background", "s2_bg")).lower()
-    for word, theme in BG_NAME_THEMES:
-        if word in names:
-            return THEMES[theme]
-    return THEMES[None]
+        th = THEMES[key]
+    else:
+        th = THEMES[None]
+        sources = [str(ev["eventname"]).lower() if ev else "",
+                   " ".join(str(ci._col(card_row, c, "") or "") for c in ("background", "s2_bg")).lower()]
+        found = next((t for src in sources for w, t in BG_NAME_THEMES if src and w in src), None)
+        if found:
+            th = THEMES[found]
+    if ev_tag:
+        th = dict(th, tag=ev_tag)
+    return th
 
 
 def _accent(ovr) -> tuple:
@@ -190,9 +210,17 @@ def _themed(th: dict) -> dict:
 
 
 def _card_bg(card_row) -> Image.Image | None:
-    name = ci._col(card_row, "s2_bg")
-    if not name:
-        return None
+    """Event background (/eventbg) first, then the card's own Style 2 background."""
+    ev = _event(card_row)
+    for name in ((ev or {}).get("bg"), ci._col(card_row, "s2_bg")):
+        if name:
+            img = _bg_image(name)
+            if img is not None:
+                return img
+    return None
+
+
+def _bg_image(name) -> Image.Image | None:
     try:
         from pathlib import Path
         from card_db import get_background
@@ -289,16 +317,21 @@ def _draw_player(canvas, card_row, fg):
         fg = c2._trim_foreground(fg.convert("RGBA"))
         manual = c2.FULL_USE_MANUAL_FIX
         box = {k: v * S for k, v in FG_BOX.items()}
+        # /foregroundfix in Full Size saves full_dx / full_dy / full_scale (own values, not the shield ones)
+        fdx = int(ci._col(card_row, "full_dx", 0) or 0)
+        fdy = int(ci._col(card_row, "full_dy", 0) or 0)
+        fsc = int(ci._col(card_row, "full_scale", 100) or 100)
         resized, pos = ci._fit_foreground(
             fg, box,
             int(ci._col(card_row, "offset_x", 0)) * S if manual else 0,
             int(ci._col(card_row, "offset_y", 0)) * S if manual else 0,
-            int(ci._col(card_row, "scale_pct", 100)) if manual else 100,
+            int(ci._col(card_row, "scale_pct", 100)) * fsc // 100 if manual else fsc,
         )
         if CENTER_ON_HEAD and not manual:
             hx = _head_center_x(resized)
             if hx is not None:
                 pos = (int(CARD_CX * S - hx), pos[1])
+        pos = (pos[0] + fdx * S, pos[1] + fdy * S)
         _draw_logo_behind(canvas, resized, pos)
         # soft glow behind the player
         glow = Image.new("L", canvas.size, 0)
