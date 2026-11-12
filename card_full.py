@@ -23,7 +23,7 @@ import math
 import threading
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
 import card_image as ci
 from card_narratives import ROLE_CARD_WORD
@@ -735,12 +735,59 @@ def _v2_panel(canvas, card_row, role, accent, themed):
 V2_STATS = "numbers"     # "numbers" = big BATTING / OVR / BOWLING panel, "bars" = gem + progress bars
 
 
+SHOW_BRAND = True        # Rush Cricket logo + name in the top-left corner
+_BRAND: list = []
+
+
+def _brand_logo():
+    """Round Rush Cricket logo (rush_logo.png if present, else cut from starter_bg.png), built once."""
+    if _BRAND:
+        return _BRAND[0]
+    lg = None
+    try:
+        if LOGO_FILE.exists():
+            lg = Image.open(LOGO_FILE).convert("RGBA")
+        else:
+            src = Image.open(LOGO_SRC).convert("RGB")
+            k = src.width / 1254
+            cx, cy, r = (v * k for v in LOGO_SRC_CIRCLE)
+            r *= 0.97
+            lg = src.crop((int(cx - r), int(cy - r), int(cx + r), int(cy + r))).convert("RGBA")
+        m = Image.new("L", (lg.width * 4, lg.height * 4), 0)
+        ImageDraw.Draw(m).ellipse((0, 0, m.width - 1, m.height - 1), fill=255)
+        lg.putalpha(ImageChops.multiply(lg.getchannel("A"), m.resize(lg.size, Image.LANCZOS)))
+    except Exception as e:
+        print(f"[card_full] brand logo unavailable ({type(e).__name__}: {e})")
+        lg = None
+    _BRAND.append(lg)
+    return lg
+
+
+def _v2_brand(canvas):
+    """Logo + RUSH / CRICKET in the top-left corner."""
+    lg = _brand_logo()
+    x, y, size = 58, 50, 104
+    if lg is not None:
+        L = lg.resize((size * S, size * S), Image.LANCZOS)
+        sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        ImageDraw.Draw(sh).ellipse((_q(x - 3, y - 1), _q(x + size + 3, y + size + 5)), fill=(0, 0, 0, 150))
+        canvas.alpha_composite(sh.filter(ImageFilter.GaussianBlur(8 * S)))
+        del sh
+        ImageDraw.Draw(canvas).ellipse((_q(x - 4, y - 4), _q(x + size + 4, y + size + 4)),
+                                       outline=(246, 248, 252, 255), width=3 * S)
+        canvas.alpha_composite(L, _q(x, y))
+    tx = x + size + 20
+    d = ImageDraw.Draw(canvas)
+    d.text(_q(tx, y + 40), "RUSH", font=_font(ci.FONT_DISPLAY_BOLD, 44), fill=WHITE, anchor="lm")
+    d.text(_q(tx, y + 80), "CRICKET", font=_font(ci.FONT_LABEL, 28), fill=(215, 222, 235, 255), anchor="lm")
+
+
 def _v2_tag(canvas, text, accent):
-    """Small event tag in the top-left corner (ICON, HALLOWEEN ...)."""
+    """Small event tag in the top-left corner (ICON, HALLOWEEN ...), under the brand if shown."""
     d = ImageDraw.Draw(canvas)
     f = _fit(d, text, ci.FONT_LABEL, 28, 380)
     tw = d.textlength(text, font=f) / S + 2.5 * (len(text) - 1)
-    x0, y = 62, 72
+    x0, y = 62, (200 if SHOW_BRAND else 72)
     d.rounded_rectangle((_q(x0, y - 24), _q(x0 + tw + 40, y + 24)), radius=24 * S,
                         outline=accent + (255,), width=3 * S, fill=(0, 0, 0, 255))
     _spaced(d, _q(x0 + 20 + tw / 2, y + 1), text, f, accent + (255,), 2.5)
@@ -755,6 +802,8 @@ def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
         _v2_gem(canvas, card_row, role, accent, themed, th["tag"])
         _v2_panel(canvas, card_row, role, accent, themed)
     else:
+        if SHOW_BRAND:
+            _v2_brand(canvas)
         if th["tag"]:
             _v2_tag(canvas, th["tag"], accent)
         _draw_panel(canvas, card_row, role, accent, themed)
