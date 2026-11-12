@@ -5,7 +5,7 @@ Entry point: build(card_row, fg_image, role) -> io.BytesIO (PNG, 1037 x 1517).
 Layout (no 6-stat grid):
   * name top-left: first name thin, surname big and bold
   * big player cutout in the middle (auto-trimmed, same size for every player)
-  * bottom panel: role word on a raised centre tab, BATTING and BOWLING numbers
+  * bottom panel (straight top line): role word in a pill on the line, BATTING and BOWLING numbers
     left / right (main skill on the left), OVR inside a hexagon in the centre
     with the flag and the first playstyle badge on either side
   * accent colour follows the OVR: bronze < 70, silver 70-79, gold 80-89, ice 90+
@@ -33,17 +33,15 @@ W, H = OUT_W * S, OUT_H * S
 RADIUS = 46                              # outer corner radius (output px)
 INNER_INSET = 22                         # thin inner border line
 WHITE = (245, 246, 250, 255)
-PANEL_FILL = (7, 11, 26, 238)
 
 # Player box (output px). Bottom sits just under the top of the bottom panel.
 FG_BOX = {"x": 250, "y": 175, "w": 770, "h": 955}
 
-# Bottom panel shape (output px)
-PANEL_TOP = 1165                         # side shoulders
-TAB_TOP = 1105                           # raised centre tab (role word)
-TAB_X = (330, 707)
-PANEL_BOTTOM = OUT_H - 44
-PANEL_SIDE = 40
+# Bottom panel (output px): straight top edge, rounded bottom corners
+PANEL_TOP = 1150
+PANEL_BOTTOM = OUT_H - 40
+PANEL_SIDE = 38
+PANEL_RADIUS = 30
 
 ACCENTS = [                               # (min ovr, colour)
     (90, (130, 225, 255)),                # ice
@@ -113,25 +111,28 @@ def _build_static() -> dict:
                 width=rnd.randint(2, 5) * S)
     bg = Image.alpha_composite(bg, tex)
 
-    # bottom panel polygon (raised centre tab, cut corners on the tab)
-    t0, t1 = TAB_X
-    panel_pts = [
-        _q(PANEL_SIDE, PANEL_TOP), _q(t0 - 34, PANEL_TOP), _q(t0, TAB_TOP),
-        _q(t1, TAB_TOP), _q(t1 + 34, PANEL_TOP), _q(OUT_W - PANEL_SIDE, PANEL_TOP),
-        _q(OUT_W - PANEL_SIDE, PANEL_BOTTOM), _q(PANEL_SIDE, PANEL_BOTTOM),
-    ]
+    # bottom panel: straight top, rounded bottom corners, vertical gradient
     panel = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(panel).polygon(panel_pts, fill=255)
+    pd = ImageDraw.Draw(panel)
+    pd.rounded_rectangle((_q(PANEL_SIDE, PANEL_TOP), _q(OUT_W - PANEL_SIDE, PANEL_BOTTOM)),
+                         radius=PANEL_RADIUS * S, fill=255)
+    pd.rectangle((_q(PANEL_SIDE, PANEL_TOP), _q(OUT_W - PANEL_SIDE, PANEL_TOP + PANEL_RADIUS)), fill=255)
+    grad = Image.new("RGB", (1, H))
+    top_c, bot_c = (18, 27, 58), (5, 8, 20)
+    for y in range(H):
+        t = min(1.0, max(0.0, (y / S - PANEL_TOP) / (PANEL_BOTTOM - PANEL_TOP)))
+        grad.putpixel((0, y), tuple(int(top_c[k] + (bot_c[k] - top_c[k]) * t) for k in range(3)))
+    panel_fill = grad.resize((W, H), Image.NEAREST)
 
     # soft dark fade above the panel so the player's legs melt into it
     fade = Image.new("L", (W, H), 0)
     fd = ImageDraw.Draw(fade)
-    y0, y1 = 930, PANEL_TOP + 10
+    y0, y1 = 930, PANEL_TOP
     for y in range(y0, OUT_H):
         a = 200 if y >= y1 else int(200 * ((y - y0) / (y1 - y0)) ** 1.4)
         fd.line([_q(0, y), _q(OUT_W, y)], fill=a, width=S)
 
-    return {"mask": mask, "bg": bg.convert("RGB"), "panel": panel, "panel_pts": panel_pts, "fade": fade}
+    return {"mask": mask, "bg": bg.convert("RGB"), "panel": panel, "panel_fill": panel_fill, "fade": fade}
 
 
 def _static() -> dict:
@@ -227,62 +228,93 @@ def _draw_name(canvas, card_row):
         _shadow_text(canvas, _q(x, 200), last, last_font, WHITE)
 
 
+def _spaced(draw, xy, text, font, fill, spacing):
+    """Centre-anchored text with extra letter spacing (output px)."""
+    widths = [draw.textlength(ch, font=font) for ch in text]
+    total = sum(widths) + spacing * S * (len(text) - 1)
+    x = xy[0] - total / 2
+    for ch, w in zip(text, widths):
+        draw.text((x, xy[1]), ch, font=font, fill=fill, anchor="lm")
+        x += w + spacing * S
+
+
 def _draw_panel(canvas, card_row, role, accent):
     st = _static()
     acc = accent + (255,)
-    canvas.paste(PANEL_FILL[:3] + (255,), (0, 0), st["panel"].point(lambda v: int(v * PANEL_FILL[3] / 255)))
-    d = ImageDraw.Draw(canvas)
-    # accent edge along the top of the panel
-    top = st["panel_pts"][:6]
-    d.line(top, fill=acc, width=5 * S, joint="curve")
-    # thin dividers between the three blocks
-    lines = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    ld = ImageDraw.Draw(lines)
-    for x in (300, 737):
-        ld.line([_q(x, 1215), _q(x, PANEL_BOTTOM - 40)], fill=(255, 255, 255, 55), width=2 * S)
-    canvas.alpha_composite(lines)
-    del lines
-    d = ImageDraw.Draw(canvas)
+    dim = accent + (150,)
 
-    # role word on the tab
+    # panel body (90% opaque, so a custom background still shows a little)
+    canvas.paste(st["panel_fill"], (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
+
+    fx = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fx)
+    y = PANEL_TOP
+    # neon glow above the straight top line
+    fd.rectangle((_q(PANEL_SIDE + 20, y - 6), _q(OUT_W - PANEL_SIDE - 20, y + 2)), fill=accent + (170,))
+    fx = fx.filter(ImageFilter.GaussianBlur(14 * S))
+    fd = ImageDraw.Draw(fx)
+    # dividers (fade in from the top)
+    for x in (305, 732):
+        for k in range(0, 200, 2):
+            a = int(60 * min(1.0, k / 60) * min(1.0, (200 - k) / 60))
+            fd.line([_q(x, 1215 + k), _q(x, 1217 + k)], fill=(255, 255, 255, a), width=2 * S)
+    canvas.alpha_composite(fx)
+    del fx
+
+    d = ImageDraw.Draw(canvas)
+    # straight accent line + thin light line under it
+    d.line([_q(PANEL_SIDE, y), _q(OUT_W - PANEL_SIDE, y)], fill=acc, width=5 * S)
+    d.line([_q(PANEL_SIDE + 30, y + 9), _q(OUT_W - PANEL_SIDE - 30, y + 9)], fill=(255, 255, 255, 40), width=1 * S)
+
+    # role word in an accent pill sitting on the line
     word = ROLE_CARD_WORD.get(ci._col(card_row, "role")) or ROLE_CARD_WORD.get(role, role)
-    f = _fit(d, word, ci.FONT_LABEL, 46, TAB_X[1] - TAB_X[0] - 40)
-    d.text(_q(518, 1140), word, font=f, fill=WHITE, anchor="mm")
+    pf = _fit(d, word, ci.FONT_LABEL, 34, 330)
+    tw = d.textlength(word, font=pf) / S + 3 * (len(word) - 1)
+    pw, ph = tw + 64, 54
+    d.rounded_rectangle((_q(518 - pw / 2, y - ph / 2), _q(518 + pw / 2, y + ph / 2)),
+                        radius=int(ph / 2 * S), fill=acc)
+    _spaced(d, _q(518, y + 1), word, pf, (8, 11, 24, 255), 3)
 
     # batting / bowling (main skill on the left)
     bat, bowl = card_row["bat"], card_row["bowl"]
     is_batter = role in ("BAT", "WK") or (role == "AR" and bat >= bowl)
     left = (bat, "BATTING") if is_batter else (bowl, "BOWLING")
     right = (bowl, "BOWLING") if is_batter else (bat, "BATTING")
-    num_f = _font(ci.FONT_DISPLAY_BOLD, 190)
-    lab_f = _font(ci.FONT_LABEL, 36)
-    for cx, (val, lab) in ((170, left), (867, right)):
-        d.text(_q(cx, 1290), str(val), font=num_f, fill=acc, anchor="mm")
-        d.text(_q(cx, 1405), lab, font=lab_f, fill=WHITE, anchor="mm")
+    num_f = _font(ci.FONT_DISPLAY_BOLD, 175)
+    lab_f = _font(ci.FONT_LABEL, 30)
+    for cx, (val, lab) in ((172, left), (865, right)):
+        _shadow_text(canvas, _q(cx, 1300), str(val), num_f, acc, anchor="mm", blur=5, alpha=200)
+        d = ImageDraw.Draw(canvas)
+        _spaced(d, _q(cx, 1410), lab, lab_f, (225, 230, 240, 255), 4)
 
-    # OVR hexagon in the centre
-    cx, cy, r = 518, 1285, 92
-    d.polygon(_hexagon(cx, cy, r), fill=(14, 20, 42, 255))
-    d.line(_hexagon(cx, cy, r) + [_hexagon(cx, cy, r)[0]], fill=acc, width=5 * S, joint="curve")
-    d.text(_q(cx, cy - 4), str(card_row["ovr"]), font=_font(ci.FONT_DISPLAY_BOLD, 120), fill=acc, anchor="mm")
-    d.text(_q(cx, 1405), "OVR", font=lab_f, fill=WHITE, anchor="mm")
+    # OVR: double-ring hexagon in the centre
+    cx, cy, r = 518, 1300, 96
+    hexa = _hexagon(cx, cy, r)
+    d.polygon(hexa, fill=(12, 18, 40, 255))
+    d.line(hexa + [hexa[0]], fill=acc, width=6 * S, joint="curve")
+    inner = _hexagon(cx, cy, r - 14)
+    d.line(inner + [inner[0]], fill=dim, width=2 * S, joint="curve")
+    _shadow_text(canvas, _q(cx, cy - 2), str(card_row["ovr"]), _font(ci.FONT_DISPLAY_BOLD, 118), WHITE,
+                 anchor="mm", blur=4, alpha=200)
+    d = ImageDraw.Draw(canvas)
+    _spaced(d, _q(cx, 1410), "OVR", lab_f, (225, 230, 240, 255), 4)
 
     # flag (left of the hexagon) and first playstyle badge (right)
     try:
         flag = ci._load_country_logo(ci._col(card_row, "country"))
         if flag is not None:
-            ci._draw_logo(canvas, flag, _q(372, 1285), 0, 0, 100, box=78 * S)
+            ci._draw_logo(canvas, flag, _q(372, 1300), 0, 0, 100, box=76 * S)
         else:
             country = str(ci._col(card_row, "country", "") or "").upper()[:10]
             if country:
-                d.text(_q(372, 1285), country, font=_fit(d, country, ci.FONT_LABEL, 26, 120),
+                d.text(_q(372, 1300), country, font=_fit(d, country, ci.FONT_LABEL, 24, 110),
                        fill=WHITE, anchor="mm")
     except Exception:
         pass
     try:
         badge = ci._load_playstyle_badge(card_row, 1)
         if badge is not None:
-            ci._draw_logo(canvas, badge, _q(664, 1285), 0, 0, 100, box=84 * S)
+            ci._draw_logo(canvas, badge, _q(664, 1300), 0, 0, 100, box=82 * S)
     except Exception:
         pass
 
