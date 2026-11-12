@@ -876,12 +876,18 @@ class EconomyCog(commands.Cog, name="Economy"):
         text = "\n".join(lines)
         shown = card_db.get_card(res["card"]) if res["card"] else None
         if shown is not None and shown["image_path"]:
-            # Reward text + the card image in ONE message (daily, weekly and monthly).
+            # Card claimed: ONLY its Buy / Sell price above the card. Coins and vouchers go straight
+            # to the account; the daily streak goes in the footer, under the card.
             embed = discord.Embed(
-                description=text,
+                description=price_line(shown),
                 color={"daily": discord.Color.blue(), "weekly": discord.Color.purple(),
                        "monthly": discord.Color.gold()}.get(kind, discord.Color.blue()),
             )
+            if kind == "daily":
+                streak = res["streak"]
+                nxt = economy.STREAK_EVERY - streak % economy.STREAK_EVERY
+                embed.set_footer(text=f"Streak: {streak} day(s) · next {economy.STREAK_VOUCHERS} vouchers in "
+                                      f"{nxt} day(s) · miss a day and it restarts")
             await card_cache.send_embed(ctx, embed, shown["image_path"])
         else:
             await ctx.send(text)
@@ -979,19 +985,14 @@ class EconomyCog(commands.Cog, name="Economy"):
 
         card = card_db.get_card(res["card"])
         ovr = int(card["ovr"])
-        if res["dupe"]:
-            body = f"{price_line(card)}\n♻️ Duplicate, sold automatically for **+{economy.fmt_coins(res['refund'])}**"
-        elif res["pending"]:
-            body = f"{price_line(card)}\n⏳ Choose below: keep, sell or replace."
-        else:
-            body = f"{price_line(card)}  🆕"
+        body = price_line(card)          # only the prices: everything else is on the card
         if ovr >= 84:
-            title, color = "🌟 Rare Claim!", discord.Color.purple()
+            color = discord.Color.purple()
         elif ovr >= 76:
-            title, color = "🎴 Hourly Claim", discord.Color.blue()
+            color = discord.Color.blue()
         else:
-            title, color = "🎴 Hourly Claim", discord.Color.light_grey()
-        embed = discord.Embed(title=title, description=body, color=color)
+            color = discord.Color.light_grey()
+        embed = discord.Embed(description=body, color=color)
         embed.set_footer(text=f"Next claim in {fmt_wait(cooldown)}" + (" • 💎 Premium" if premium else ""))
         await card_cache.send_embed(ctx, embed, card["image_path"])   # card image comes with the message
         if res["pending"]:
