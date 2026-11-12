@@ -39,9 +39,26 @@ class _NoName:
         return iter(self._row)
 
 
+def _design_tag() -> str:
+    """Changes when the card SHAPE (/cardshape) or the card design code changes (git pull),
+    so spawns never show an image drawn with an old design."""
+    try:
+        import card_style2
+        shape = card_style2.CARD_SHAPE
+    except Exception:
+        shape = "x"
+    ver = 0
+    for f in ("card_full.py", "card_style2.py", "card_image.py"):
+        try:
+            ver = max(ver, int((Path(__file__).parent / f).stat().st_mtime))
+        except OSError:
+            pass
+    return f"{shape}{ver}"
+
+
 def _cache_path(card) -> Path:
     stamp = int(float(card["updated_at"] or 0))
-    return CACHE_DIR / f"{card['playername_key'].replace(' ', '_').replace('/', '_')}_{stamp}.png"
+    return CACHE_DIR / f"{card['playername_key'].replace(' ', '_').replace('/', '_')}_{stamp}_{_design_tag()}.png"
 
 
 def _blur(full: bytes, nameless: bytes) -> bytes:
@@ -97,7 +114,9 @@ async def blurred_card(card) -> bytes | None:
         prefix = card['playername_key'].replace(' ', '_').replace('/', '_') + "_"
         for old in CACHE_DIR.glob(f"{prefix}*.png"):
             rest = old.name[len(prefix):-4]
-            if old != path and rest.isdigit():          # same card only (not "virat_kohli_(s1)_...")
+            parts = rest.split("_")
+            same_card = parts[0].isdigit() and len(parts) <= 2   # not "virat_kohli_(s1)_..."
+            if old != path and same_card:
                 try:
                     old.unlink()
                 except OSError:
