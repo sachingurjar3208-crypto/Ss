@@ -39,7 +39,11 @@ BORDER_RADIUS = 18                       # white border corner radius
 WHITE = (245, 246, 250, 255)
 
 # Player box (output px). Bottom sits just under the top of the bottom panel.
-FG_BOX = {"x": 250, "y": 175, "w": 770, "h": 955}
+FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
+# Player is moved sideways so its HEAD sits exactly on the card's centre line (a bat or a
+# stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
+CENTER_ON_HEAD = True
+CARD_CX = OUT_W / 2
 
 # Bottom panel (output px): straight top edge, rounded bottom corners
 PANEL_TOP = 1150
@@ -278,6 +282,10 @@ def _draw_player(canvas, card_row, fg):
             int(ci._col(card_row, "offset_y", 0)) * S if manual else 0,
             int(ci._col(card_row, "scale_pct", 100)) if manual else 100,
         )
+        if CENTER_ON_HEAD and not manual:
+            hx = _head_center_x(resized)
+            if hx is not None:
+                pos = (int(CARD_CX * S - hx), pos[1])
         _draw_logo_behind(canvas, resized, pos)
         # soft glow behind the player
         glow = Image.new("L", canvas.size, 0)
@@ -287,6 +295,38 @@ def _draw_player(canvas, card_row, fg):
         canvas.alpha_composite(resized, pos)
     except Exception as e:
         print(f"[card_full] player skipped ({type(e).__name__}: {e})")
+
+
+def _head_center_x(player):
+    """x of the head's centre inside the cutout: on each row of the top part, the WIDEST solid
+    run is taken (a thin bat or stick is ignored), and the middle of those rows is used."""
+    try:
+        k = max(1, player.width // 240)                       # work small, it's only a measurement
+        a = player.getchannel("A").resize((max(1, player.width // k), max(1, player.height // k)))
+        w, h = a.size
+        px = a.load()
+        top = next((y for y in range(h) if any(px[x, y] >= 40 for x in range(w))), None)
+        if top is None:
+            return None
+        centres = []
+        for y in range(top + int(h * 0.03), min(h, top + int(h * 0.16))):
+            best, run_start, best_c = 0, None, None
+            for x in range(w + 1):
+                solid = x < w and px[x, y] >= 40
+                if solid and run_start is None:
+                    run_start = x
+                elif not solid and run_start is not None:
+                    if x - run_start > best:
+                        best, best_c = x - run_start, (run_start + x) / 2
+                    run_start = None
+            if best_c is not None:
+                centres.append(best_c)
+        if not centres:
+            return None
+        centres.sort()
+        return centres[len(centres) // 2] * k
+    except Exception:
+        return None
 
 
 def _draw_logo_behind(canvas, player, pos):
@@ -319,7 +359,7 @@ def _draw_name(canvas, card_row):
     parts = name.split()
     first, last = (" ".join(parts[:-1]), parts[-1]) if len(parts) > 1 else ("", parts[0])
     bold = ci.FONT_NAME if ci.FONT_NAME.is_file() else ci.FONT_DISPLAY_BOLD
-    x, max_w = 68, 520
+    x, max_w = 68, 430          # stays left of the (centred) head; long names shrink
     last_font = _fit(d, last, bold, 92, max_w)
     if first:
         first_font = _fit(d, first, ci.FONT_LABEL, 70, max_w)
