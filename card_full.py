@@ -495,10 +495,17 @@ def _draw_panel(canvas, card_row, role, accent, themed):
         if flag is not None:
             ci._draw_logo(canvas, flag, _q(372, 1300), 0, 0, 100, box=76 * S)
         else:
-            country = str(ci._col(card_row, "country", "") or "").upper()[:10]
+            country = str(ci._col(card_row, "country", "") or "").upper().strip()
             if country:
-                d.text(_q(372, 1300), country, font=_fit(d, country, ci.FONT_LABEL, 24, 110),
-                       fill=WHITE, anchor="mm")
+                words = country.split()
+                # long names go on two lines (PAPUA NEW / GUINEA) instead of being cut off
+                lines = [country] if len(words) == 1 or len(country) <= 10 else \
+                    [" ".join(words[:(len(words) + 1) // 2]), " ".join(words[(len(words) + 1) // 2:])]
+                f = min((_fit(d, ln, ci.FONT_LABEL, 24, 110) for ln in lines), key=lambda x: x.size)
+                step = f.size / S + 4
+                y0 = 1300 - step * (len(lines) - 1) / 2
+                for k, ln in enumerate(lines):
+                    d.text(_q(372, y0 + k * step), ln, font=f, fill=WHITE, anchor="mm")
     except Exception:
         pass
     try:
