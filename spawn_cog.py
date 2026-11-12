@@ -12,6 +12,7 @@ Button -> type the name. Right name = the card (squad full / duplicate -> the no
 Event cards: "Virat Kohli (S1)" is caught with just "Virat Kohli" (the short card name works too).
 Every SPAWN_VOUCHER_EVERY (30) catches = 1 Draft Voucher.
 Unob cards (obtainable off) and cards of a disabled event never spawn. /spawn card turns any card off/on.
+Maintenance ON (/maintenance): no wild spawns and only staff can catch. Owner's /admin cricketer spawn still works (testing).
 
 Slash (every server, everyone sees it):  /spawn channel   (needs Manage Server + 40 members in the server)
 Slash (hidden, only your server):        /spawnadmin toggle  /spawnadmin status   (owner + admin role)
@@ -39,7 +40,7 @@ import card_db
 import economy
 import spawn_blur
 import spawn_db
-from bot_guard import ADMIN_GUILD_ID, OWNER_ID, MaintenanceActive, is_staff
+from bot_guard import ADMIN_GUILD_ID, OWNER_ID, MaintenanceActive, is_staff, maintenance_on
 
 # ── settings (change freely) ──────────────────────────────────────────────────
 SPAWN_MESSAGES = (5, 7)      # each spawn needs a random 5 to 7 messages
@@ -209,6 +210,9 @@ class SpawnView(discord.ui.View):
         if self.caught_by is not None or self.is_finished():
             await interaction.response.send_message("This cricketer was already caught.", ephemeral=True)
             return
+        if maintenance_on() and not is_staff(interaction.user):
+            await interaction.response.send_message("The bot is under maintenance. Catching is paused.", ephemeral=True)
+            return
         row = await asyncio.to_thread(economy.get_user, interaction.user.id)
         if row is None:
             await interaction.response.send_message("You haven't debuted yet. Type `rcdebut` first.", ephemeral=True)
@@ -334,6 +338,8 @@ class SpawnCog(commands.Cog):
         g = message.guild
         if g is None or message.author.bot or message.webhook_id:
             return
+        if maintenance_on():                              # maintenance = no wild spawns anywhere
+            return
         cfg = self.configs.get(g.id)
         if not cfg or not cfg["enabled"] or not cfg["channel_id"]:
             return
@@ -367,6 +373,8 @@ class SpawnCog(commands.Cog):
 
     async def spawn(self, channel: discord.abc.Messageable, card=None, chooser=None, manual: bool = False) -> str:
         g = channel.guild
+        if maintenance_on() and not manual:
+            return "Maintenance is on: spawns are paused."
         if g.id in self.busy:
             return "A spawn is already being prepared."
         self.busy.add(g.id)

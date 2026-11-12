@@ -30,8 +30,10 @@ S = 2                                   # supersampling
 OUT_W, OUT_H = ci.CANVAS_W, ci.CANVAS_H  # 1037 x 1517
 W, H = OUT_W * S, OUT_H * S
 
-RADIUS = 46                              # outer corner radius (output px)
-INNER_INSET = 22                         # thin inner border line
+RADIUS = 28                              # outer corner radius (output px)
+INNER_INSET = 22                         # white border line distance from the edge
+BORDER_W = 6                             # white border line thickness
+BORDER_RADIUS = 18                       # white border corner radius
 WHITE = (245, 246, 250, 255)
 
 # Player box (output px). Bottom sits just under the top of the bottom panel.
@@ -338,14 +340,12 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     _draw_panel(canvas, card_row, role, accent)
 
     # thin inner border line + accent outer edge
-    edge = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    i = INNER_INSET
-    ImageDraw.Draw(edge).rounded_rectangle((_q(i, i), _q(OUT_W - i, OUT_H - i)), radius=(RADIUS - 14) * S,
-                                           outline=(255, 255, 255, 140), width=3 * S)
-    canvas.alpha_composite(edge)
-    del edge
+    # clean white border line (inset), dark navy outside it
     d = ImageDraw.Draw(canvas)
-    d.rounded_rectangle((0, 0, W - 1, H - 1), radius=RADIUS * S, outline=accent + (255,), width=6 * S)
+    i = INNER_INSET
+    d.rounded_rectangle((0, 0, W - 1, H - 1), radius=RADIUS * S, outline=(6, 10, 24, 255), width=i * S)
+    d.rounded_rectangle((_q(i, i), _q(OUT_W - i, OUT_H - i)), radius=BORDER_RADIUS * S,
+                        outline=(246, 248, 252, 255), width=BORDER_W * S)
 
     solid = Image.new("RGB", (W, H), (5, 8, 20))
     solid.paste(canvas.convert("RGB"), (0, 0), st["mask"])
