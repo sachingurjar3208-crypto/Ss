@@ -359,7 +359,8 @@ async def generate_card_image(card_row, background_local_path: str) -> io.BytesI
     # Style 2 (set with /cardstats) has its own renderer and ignores the background
     # template. Imported here, not at the top, because card_style2 imports helpers
     # from this file (a top-level import would be circular).
-    if _col(card_row, "card_style") == "style2":
+    import card_style2
+    if _col(card_row, "card_style") == "style2" or card_style2.CARD_SHAPE == "full":   # Full Size = every card
         from card_style2 import build_card_style2
         return await asyncio.to_thread(build_card_style2, card_row, fg)
     return await asyncio.to_thread(_build_card_image_sync, card_row, background_local_path, fg)

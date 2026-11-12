@@ -10,8 +10,10 @@ Layout (no 6-stat grid):
     with the flag and the first playstyle badge on either side
   * accent colour follows the OVR: bronze < 70, silver 70-79, gold 80-89, ice 90+
 
-Background: the card's own Style 2 background (s2_bg via /bgadder) if it has one,
-otherwise a built-in dark navy design.
+Background: the card's own Style 2 background (s2_bg via /bgadder) if it has one (shield frame
+images are skipped), otherwise a built-in glow in the card's theme colours (navy for normal cards).
+Theme cards (Diwali, Halloween, EOAE, Rangoli, Prestige, Crest, Arena, Showcase) get their own
+colours and a small tag top-right.
 """
 
 from __future__ import annotations
@@ -53,6 +55,27 @@ ACCENTS = [                               # (min ovr, colour)
 ]
 
 
+# Theme cards (s2_theme) in Full Size: own glow colours, accent colour and a small tag top-right.
+# bg = (glow centre colour, edge colour), panel = (panel top colour, panel bottom colour).
+THEMES = {
+    None:              {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((18, 27, 58), (5, 8, 20)),  "accent": None,            "tag": None},
+    "diwali":          {"bg": ((122, 44, 18), (28, 6, 10)), "panel": ((58, 16, 14), (20, 4, 8)),  "accent": (255, 196, 70),  "tag": "DIWALI"},
+    "rangoli":         {"bg": ((132, 30, 72), (26, 5, 18)), "panel": ((56, 12, 34), (18, 3, 10)), "accent": (255, 186, 60),  "tag": "RANGOLI"},
+    "prestige_diwali": {"bg": ((110, 70, 24), (24, 12, 6)), "panel": ((50, 30, 12), (16, 9, 4)),  "accent": (255, 214, 120), "tag": "PRESTIGE DIWALI"},
+    "halloween":       {"bg": ((74, 26, 96), (12, 4, 20)),  "panel": ((34, 12, 44), (10, 3, 16)), "accent": (255, 146, 28),  "tag": "HALLOWEEN"},
+    "eoae":            {"bg": ((64, 56, 42), (10, 9, 8)),   "panel": ((32, 28, 22), (8, 7, 6)),   "accent": (226, 186, 96),  "tag": "END OF AN ERA"},
+    "prestige":        {"bg": ((74, 76, 88), (12, 12, 16)), "panel": ((32, 33, 40), (9, 9, 12)),  "accent": (236, 226, 200), "tag": "PRESTIGE"},
+    "crest":           {"bg": ((18, 70, 70), (3, 14, 16)),  "panel": ((10, 36, 38), (3, 10, 12)), "accent": (90, 224, 204),  "tag": "CREST"},
+    "arena":           {"bg": ((96, 22, 22), (14, 4, 6)),   "panel": ((44, 12, 14), (12, 3, 5)),  "accent": (255, 96, 74),   "tag": "ARENA"},
+    "showcase":        {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((18, 27, 58), (5, 8, 20)),  "accent": None,            "tag": "SHOWCASE"},
+}
+
+
+def _theme(card_row) -> dict:
+    key = str(ci._col(card_row, "s2_theme", "") or "").strip().lower() or None
+    return THEMES.get(key, THEMES[None])
+
+
 def _accent(ovr) -> tuple:
     try:
         o = int(ovr)
@@ -92,31 +115,12 @@ def _build_static() -> dict:
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, W - 1, H - 1), radius=RADIUS * S, fill=255)
 
-    # built-in background: plain smooth navy glow
-    small = Image.new("RGB", (OUT_W // 4, OUT_H // 4))
-    cx, cy = small.width * 0.55, small.height * 0.38
-    maxd = math.hypot(small.width, small.height) * 0.62
-    inner, outer = (28, 44, 92), (5, 8, 20)
-    px = small.load()
-    for y in range(small.height):
-        for x in range(small.width):
-            t = min(1.0, math.hypot(x - cx, y - cy) / maxd) ** 1.15
-            px[x, y] = tuple(int(inner[i] + (outer[i] - inner[i]) * t) for i in range(3))
-    bg = small.resize((W, H), Image.BICUBIC).convert("RGBA")
-    # plain: just the smooth navy glow, no stripes or shapes
-
     # bottom panel: straight top, rounded bottom corners, vertical gradient
     panel = Image.new("L", (W, H), 0)
     pd = ImageDraw.Draw(panel)
     pd.rounded_rectangle((_q(PANEL_SIDE, PANEL_TOP), _q(OUT_W - PANEL_SIDE, PANEL_BOTTOM)),
                          radius=PANEL_RADIUS * S, fill=255)
     pd.rectangle((_q(PANEL_SIDE, PANEL_TOP), _q(OUT_W - PANEL_SIDE, PANEL_TOP + PANEL_RADIUS)), fill=255)
-    grad = Image.new("RGB", (1, H))
-    top_c, bot_c = (18, 27, 58), (5, 8, 20)
-    for y in range(H):
-        t = min(1.0, max(0.0, (y / S - PANEL_TOP) / (PANEL_BOTTOM - PANEL_TOP)))
-        grad.putpixel((0, y), tuple(int(top_c[k] + (bot_c[k] - top_c[k]) * t) for k in range(3)))
-    panel_fill = grad.resize((W, H), Image.NEAREST)
 
     # soft dark fade above the panel so the player's legs melt into it
     fade = Image.new("L", (W, H), 0)
@@ -126,7 +130,7 @@ def _build_static() -> dict:
         a = 200 if y >= y1 else int(200 * ((y - y0) / (y1 - y0)) ** 1.4)
         fd.line([_q(0, y), _q(OUT_W, y)], fill=a, width=S)
 
-    return {"mask": mask, "bg": bg.convert("RGB"), "panel": panel, "panel_fill": panel_fill, "fade": fade}
+    return {"mask": mask, "panel": panel, "fade": fade}
 
 
 def _static() -> dict:
@@ -134,6 +138,38 @@ def _static() -> dict:
         if not _STATIC:
             _STATIC.update(_build_static())
         return _STATIC
+
+
+_THEMED: dict = {}
+
+
+def _themed(th: dict) -> dict:
+    """Background glow + panel gradient for one theme's colours, built once."""
+    key = (th["bg"], th["panel"])
+    with _LOCK:
+        hit = _THEMED.get(key)
+        if hit is not None:
+            return hit
+        small = Image.new("RGB", (OUT_W // 4, OUT_H // 4))
+        cx, cy = small.width * 0.55, small.height * 0.38
+        maxd = math.hypot(small.width, small.height) * 0.62
+        inner, outer = th["bg"]
+        px = small.load()
+        for y in range(small.height):
+            for x in range(small.width):
+                t = min(1.0, math.hypot(x - cx, y - cy) / maxd) ** 1.15
+                px[x, y] = tuple(int(inner[i] + (outer[i] - inner[i]) * t) for i in range(3))
+        bg = small.resize((W, H), Image.BICUBIC)
+        grad = Image.new("RGB", (1, H))
+        top_c, bot_c = th["panel"]
+        for y in range(H):
+            t = min(1.0, max(0.0, (y / S - PANEL_TOP) / (PANEL_BOTTOM - PANEL_TOP)))
+            grad.putpixel((0, y), tuple(int(top_c[k] + (bot_c[k] - top_c[k]) * t) for k in range(3)))
+        hit = {"bg": bg, "panel_fill": grad.resize((W, H), Image.NEAREST), "hex": top_c + (255,)}
+        if len(_THEMED) >= 4:
+            _THEMED.pop(next(iter(_THEMED)))
+        _THEMED[key] = hit
+        return hit
 
 
 def _card_bg(card_row) -> Image.Image | None:
@@ -150,7 +186,10 @@ def _card_bg(card_row) -> Image.Image | None:
         key = (path, Path(path).stat().st_mtime)
         hit = _BG_CACHE.get(key)
         if hit is None:
-            hit = ImageOps.fit(Image.open(path).convert("RGB"), (W, H), Image.LANCZOS)
+            src = Image.open(path)
+            if src.mode in ("RGBA", "LA", "P") and src.convert("RGBA").getpixel((0, 0))[3] < 128:
+                return None            # a shield frame (Diwali / Halloween), not a background
+            hit = ImageOps.fit(src.convert("RGB"), (W, H), Image.LANCZOS)
             if len(_BG_CACHE) >= 3:
                 _BG_CACHE.pop(next(iter(_BG_CACHE)))
             _BG_CACHE[key] = hit
@@ -300,13 +339,13 @@ def _spaced(draw, xy, text, font, fill, spacing):
         x += w + spacing * S
 
 
-def _draw_panel(canvas, card_row, role, accent):
+def _draw_panel(canvas, card_row, role, accent, themed):
     st = _static()
     acc = accent + (255,)
     dim = accent + (150,)
 
     # panel body (90% opaque, so a custom background still shows a little)
-    canvas.paste(st["panel_fill"], (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
+    canvas.paste(themed["panel_fill"], (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
 
     fx = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     fd = ImageDraw.Draw(fx)
@@ -352,7 +391,7 @@ def _draw_panel(canvas, card_row, role, accent):
     # OVR: double-ring hexagon in the centre
     cx, cy, r = 518, 1300, 96
     hexa = _hexagon(cx, cy, r)
-    d.polygon(hexa, fill=(12, 18, 40, 255))
+    d.polygon(hexa, fill=themed["hex"])
     d.line(hexa + [hexa[0]], fill=acc, width=6 * S, joint="curve")
     inner = _hexagon(cx, cy, r - 14)
     d.line(inner + [inner[0]], fill=dim, width=2 * S, joint="curve")
@@ -381,15 +420,30 @@ def _draw_panel(canvas, card_row, role, accent):
         pass
 
 
+def _draw_tag(canvas, text, accent):
+    """Small event tag top-right (DIWALI, END OF AN ERA ...)."""
+    d = ImageDraw.Draw(canvas)
+    f = _fit(d, text, ci.FONT_LABEL, 26, 330)
+    tw = d.textlength(text, font=f) / S + 2.5 * (len(text) - 1)
+    x1, y = OUT_W - 60, 92
+    d.rounded_rectangle((_q(x1 - tw - 36, y - 22), _q(x1, y + 22)), radius=22 * S,
+                        outline=accent + (255,), width=3 * S, fill=(0, 0, 0, 255))
+    _spaced(d, _q(x1 - tw / 2 - 18, y + 1), text, f, accent + (255,), 2.5)
+
+
 def build(card_row, fg_image, role) -> io.BytesIO:
     st = _static()
-    accent = _accent(card_row["ovr"])
-    canvas = (_card_bg(card_row) or st["bg"]).convert("RGBA")
+    th = _theme(card_row)
+    themed = _themed(th)
+    accent = th["accent"] or _accent(card_row["ovr"])
+    canvas = (_card_bg(card_row) or themed["bg"]).convert("RGBA")
 
     _draw_player(canvas, card_row, fg_image)
     canvas.paste((4, 6, 16, 255), (0, 0), st["fade"])
     _draw_name(canvas, card_row)
-    _draw_panel(canvas, card_row, role, accent)
+    if th["tag"]:
+        _draw_tag(canvas, th["tag"], accent)
+    _draw_panel(canvas, card_row, role, accent, themed)
 
     # thin inner border line + accent outer edge
     # clean white border line (inset), dark navy outside it

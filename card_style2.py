@@ -656,6 +656,13 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
         with _RENDER_LOCK:
             return card_art.build(card_row, fg_image, role)
 
+    # FULL SIZE: every other theme (Diwali, Halloween, EOAE, ...) uses the Full Size layout too,
+    # in its own colours (card_full.THEMES). Only ARTWORK above keeps its own picture.
+    if CARD_SHAPE == "full":
+        import card_full
+        with _RENDER_LOCK:
+            return card_full.build(card_row, fg_image, role)
+
     # SHOWCASE: the shield with a 16:9 artwork box (card_showcase.py, artwork from /showcase).
     if str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "showcase":
         import card_showcase

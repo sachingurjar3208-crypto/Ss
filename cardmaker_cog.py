@@ -1370,11 +1370,12 @@ class CardMakerCog(commands.Cog):
             await interaction.response.send_message("Cards are already being redrawn. Wait for it to finish.", ephemeral=True)
             return
         import card_style2
+        involves_full = "full" in (card_style2.CARD_SHAPE, shape.value)   # Full Size changes EVERY card
         await asyncio.to_thread(card_style2.set_card_shape, shape.value)
         names = [c["playername"] for c in list_all_cards()
-                 if str(c["card_style"] if "card_style" in c.keys() else "").lower() == "style2"]
+                 if involves_full or str(c["card_style"] if "card_style" in c.keys() else "").lower() == "style2"]
         await interaction.response.send_message(
-            f"Card shape: **{shape.name}**. Redrawing **{len(names)}** Style 2 cards in the background "
+            f"Card shape: **{shape.name}**. Redrawing **{len(names)}** cards in the background "
             "(about 1-2 seconds each). I'll post here when it's done.", ephemeral=True)
         self._shape_busy = True
 
