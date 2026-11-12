@@ -62,24 +62,27 @@ ACCENTS = [                               # (min ovr, colour)
 # Theme cards (s2_theme) in Full Size: own glow colours, accent colour and a small tag top-right.
 # bg = (glow centre colour, edge colour), panel = (panel top colour, panel bottom colour).
 THEMES = {
-    None:              {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((18, 27, 58), (5, 8, 20)),  "accent": None,            "tag": None},
-    "diwali":          {"bg": ((122, 44, 18), (28, 6, 10)), "panel": ((58, 16, 14), (20, 4, 8)),  "accent": (255, 196, 70),  "tag": "DIWALI"},
-    "rangoli":         {"bg": ((132, 30, 72), (26, 5, 18)), "panel": ((56, 12, 34), (18, 3, 10)), "accent": (255, 186, 60),  "tag": "RANGOLI"},
-    "prestige_diwali": {"bg": ((110, 70, 24), (24, 12, 6)), "panel": ((50, 30, 12), (16, 9, 4)),  "accent": (255, 214, 120), "tag": "PRESTIGE DIWALI"},
-    "halloween":       {"bg": ((74, 26, 96), (12, 4, 20)),  "panel": ((34, 12, 44), (10, 3, 16)), "accent": (255, 146, 28),  "tag": "HALLOWEEN"},
-    "eoae":            {"bg": ((64, 56, 42), (10, 9, 8)),   "panel": ((32, 28, 22), (8, 7, 6)),   "accent": (226, 186, 96),  "tag": "END OF AN ERA"},
-    "prestige":        {"bg": ((74, 76, 88), (12, 12, 16)), "panel": ((32, 33, 40), (9, 9, 12)),  "accent": (236, 226, 200), "tag": "PRESTIGE"},
-    "crest":           {"bg": ((18, 70, 70), (3, 14, 16)),  "panel": ((10, 36, 38), (3, 10, 12)), "accent": (90, 224, 204),  "tag": "CREST"},
-    "arena":           {"bg": ((96, 22, 22), (14, 4, 6)),   "panel": ((44, 12, 14), (12, 3, 5)),  "accent": (255, 96, 74),   "tag": "ARENA"},
-    "showcase":        {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((18, 27, 58), (5, 8, 20)),  "accent": None,            "tag": "SHOWCASE"},
-    # picked by background NAME (see BG_NAME_THEMES), not by s2_theme
-    "icon":            {"bg": ((78, 58, 18), (7, 6, 3)),    "panel": ((34, 27, 12), (7, 6, 3)),   "accent": (246, 204, 96),  "tag": "ICON"},
-    "bronze":          {"bg": ((92, 52, 28), (14, 8, 5)),   "panel": ((40, 24, 14), (10, 6, 4)),  "accent": (214, 138, 80),  "tag": None},
+    # bg = (glow centre, edge) when the card has no background image,
+    # panel = (panel top, panel bottom) of the stats panel, accent = numbers / line / hexagon.
+    None:              {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((22, 34, 72), (5, 8, 20)),    "accent": None,            "tag": None},
+    "icon":            {"bg": ((78, 58, 18), (7, 6, 3)),    "panel": ((92, 70, 22), (16, 12, 4)),   "accent": (250, 210, 105), "tag": "ICON"},
+    "bronze":          {"bg": ((92, 52, 28), (14, 8, 5)),   "panel": ((84, 46, 24), (16, 9, 5)),    "accent": (222, 146, 88),  "tag": None},
+    "season1":         {"bg": ((22, 122, 86), (3, 16, 14)), "panel": ((14, 84, 56), (3, 16, 12)),   "accent": (120, 235, 160), "tag": None},
+    "diwali":          {"bg": ((122, 44, 18), (28, 6, 10)), "panel": ((110, 36, 16), (26, 6, 8)),   "accent": (255, 196, 70),  "tag": "DIWALI"},
+    "rangoli":         {"bg": ((132, 30, 72), (26, 5, 18)), "panel": ((104, 22, 60), (22, 4, 14)),  "accent": (255, 186, 60),  "tag": "RANGOLI"},
+    "prestige_diwali": {"bg": ((110, 70, 24), (24, 12, 6)), "panel": ((96, 60, 20), (20, 11, 5)),   "accent": (255, 214, 120), "tag": "PRESTIGE DIWALI"},
+    "halloween":       {"bg": ((74, 26, 96), (12, 4, 20)),  "panel": ((72, 22, 98), (14, 4, 22)),   "accent": (255, 146, 28),  "tag": "HALLOWEEN"},
+    "eoae":            {"bg": ((64, 56, 42), (10, 9, 8)),   "panel": ((96, 50, 18), (18, 10, 6)),   "accent": (255, 184, 92),  "tag": "END OF AN ERA"},
+    "prestige":        {"bg": ((74, 76, 88), (12, 12, 16)), "panel": ((62, 64, 76), (12, 12, 16)),  "accent": (236, 226, 200), "tag": "PRESTIGE"},
+    "crest":           {"bg": ((18, 70, 70), (3, 14, 16)),  "panel": ((14, 70, 72), (3, 14, 16)),   "accent": (90, 224, 204),  "tag": "CREST"},
+    "arena":           {"bg": ((96, 22, 22), (14, 4, 6)),   "panel": ((96, 18, 20), (16, 4, 6)),    "accent": (255, 96, 74),   "tag": "ARENA"},
+    "showcase":        {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((22, 34, 72), (5, 8, 20)),    "accent": None,            "tag": "SHOWCASE"},
 }
 
 # Cards with no theme get a look from their EVENT name first, then their background's name
 # (background or s2_bg): a name containing the word on the left uses the theme on the right.
-BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"), ("diwali", "diwali"), ("halloween", "halloween")]
+BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"), ("season", "season1"), ("s1", "season1"),
+                  ("diwali", "diwali"), ("halloween", "halloween"), ("end of an era", "eoae"), ("eoae", "eoae")]
 
 
 def _event(card_row) -> dict | None:
