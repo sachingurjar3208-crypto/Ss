@@ -59,7 +59,11 @@ HEAD_TOP_MAX = 420               # ...and never lower: a head-and-shoulders phot
 HEAD_SCALE_LIMITS = (0.45, 1.8)  # how much the head-size rule may shrink / grow the box-fit size
 
 # Bottom panel (output px): straight top edge, rounded bottom corners
-PANEL_TOP = 1150
+# "v2" = Rush Cricket layout: chamfered corners, OVR gem top-left, name above the panel,
+# BAT / BOWL bars, flag + playstyle footer. "v1" = the older layout (name top-left, 3 numbers).
+LAYOUT = "v2"
+CUT = 70                                  # v2: size of the cut corners (top-right, bottom-left)
+PANEL_TOP = 1215 if LAYOUT == "v2" else 1150
 PANEL_BOTTOM = OUT_H - 40
 PANEL_SIDE = 38
 PANEL_RADIUS = 30
@@ -183,7 +187,27 @@ def _build_static() -> dict:
         a = 200 if y >= y1 else int(200 * ((y - y0) / (y1 - y0)) ** 1.4)
         fd.line([_q(0, y), _q(OUT_W, y)], fill=a, width=S)
 
+    if LAYOUT == "v2":
+        mask = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(mask).polygon(_v2_outline(0), fill=255)
+        panel = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(panel).polygon(
+            [_q(30, PANEL_TOP), _q(OUT_W - 30, PANEL_TOP), _q(OUT_W - 30, OUT_H - 30),
+             _q(30 + CUT * 0.75, OUT_H - 30), _q(30, OUT_H - 30 - CUT * 0.75)], fill=255)
+        fade = Image.new("L", (W, H), 0)
+        fd = ImageDraw.Draw(fade)
+        y0 = 950
+        for y in range(y0, OUT_H):
+            a = 235 if y >= PANEL_TOP else int(235 * ((y - y0) / (PANEL_TOP - y0)) ** 1.3)
+            fd.line([_q(0, y), _q(OUT_W, y)], fill=a, width=S)
     return {"mask": mask, "panel": panel, "fade": fade}
+
+
+def _v2_outline(inset):
+    """Card outline with the top-right and bottom-left corners cut (output px inset)."""
+    i, c = inset, CUT - inset * 0.4
+    return [_q(i, i), _q(OUT_W - i - c, i), _q(OUT_W - i, i + c), _q(OUT_W - i, OUT_H - i),
+            _q(i + c, OUT_H - i), _q(i, OUT_H - i - c)]
 
 
 def _static() -> dict:
@@ -602,12 +626,139 @@ def _draw_tag(canvas, text, accent):
     _spaced(d, _q(x1 - tw / 2 - 18, y + 1), text, f, accent + (255,), 2.5)
 
 
+# ── v2 layout ────────────────────────────────────────────────────────────
+ROLE_SHORT = {"BAT": "BAT", "WK": "WK", "AR": "AR", "BOWL": "BOWL"}
+
+
+def _v2_diagonals(canvas, accent):
+    fx = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fx)
+    for off, a in ((0, 200), (34, 90)):
+        fd.polygon([_q(OUT_W + 40 - off, 300 + off), _q(OUT_W - 300 - off, -40 + off),
+                    _q(OUT_W - 312 - off, -40 + off), _q(OUT_W + 40 - off, 312 + off)], fill=accent + (a,))
+    canvas.alpha_composite(fx)
+
+
+def _v2_gem(canvas, card_row, role, accent, themed, tag):
+    gx, gy, r = 150, 175, 98
+    gem = [_q(gx, gy - r * 1.18), _q(gx + r, gy - r * 0.45), _q(gx + r, gy + r * 0.55), _q(gx, gy + r * 1.22),
+           _q(gx - r, gy + r * 0.55), _q(gx - r, gy - r * 0.45)]
+    sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ImageDraw.Draw(sh).polygon(gem, fill=(0, 0, 0, 170))
+    canvas.alpha_composite(sh.filter(ImageFilter.GaussianBlur(14 * S)))
+    del sh
+    d = ImageDraw.Draw(canvas)
+    d.polygon(gem, fill=themed["hex"])
+    d.line(gem + [gem[0]], fill=accent + (255,), width=6 * S, joint="curve")
+    d.text(_q(gx, gy - 14), str(card_row["ovr"]), font=_font(ci.FONT_DISPLAY_BOLD, 124), fill=WHITE, anchor="mm")
+    d.line([_q(gx - r * 0.55, gy + r * 0.52), _q(gx + r * 0.55, gy + r * 0.52)], fill=accent + (150,), width=2 * S)
+    word = ROLE_SHORT.get(role, str(role)[:4])
+    _spaced(d, _q(gx, gy + r * 0.84), word, _font(ci.FONT_LABEL, 24), accent + (255,), 3)
+    if tag:
+        f = _fit(d, tag, ci.FONT_LABEL, 24, 260)
+        tw = d.textlength(tag, font=f) / S + 2.5 * (len(tag) - 1)
+        y = gy + r * 1.42
+        d.rounded_rectangle((_q(gx - tw / 2 - 18, y), _q(gx + tw / 2 + 18, y + 40)), radius=20 * S,
+                            outline=accent + (255,), width=3 * S, fill=(0, 0, 0, 255))
+        _spaced(d, _q(gx, y + 21), tag, f, accent + (255,), 2.5)
+
+
+def _v2_name(canvas, card_row):
+    name = str(card_row["displayname"] or "").strip().upper()
+    if not name:
+        return
+    d = ImageDraw.Draw(canvas)
+    bold = ci.FONT_NAME if ci.FONT_NAME.is_file() else ci.FONT_DISPLAY_BOLD
+    f = _fit(d, name, bold, 84, 880)
+    _shadow_text(canvas, (W / 2, (PANEL_TOP - 40) * S), name, f, WHITE, anchor="ms", blur=7, alpha=210)
+
+
+def _v2_panel(canvas, card_row, role, accent, themed):
+    st = _static()
+    canvas.paste(themed["panel_fill"], (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
+    d = ImageDraw.Draw(canvas)
+    d.line([_q(30, PANEL_TOP), _q(OUT_W - 30, PANEL_TOP)], fill=accent + (255,), width=4 * S)
+
+    bat, bowl = int(card_row["bat"] or 0), int(card_row["bowl"] or 0)
+    lf, nf = _font(ci.FONT_LABEL, 32), _font(ci.FONT_DISPLAY_BOLD, 66)
+    track = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    td = ImageDraw.Draw(track)
+    rows = [("BAT", bat), ("BOWL", bowl)]
+    for i, (_, val) in enumerate(rows):
+        y = PANEL_TOP + 52 + i * 74
+        td.rounded_rectangle((_q(215, y - 12), _q(790, y + 12)), radius=12 * S, fill=(255, 255, 255, 30))
+    canvas.alpha_composite(track)
+    del track
+    d = ImageDraw.Draw(canvas)
+    top = max(bat, bowl)
+    for i, (lab, val) in enumerate(rows):
+        y = PANEL_TOP + 52 + i * 74
+        ws = [d.textlength(c, font=lf) for c in lab]
+        x = 80 * S
+        for c, w in zip(lab, ws):
+            d.text((x, y * S), c, font=lf, fill=(215, 222, 235, 255), anchor="lm")
+            x += w + 3 * S
+        fill_x = 215 + (790 - 215) * max(0.05, min(1.0, val / 100))
+        d.rounded_rectangle((_q(215, y - 12), _q(fill_x, y + 12)), radius=12 * S, fill=accent + (255,))
+        d.text(_q(890, y + 2), str(val), font=nf, fill=(accent + (255,)) if val >= top else WHITE, anchor="mm")
+
+    # footer: flag + country (left), playstyle badge + name (right)
+    fy = OUT_H - 82
+    country = str(ci._col(card_row, "country", "") or "").strip()
+    tx = 100
+    try:
+        flag = ci._load_country_logo(country)
+        if flag is not None:
+            ci._draw_logo(canvas, flag, _q(142, fy), 0, 0, 100, box=84 * S)
+            tx = 200
+    except Exception:
+        pass
+    d = ImageDraw.Draw(canvas)
+    if country:
+        d.text(_q(tx, fy), country.upper(), font=_fit(d, country.upper(), ci.FONT_LABEL, 34, 330),
+               fill=(215, 222, 235, 255), anchor="lm")
+    style = ci._col(card_row, "playstyle1")
+    try:
+        badge = ci._load_playstyle_badge(card_row, 1)
+        if badge is not None:
+            ci._draw_logo(canvas, badge, _q(OUT_W - 122, fy), 0, 0, 100, box=104 * S)
+            d = ImageDraw.Draw(canvas)
+            if style:
+                txt = str(style).upper()
+                d.text(_q(OUT_W - 192, fy), txt, font=_fit(d, txt, ci.FONT_LABEL, 32, 330),
+                       fill=accent + (255,), anchor="rm")
+    except Exception:
+        pass
+
+
+def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
+    _v2_diagonals(canvas, accent)
+    _draw_player(canvas, card_row, fg_image)
+    canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
+    _v2_name(canvas, card_row)
+    _v2_gem(canvas, card_row, role, accent, themed, th["tag"])
+    _v2_panel(canvas, card_row, role, accent, themed)
+    ImageDraw.Draw(canvas).line(_v2_outline(20) + [_v2_outline(20)[0]], fill=(246, 248, 252, 255),
+                                width=5 * S, joint="curve")
+
+
 def build(card_row, fg_image, role) -> io.BytesIO:
     st = _static()
     th = _theme(card_row)
     themed = _themed(th)
     accent = th["accent"] or _accent(card_row["ovr"])
     canvas = (_card_bg(card_row) or themed["bg"]).convert("RGBA")
+
+    if LAYOUT == "v2":
+        _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas)
+        out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        out.paste(canvas, (0, 0), st["mask"])
+        del canvas
+        out = out.resize((OUT_W, OUT_H), Image.LANCZOS)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
 
     _draw_player(canvas, card_row, fg_image)
     canvas.paste((4, 6, 16, 255), (0, 0), st["fade"])
