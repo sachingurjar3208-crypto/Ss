@@ -50,7 +50,9 @@ SHIELD = [
     (188, 1475), (152, 1405),
 ]
 
-# Card outline: "shield" (pointed top/bottom, the original) or "rect" (rounded rectangle).
+# Card outline: "shield" (pointed top/bottom, the original), "rect" (rounded rectangle) or
+# "full" (Full Size: rounded rectangle that fills the WHOLE image, so the card looks as big as
+# possible in Discord; the player cutout is also auto-trimmed so every player is the same size).
 # Every Style 2 card (and the EOAE theme) is cut with this shape. Frame-image themes
 # (halloween, diwali) draw their own shield PNG, so they look best with "shield".
 _SHAPE_FILE = Path(__file__).with_name("card_shape.txt")     # saved by /cardshape
@@ -59,7 +61,7 @@ _SHAPE_FILE = Path(__file__).with_name("card_shape.txt")     # saved by /cardsha
 def _load_shape() -> str:
     try:
         v = _SHAPE_FILE.read_text().strip().lower()
-        return v if v in ("shield", "rect") else "shield"
+        return v if v in ("shield", "rect", "full") else "shield"
     except Exception:
         return "shield"
 
@@ -70,7 +72,7 @@ CARD_SHAPE = _load_shape()
 def set_card_shape(shape: str) -> None:
     """Switch the outline for every NEW render (existing images need a redraw)."""
     global CARD_SHAPE
-    shape = "rect" if shape == "rect" else "shield"
+    shape = shape if shape in ("rect", "full") else "shield"
     _SHAPE_FILE.write_text(shape)
     with _STATIC_LOCK:
         CARD_SHAPE = shape
@@ -84,6 +86,19 @@ def set_card_shape(shape: str) -> None:
 
 RECT_BOX = (152, 96, 1128, 1648)       # design-space box of the rectangle card
 RECT_RADIUS = 64                       # corner radius (design px)
+
+# ── "full" (Full Size) shape ──
+FULL_INSET = 4                         # design px left free on every edge (keeps the border crisp)
+FULL_RADIUS = 48                       # corner radius (design px)
+# Player box used ONLY by the full shape: a bit wider/taller than FG_BOX, bottom on the name line.
+FG_BOX_FULL = {"x": 420, "y": 150, "w": 760, "h": 947}
+# Full shape: the player PNG's empty (transparent) border is cut off first, so every player
+# fills the box the same way. Pixels fainter than this alpha count as empty (ignores soft shadows).
+FG_TRIM_ALPHA = 24
+# False = Full Size cards ignore the old /foregroundfixer offset + size (they were tuned for the
+# shield and untrimmed PNGs), so every player comes out uniform. Set True to use them again
+# for fine-tuning odd players.
+FULL_USE_MANUAL_FIX = False
 
 # Foreground fit box (design space) for the player cutout.
 FG_BOX = {"x": 430, "y": 215, "w": 690, "h": 880}
@@ -252,7 +267,10 @@ _RENDER_LOCK = threading.Lock()   # one card at a time keeps RAM low on a small 
 def _build_static() -> dict:
     # Shield mask
     mask = Image.new("L", (CW, CH), 0)
-    if CARD_SHAPE == "rect":
+    if CARD_SHAPE == "full":
+        i = FULL_INSET * S
+        ImageDraw.Draw(mask).rounded_rectangle((i, i, CW - 1 - i, CH - 1 - i), radius=FULL_RADIUS * S, fill=255)
+    elif CARD_SHAPE == "rect":
         x0, y0 = _p(RECT_BOX[0], RECT_BOX[1]); x1, y1 = _p(RECT_BOX[2], RECT_BOX[3])
         ImageDraw.Draw(mask).rounded_rectangle((x0, y0, x1, y1), radius=RECT_RADIUS * S, fill=255)
     else:
@@ -312,7 +330,13 @@ def _build_static() -> dict:
     thin = ImageChops.subtract(thin_out, thin_in).point(lambda v: int(v * 0.22))
     border = ImageChops.lighter(ring, thin)
 
-    return {"mask": mask, "bg": bg_rgb, "shade": shade, "border": border}
+    # END OF AN ERA keeps the shield when every other card is Full Size (old limited design).
+    if CARD_SHAPE == "full":
+        eoae_mask = Image.new("L", (CW, CH), 0)
+        ImageDraw.Draw(eoae_mask).polygon([_p(x, y) for x, y in SHIELD], fill=255)
+    else:
+        eoae_mask = mask
+    return {"mask": mask, "bg": bg_rgb, "shade": shade, "border": border, "eoae_mask": eoae_mask}
 
 
 def _static_nolock() -> dict:
@@ -403,18 +427,36 @@ def _glow_text(canvas: Image.Image, xy, text: str, font, anchor: str, rgb, radiu
 
 # ── Per-card drawing ─────────────────────────────────────────────────────
 
+def _trim_foreground(fg: Image.Image) -> Image.Image:
+    """Cut the empty transparent border off a player cutout, so a PNG with lots of empty
+    space and a tightly cropped PNG end up the same size on the card."""
+    try:
+        solid = fg.getchannel("A").point(lambda v: 255 if v >= FG_TRIM_ALPHA else 0)
+        bbox = solid.getbbox()
+        if bbox and (bbox[2] - bbox[0]) > 8 and (bbox[3] - bbox[1]) > 8:
+            return fg.crop(bbox)
+    except Exception:
+        pass
+    return fg
+
+
 def _draw_player(canvas: Image.Image, card_row, fg) -> None:
     try:
         fg = fg.convert("RGBA")
+        full = CARD_SHAPE == "full"
+        fb = FG_BOX_FULL if full else FG_BOX
         box = {
-            "x": (FG_BOX["x"] - CROP[0]) * S, "y": (FG_BOX["y"] - CROP[1]) * S,
-            "w": FG_BOX["w"] * S, "h": FG_BOX["h"] * S,
+            "x": (fb["x"] - CROP[0]) * S, "y": (fb["y"] - CROP[1]) * S,
+            "w": fb["w"] * S, "h": fb["h"] * S,
         }
+        if full:
+            fg = _trim_foreground(fg)
+        manual = (not full) or FULL_USE_MANUAL_FIX
         resized, pos = ci._fit_foreground(
             fg, box,
-            int(ci._col(card_row, "offset_x", 0)) * S,
-            int(ci._col(card_row, "offset_y", 0)) * S,
-            int(ci._col(card_row, "scale_pct", 100)),
+            int(ci._col(card_row, "offset_x", 0)) * S if manual else 0,
+            int(ci._col(card_row, "offset_y", 0)) * S if manual else 0,
+            int(ci._col(card_row, "scale_pct", 100)) if manual else 100,
         )
         if ci._col(card_row, "s2_fade_legs", 0) in (1, "1", True):
             # Multiply the cutout's own alpha by a vertical gradient: 1 above

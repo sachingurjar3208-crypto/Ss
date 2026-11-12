@@ -1357,9 +1357,10 @@ class CardMakerCog(commands.Cog):
 
     # ── /cardshape: shield or rectangle for every Style 2 card ───────
     @app_commands.command(name="cardshape", description="Owner: card outline for ALL Style 2 cards (shield or rectangle), then redraw them")
-    @app_commands.describe(shape="Shield (pointed) or Rectangle (rounded corners)")
+    @app_commands.describe(shape="Shield (pointed), Rectangle (rounded corners) or Full Size (fills the whole image)")
     @app_commands.choices(shape=[app_commands.Choice(name="Shield", value="shield"),
-                                 app_commands.Choice(name="Rectangle", value="rect")])
+                                 app_commands.Choice(name="Rectangle", value="rect"),
+                                 app_commands.Choice(name="Full Size", value="full")])
     @admin_only()
     async def cardshape(self, interaction: discord.Interaction, shape: app_commands.Choice[str]):
         if interaction.user.id != OWNER_ID:

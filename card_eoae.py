@@ -171,7 +171,7 @@ def _static() -> dict:
         if not _STATIC:
             c2 = _c2()
             st = c2._static()
-            mask = st["mask"]
+            mask = st.get("eoae_mask", st["mask"])
             CW, CH = mask.size
             _STATIC["bg"] = _background(CW, CH, c2.S)
             _STATIC["frame"] = _frame_layers(mask, c2)
@@ -376,7 +376,7 @@ def build(card_row, fg_image, role: str, template: bool = False) -> io.BytesIO:
     S, p = c2.S, c2._p
     st = _static()
     base = c2._static()
-    mask = base["mask"]
+    mask = base.get("eoae_mask", base["mask"])
     CW, CH = mask.size
     canvas = st["bg"].copy()
 
