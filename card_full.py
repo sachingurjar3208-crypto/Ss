@@ -47,7 +47,7 @@ CARD_CX = OUT_W / 2
 # Same size for every player: the cutout is scaled so the HEAD is this wide (output px),
 # whatever the photo is (head-and-shoulders, half body, full body). False = old box fit.
 AUTO_HEAD_SIZE = True
-HEAD_W = 205                     # head width on the card (output px); bigger = bigger players
+HEAD_W = 265                     # head width on the card (output px); bigger = bigger players
 HEAD_TOP_MIN = 150               # the head never goes higher than this (keeps clear of the top edge)
 HEAD_TOP_MAX = 420               # ...and never lower: a head-and-shoulders photo is enlarged up to here
 HEAD_SCALE_LIMITS = (0.45, 1.8)  # how much the head-size rule may shrink / grow the box-fit size
