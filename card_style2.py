@@ -699,6 +699,12 @@ def build_card_style2(card_row, fg_image) -> io.BytesIO:
             with _RENDER_LOCK:
                 return _build_themed(card_row, fg_image, role, theme_key, ts)
 
+    # FULL SIZE: its own layout (card_full.py) — name, player, BATTING / BOWLING + OVR, no 6-stat grid.
+    if CARD_SHAPE == "full":
+        import card_full
+        with _RENDER_LOCK:
+            return card_full.build(card_row, fg_image, role)
+
     with _RENDER_LOCK:
         canvas = (_custom_bg(card_row) or static["bg"]).convert("RGBA")
 
