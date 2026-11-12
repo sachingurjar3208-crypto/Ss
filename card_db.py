@@ -429,6 +429,12 @@ def _ensure_events(conn) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(events)")}
     if "bg" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN bg TEXT")
+    # /cricketer eventspawn: an event's cards spawn at spawn_rate % of a normal card's chance,
+    # until spawn_until (unix time, NULL = no end). spawn_rate NULL = never set (old behaviour).
+    if "spawn_rate" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN spawn_rate INTEGER")
+    if "spawn_until" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN spawn_until REAL")
 
 
 def _invalidate_events() -> None:
@@ -514,6 +520,34 @@ def set_event_bg(eventname: str, pathname: str | None) -> bool:
         conn.commit()
     _invalidate_events()
     return cur.rowcount > 0
+
+
+def set_event_spawn(eventname: str, rate: int | None, until: float | None) -> bool:
+    """Event spawn window: rate % (0 = off), until = unix time or None. False = no such event."""
+    key = (eventname or "").strip().lower()
+    with _conn() as conn:
+        _ensure_events(conn)
+        cur = conn.execute("UPDATE events SET spawn_rate = ?, spawn_until = ? WHERE event_key = ?",
+                           (rate, until, key))
+        conn.commit()
+    _invalidate_events()
+    return cur.rowcount > 0
+
+
+def event_spawn_live(ev: dict | None) -> bool:
+    """True while the event has a running spawn window (set with /admin cricketer eventspawn)."""
+    if not ev or ev.get("spawn_rate") is None or int(ev["spawn_rate"]) <= 0:
+        return False
+    until = ev.get("spawn_until")
+    return until is None or float(until) > time.time()
+
+
+def event_spawn_weight(ev: dict | None) -> float:
+    """How likely one of the event's cards is to spawn, next to a normal card of the same OVR (1.0).
+    Never set = 1.0 (as before); window ended or switched off = 0 (doesn't spawn)."""
+    if not ev or ev.get("spawn_rate") is None:
+        return 1.0
+    return int(ev["spawn_rate"]) / 100 if event_spawn_live(ev) else 0.0
 
 
 def cards_in_event(event_key: str) -> list[str]:

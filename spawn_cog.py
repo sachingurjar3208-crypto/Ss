@@ -51,6 +51,8 @@ MAX_PER_DAY = 0              # spawns per server per day (India time); 0 = unlim
 SPAWN_TIMEOUT = 300          # seconds the "Catch me" button stays (5 min), then the cricketer runs away
 COUNT_EVERY = 3              # at most one message counted every 3 seconds (spam doesn't help)
 HEADER = "**A wild cricketer appeared!**"
+# A card from an event with a running spawn window (/admin cricketer eventspawn) gets this instead.
+EVENT_HEADER = "✨ **NEW EDITION!** A **{event}** cricketer appeared! Catch me before I'm gone!"
 
 # OVR odds.
 # 80-99: exact chances in % (as asked).
@@ -104,15 +106,28 @@ def pick_card(exclude: set[str] | None = None):
     pool = [c for c in card_db.list_obtainable_cards() if c["playername_key"] not in blocked]
     if not pool:
         return None
+    # each card's weight inside its OVR band: normal card = 1, event card = the event's spawn rate
+    # (e.g. 33% -> a Retro 80 is a third as likely as a normal 80); 0 = it doesn't spawn now
+    events = {e["event_key"]: e for e in card_db.list_events()}
+
+    def cw(c) -> float:
+        key = card_db._rget(c, "event_key", None)
+        return card_db.event_spawn_weight(events.get(str(key).lower())) if key else 1.0
+
+    weighted = [(c, cw(c)) for c in pool]
+    weighted = [(c, w) for c, w in weighted if w > 0]
+    if not weighted:
+        return None
     bands, weights = [], []
     for lo, hi, w in SPAWN_ODDS:
-        cards = [c for c in pool if lo <= int(c["ovr"]) <= hi]
+        cards = [(c, x) for c, x in weighted if lo <= int(c["ovr"]) <= hi]
         if cards and w > 0:
             bands.append(cards)
             weights.append(w)
     if not bands:
-        return _rng.choice(pool)
-    return _rng.choice(_rng.choices(bands, weights=weights, k=1)[0])
+        bands, weights = [weighted], [1]
+    band = _rng.choices(bands, weights=weights, k=1)[0]
+    return _rng.choices([c for c, _ in band], weights=[x for _, x in band], k=1)[0]
 
 
 def parse_ovrs(text: str) -> set[int] | None:
@@ -394,7 +409,11 @@ class SpawnCog(commands.Cog):
                 return "Could not draw the spawn image."
             log_id = await asyncio.to_thread(spawn_db.log_spawn, g.id, card["playername_key"], manual)
             view = SpawnView(self, g.id, card, log_id)
-            view.message = await channel.send(HEADER, file=discord.File(io.BytesIO(data), filename=_random_filename()),
+            header = HEADER
+            ev = card_db.get_event(card_db._rget(card, "event_key", "") or "")
+            if card_db.event_spawn_live(ev):
+                header = EVENT_HEADER.format(event=discord.utils.escape_markdown(ev["eventname"]))
+            view.message = await channel.send(header, file=discord.File(io.BytesIO(data), filename=_random_filename()),
                                               view=view)
             self.active.setdefault(g.id, set()).add(view)
             print(f"[spawn] {g.id}: {card['playername']} ({card['ovr']})")
@@ -491,6 +510,38 @@ class SpawnCog(commands.Cog):
                                     guild_only=True, default_permissions=discord.Permissions())
     app_commands.guilds(ADMIN_GUILD_ID)(admin_root)
     cricketer = app_commands.Group(name="cricketer", description="Wild cricketer tools", parent=admin_root)
+
+    @cricketer.command(name="eventspawn",
+                       description="(Owner) Let an event's cards spawn for a limited time, at a % of normal chance")
+    @app_commands.describe(
+        event="Which event",
+        enabled="On = start the spawn window, Off = its cards stop spawning",
+        rate="Chance next to a normal card of the same OVR, in % (e.g. 33). Default 33",
+        hours="How long it runs (0 = until you switch it off). Default 48",
+    )
+    @app_commands.autocomplete(event=_event_autocomplete)
+    @app_commands.check(_owner_check)
+    async def a_eventspawn(self, interaction: discord.Interaction, event: str, enabled: bool,
+                           rate: app_commands.Range[int, 1, 100] = 33,
+                           hours: app_commands.Range[int, 0, 720] = 48):
+        ev = card_db.get_event(event)
+        if ev is None:
+            await interaction.response.send_message(f"No event named `{event}`.", ephemeral=True)
+            return
+        if not enabled:
+            await asyncio.to_thread(card_db.set_event_spawn, ev["eventname"], 0, None)
+            await interaction.response.send_message(
+                f"**{ev['eventname']}** cards no longer spawn.", ephemeral=True)
+            return
+        until = time.time() + hours * 3600 if hours else None
+        await asyncio.to_thread(card_db.set_event_spawn, ev["eventname"], rate, until)
+        n = sum(1 for c in card_db.list_obtainable_cards()
+                if str(card_db._rget(c, "event_key", "") or "").lower() == ev["event_key"])
+        end = f"until <t:{int(until)}:f> (<t:{int(until)}:R>)" if until else "until you switch it off"
+        note = "" if not ev.get("disabled") else "\n⚠️ This event is **disabled**, so its cards still can't spawn. Enable it first."
+        await interaction.response.send_message(
+            f"✨ **{ev['eventname']}** spawns are ON at **{rate}%** of a normal card's chance, {end}.\n"
+            f"{n} card(s) can spawn. They show the **NEW EDITION** message.{note}", ephemeral=True)
 
     @cricketer.command(name="spawn", description="(Owner) Spawn cricketers in this channel now")
     @app_commands.describe(
