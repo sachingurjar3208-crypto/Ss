@@ -467,7 +467,11 @@ def parse_emoji_input(text: str):
 
 
 def event_emoji_str(ev: dict) -> str:
-    return f"<{'a' if ev.get('animated') else ''}:evt:{ev['emoji_id']}>"
+    """The event's emoji; an event made without one uses the normal card emoji."""
+    eid = str(ev.get("emoji_id") or "").strip()
+    if not eid.isdigit():
+        return emojis.DEFAULT_CARD_EMOJI
+    return f"<{'a' if ev.get('animated') else ''}:evt:{eid}>"
 
 
 def create_event(eventname: str, emoji_id: str, animated: bool, created_by: int) -> str:

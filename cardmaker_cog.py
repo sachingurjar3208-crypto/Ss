@@ -974,11 +974,11 @@ class CardMakerCog(commands.Cog):
     @app_commands.command(name="eventmaker", description="Make an event (name + emoji) for event cards")
     @app_commands.describe(
         eventname="Event name, e.g. Diwali 2026",
-        emojiid="Emoji id (digits) of the emoji shown first in the XI for this event's cards",
+        emojiid="Optional: emoji id (digits) shown first in the XI. Empty = normal card emoji",
         animated="Only if the emoji is animated and the bot could not find it itself (default No)",
     )
     @is_owner()
-    async def eventmaker(self, interaction: discord.Interaction, eventname: str, emojiid: str,
+    async def eventmaker(self, interaction: discord.Interaction, eventname: str, emojiid: str | None = None,
                          animated: bool = False):
         await interaction.response.defer()
         name = eventname.strip()
@@ -987,6 +987,14 @@ class CardMakerCog(commands.Cog):
             return
         if name.lower() == "none":
             await interaction.followup.send("❌ `none` is reserved (it removes a card from its event). Pick another name.")
+            return
+        if not (emojiid or "").strip():
+            result = create_event(name, "", False, interaction.user.id)
+            ev = get_event(name)
+            verb = "created" if result == "created" else "updated (emoji removed)"
+            await interaction.followup.send(
+                f"✅ Event **{ev['eventname']}** {verb} (no emoji, its cards use the normal card emoji).\n"
+                f"Give it to cards with `/cardmaker event:`, `/editcard event:` or `/eventfrombg`.")
             return
         parsed = parse_emoji_input(emojiid)
         if parsed is None:
