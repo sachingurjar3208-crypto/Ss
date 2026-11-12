@@ -174,10 +174,13 @@ def _card_bg(card_row) -> Image.Image | None:
 LOGO_FILE = Path(__file__).with_name("rush_logo.png")
 LOGO_SRC = Path(__file__).with_name("starter_bg.png")
 LOGO_SRC_CIRCLE = (627, 117, 111)          # centre x, centre y, radius in starter_bg scaled to 1254 wide
-LOGO_CENTER = (635, 610)                   # output px, used only if the player can't be measured
-# The logo follows the player: centred on the player's upper body (head + shoulders).
-LOGO_FOLLOW_Y = 0.36                       # logo centre at this fraction of the player's height from the top
-LOGO_SIZE = 660                            # diameter, output px
+# Fixed spot, same on every card: centred, ~38% down, diameter ~86% of the width inside the white border.
+LOGO_CENTER = (518, 585)                   # output px
+# False = logo always at LOGO_CENTER (same place on every card).
+# True  = logo follows the player (centred on the head, LOGO_FOLLOW_Y down the cutout).
+LOGO_FOLLOW_PLAYER = False
+LOGO_FOLLOW_Y = 0.36
+LOGO_SIZE = 830                            # diameter, output px
 LOGO_OPACITY = 0.22                        # 0 = invisible, 1 = solid
 _LOGO: list = []
 
@@ -256,22 +259,22 @@ def _draw_player(canvas, card_row, fg):
 
 
 def _draw_logo_behind(canvas, player, pos):
-    """Faint Rush Cricket logo always right behind the player's head and shoulders."""
+    """Faint Rush Cricket logo behind the player: fixed in the middle (default) or following the player."""
     logo = _logo_layer()
     if logo is None:
         return
     size = logo.width
     cx, cy = LOGO_CENTER[0] * S, LOGO_CENTER[1] * S
-    try:
-        a = player.getchannel("A").point(lambda v: 255 if v >= 40 else 0)
-        top_part = a.crop((0, 0, a.width, max(1, int(a.height * 0.20))))   # the head: arms / bats don't pull it sideways
-        bb = top_part.getbbox() or a.getbbox()
-        if bb:
-            cx = pos[0] + (bb[0] + bb[2]) / 2
-            cy = pos[1] + player.height * LOGO_FOLLOW_Y
-    except Exception:
-        pass
-    cy = min(cy, PANEL_TOP * S - size / 2 + 90 * S)      # never sink deep behind the stats panel
+    if LOGO_FOLLOW_PLAYER:
+        try:
+            a = player.getchannel("A").point(lambda v: 255 if v >= 40 else 0)
+            head = a.crop((0, 0, a.width, max(1, int(a.height * 0.20))))   # arms / bats don't pull it sideways
+            bb = head.getbbox() or a.getbbox()
+            if bb:
+                cx = pos[0] + (bb[0] + bb[2]) / 2
+                cy = min(pos[1] + player.height * LOGO_FOLLOW_Y, PANEL_TOP * S - size / 2 + 90 * S)
+        except Exception:
+            pass
     canvas.alpha_composite(logo, (int(cx - size / 2), int(cy - size / 2)))
 
 
