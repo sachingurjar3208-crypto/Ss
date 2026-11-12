@@ -72,12 +72,25 @@ THEMES = {
     "crest":           {"bg": ((18, 70, 70), (3, 14, 16)),  "panel": ((10, 36, 38), (3, 10, 12)), "accent": (90, 224, 204),  "tag": "CREST"},
     "arena":           {"bg": ((96, 22, 22), (14, 4, 6)),   "panel": ((44, 12, 14), (12, 3, 5)),  "accent": (255, 96, 74),   "tag": "ARENA"},
     "showcase":        {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((18, 27, 58), (5, 8, 20)),  "accent": None,            "tag": "SHOWCASE"},
+    # picked by background NAME (see BG_NAME_THEMES), not by s2_theme
+    "icon":            {"bg": ((78, 58, 18), (7, 6, 3)),    "panel": ((34, 27, 12), (7, 6, 3)),   "accent": (246, 204, 96),  "tag": "ICON"},
+    "bronze":          {"bg": ((92, 52, 28), (14, 8, 5)),   "panel": ((40, 24, 14), (10, 6, 4)),  "accent": (214, 138, 80),  "tag": None},
 }
+
+# Cards with no theme get a look from their background's name (background or s2_bg):
+# a name containing the word on the left uses the theme on the right. Checked in order.
+BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze")]
 
 
 def _theme(card_row) -> dict:
     key = str(ci._col(card_row, "s2_theme", "") or "").strip().lower() or None
-    return THEMES.get(key, THEMES[None])
+    if key and key in THEMES:
+        return THEMES[key]
+    names = " ".join(str(ci._col(card_row, c, "") or "") for c in ("background", "s2_bg")).lower()
+    for word, theme in BG_NAME_THEMES:
+        if word in names:
+            return THEMES[theme]
+    return THEMES[None]
 
 
 def _accent(ovr) -> tuple:
