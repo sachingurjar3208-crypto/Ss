@@ -63,7 +63,7 @@ HEAD_SCALE_LIMITS = (0.45, 1.8)  # how much the head-size rule may shrink / grow
 # BAT / BOWL bars, flag + playstyle footer. "v1" = the older layout (name top-left, 3 numbers).
 LAYOUT = "v2"
 CUT = 70                                  # v2: size of the cut corners (top-right, bottom-left)
-PANEL_TOP = 1215 if LAYOUT == "v2" else 1150
+PANEL_TOP = 1150
 PANEL_BOTTOM = OUT_H - 40
 PANEL_SIDE = 38
 PANEL_RADIUS = 30
@@ -670,7 +670,8 @@ def _v2_name(canvas, card_row):
     d = ImageDraw.Draw(canvas)
     bold = ci.FONT_NAME if ci.FONT_NAME.is_file() else ci.FONT_DISPLAY_BOLD
     f = _fit(d, name, bold, 84, 880)
-    _shadow_text(canvas, (W / 2, (PANEL_TOP - 40) * S), name, f, WHITE, anchor="ms", blur=7, alpha=210)
+    gap = 40 if V2_STATS == "bars" else 62          # numbers panel: leave room for the role pill
+    _shadow_text(canvas, (W / 2, (PANEL_TOP - gap) * S), name, f, WHITE, anchor="ms", blur=7, alpha=210)
 
 
 def _v2_panel(canvas, card_row, role, accent, themed):
@@ -731,13 +732,32 @@ def _v2_panel(canvas, card_row, role, accent, themed):
         pass
 
 
+V2_STATS = "numbers"     # "numbers" = big BATTING / OVR / BOWLING panel, "bars" = gem + progress bars
+
+
+def _v2_tag(canvas, text, accent):
+    """Small event tag in the top-left corner (ICON, HALLOWEEN ...)."""
+    d = ImageDraw.Draw(canvas)
+    f = _fit(d, text, ci.FONT_LABEL, 28, 380)
+    tw = d.textlength(text, font=f) / S + 2.5 * (len(text) - 1)
+    x0, y = 62, 72
+    d.rounded_rectangle((_q(x0, y - 24), _q(x0 + tw + 40, y + 24)), radius=24 * S,
+                        outline=accent + (255,), width=3 * S, fill=(0, 0, 0, 255))
+    _spaced(d, _q(x0 + 20 + tw / 2, y + 1), text, f, accent + (255,), 2.5)
+
+
 def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
     _v2_diagonals(canvas, accent)
     _draw_player(canvas, card_row, fg_image)
     canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
     _v2_name(canvas, card_row)
-    _v2_gem(canvas, card_row, role, accent, themed, th["tag"])
-    _v2_panel(canvas, card_row, role, accent, themed)
+    if V2_STATS == "bars":
+        _v2_gem(canvas, card_row, role, accent, themed, th["tag"])
+        _v2_panel(canvas, card_row, role, accent, themed)
+    else:
+        if th["tag"]:
+            _v2_tag(canvas, th["tag"], accent)
+        _draw_panel(canvas, card_row, role, accent, themed)
     ImageDraw.Draw(canvas).line(_v2_outline(20) + [_v2_outline(20)[0]], fill=(246, 248, 252, 255),
                                 width=5 * S, joint="curve")
 
