@@ -178,7 +178,7 @@ PACKS = {
                   "keep_odds": True,
                   "weights": HALLOWEEN_OVR_WEIGHTS},
     # Retro Stars Pack: ONLY cards of the "Retro Star" event (unob ones too). Same rules as Halloween.
-    "retro": {"label": "Retro Stars Pack", "emoji": "📼", "price": _RETRO_PRICE, "cards": 1,
+    "retro": {"label": "Retro Stars Pack", "emoji": emojis.RETRO_PACK, "price": _RETRO_PRICE, "cards": 1,
               "range": (86, 99), "event": "retro star",
               "keep_odds": True,
               "weights": RETRO_OVR_WEIGHTS},

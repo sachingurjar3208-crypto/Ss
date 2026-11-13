@@ -32,6 +32,7 @@ SILVER_PACK    = "<:Silverpack:1564835559841599560>"
 GOLD_PACK      = "<:Goldpack:1564835565323423764>"
 LEGENDARY_PACK = "<:Legpack:1564835557396189345>"
 HALLOWEEN_PACK = "<:Halloweenpack:1564836597046837258>"
+RETRO_PACK = "<:Retropack:1570481667108503642>"
 
 # Player roles (Developer Portal names)
 WICKETKEEPER = "<:Wicketkepper:1558757467045888100>"   # portal name is spelled "Wicketkepper"
