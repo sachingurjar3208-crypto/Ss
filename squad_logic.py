@@ -129,6 +129,14 @@ def _loss_profit_weights(lo: int, hi: int, price: int, relative: dict | None = N
 
 _BRONZE_PRICE, _SILVER_PRICE, _GOLD_PRICE, _LEGEND_PRICE = 1_500, 60_000, 690_000, 4_000_000
 _HALLOWEEN_PRICE = 250_000
+_RETRO_PRICE = 750_000
+
+# Retro Stars Pack: % chance per OVR (only the OVRs the set has). 70% of packs give an 86/87
+# (sells for less than the pack), 30% give 88+; on average a pack sells back for ~91% of its price.
+RETRO_OVR_WEIGHTS: dict[int, float] = {
+    86: 42, 87: 28, 88: 18, 89: 9.5,
+    94: 1.6, 95: 0.6, 96: 0.2, 97: 0.1,
+}
 
 # Halloween Pack: relative chance of each OVR (these are weights, not a 100% split: a card's
 # chance = its number / the sum of all numbers). 79 was not given, so it sits between 78 and 80.
@@ -169,6 +177,11 @@ PACKS = {
                   # given (see keep_odds in roll_pack), so 90+ cards stay rare.
                   "keep_odds": True,
                   "weights": HALLOWEEN_OVR_WEIGHTS},
+    # Retro Stars Pack: ONLY cards of the "Retro Star" event (unob ones too). Same rules as Halloween.
+    "retro": {"label": "Retro Stars Pack", "emoji": "📼", "price": _RETRO_PRICE, "cards": 1,
+              "range": (86, 99), "event": "retro star",
+              "keep_odds": True,
+              "weights": RETRO_OVR_WEIGHTS},
 }
 
 

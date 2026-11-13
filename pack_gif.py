@@ -42,9 +42,12 @@ PACK_COLORS = {
     # Halloween: pumpkin orange with a deep purple rim.
     "halloween": ((44, 14, 62), (255, 128, 30), (104, 34, 128), (204, 84, 18),
                   (255, 190, 80), (255, 226, 150), (160, 60, 12)),
+    # Retro Stars: neon pink with a deep purple rim.
+    "retro": ((40, 8, 70), (255, 70, 200), (96, 24, 140), (210, 40, 170),
+              (255, 160, 230), (255, 214, 245), (150, 20, 120)),
 }
 LABELS = {"bronze": "BRONZE PACK", "silver": "SILVER PACK", "gold": "GOLD PACK",
-          "legendary": "LEGENDARY PACK", "halloween": "HALLOWEEN PACK"}
+          "legendary": "LEGENDARY PACK", "halloween": "HALLOWEEN PACK", "retro": "RETRO STARS PACK"}
 GOLD_TRIM = (232, 214, 140)
 CREAM = (238, 228, 165)
 
