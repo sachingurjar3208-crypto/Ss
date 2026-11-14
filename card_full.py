@@ -530,6 +530,7 @@ def _spaced(draw, xy, text, font, fill, spacing):
 
 PANEL_SHOW_BG = True     # stats panel shows the card background (texture / photo) under a theme tint
 PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = flat colour)
+PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
 
 
 def _panel_fill(themed):
@@ -844,7 +845,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     themed = _themed(th)
     accent = th["accent"] or _accent(card_row["ovr"])
     raw_bg = _card_bg(card_row)
-    if raw_bg is not None:
+    if raw_bg is not None and any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES):
         themed = dict(themed, raw_bg=raw_bg)
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
 
