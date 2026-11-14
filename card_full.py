@@ -42,7 +42,7 @@ WHITE = (245, 246, 250, 255)
 FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
 # Player is moved sideways so its HEAD sits exactly on the card's centre line (a bat or a
 # stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
-CENTER_ON_HEAD = True
+CENTER_ON_HEAD = False           # False: the whole image is centred on the OVR line (no head guessing)
 HEAD_MAX_WIDTH = 0.62     # a row wider than this (x body width) is shoulders, not head
 HEAD_MIN_WIDTH = 0.3      # head = first part from the top at least 30% as wide as the body (skips raised arms)
 CARD_CX = OUT_W / 2
@@ -403,10 +403,11 @@ def _draw_player(canvas, card_row, fg):
                 y = bottom - resized.height
                 y = max(y, HEAD_TOP_MIN * S)
                 pos = (box["x"] + (box["w"] - resized.width) // 2, y)
-        if CENTER_ON_HEAD and not manual:
-            hx = _head_center_x(resized)
-            if hx is not None:
-                pos = (int(CARD_CX * S - hx), pos[1])
+        if not manual:
+            hx = _head_center_x(resized) if CENTER_ON_HEAD else None
+            if hx is None:
+                hx = resized.width / 2                    # middle of the image on the card's centre line
+            pos = (int(CARD_CX * S - hx), pos[1])
         pos = (pos[0] + fdx * S, pos[1] + fdy * S)
         _draw_logo_behind(canvas, resized, pos)
         # soft glow behind the player
