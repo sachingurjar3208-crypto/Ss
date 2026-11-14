@@ -43,6 +43,7 @@ FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
 # Player is moved sideways so its HEAD sits exactly on the card's centre line (a bat or a
 # stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
 CENTER_ON_HEAD = True
+HEAD_MIN_WIDTH = 0.3      # head = first part from the top at least 30% as wide as the body (skips raised arms)
 CARD_CX = OUT_W / 2
 # Same size for every player: the cutout is scaled so the HEAD is this wide (output px),
 # whatever the photo is (head-and-shoulders, half body, full body). False = old box fit.
@@ -447,18 +448,18 @@ def _head_width(player):
 
 
 def _head_center_x(player):
-    """x of the head's centre inside the cutout: on each row of the top part, the WIDEST solid
-    run is taken (a thin bat or stick is ignored), and the middle of those rows is used."""
+    """x of the head's centre inside the cutout.
+
+    Every row's WIDEST solid run is measured. A raised arm, finger, bat or stick is thin, so it is
+    skipped: the head is the first part from the top that is wide enough (compared with the body)
+    and stays wide for a while. The middle of the head rows is used."""
     try:
         k = max(1, player.width // 240)                       # work small, it's only a measurement
         a = player.getchannel("A").resize((max(1, player.width // k), max(1, player.height // k)))
         w, h = a.size
         px = a.load()
-        top = next((y for y in range(h) if any(px[x, y] >= 40 for x in range(w))), None)
-        if top is None:
-            return None
-        centres = []
-        for y in range(top + int(h * 0.03), min(h, top + int(h * 0.16))):
+        rows = []                                             # (width, centre) of the widest run per row
+        for y in range(h):
             best, run_start, best_c = 0, None, None
             for x in range(w + 1):
                 solid = x < w and px[x, y] >= 40
@@ -468,12 +469,22 @@ def _head_center_x(player):
                     if x - run_start > best:
                         best, best_c = x - run_start, (run_start + x) / 2
                     run_start = None
-            if best_c is not None:
-                centres.append(best_c)
-        if not centres:
+            rows.append((best, best_c))
+        filled = [y for y, (bw, _) in enumerate(rows) if bw > 0]
+        if not filled:
             return None
-        centres.sort()
-        return centres[len(centres) // 2] * k
+        top, bottom = filled[0], filled[-1]
+        fig_h = bottom - top + 1
+        body = sorted(bw for bw, _ in rows[top + int(fig_h * 0.4): top + int(fig_h * 0.75)] if bw > 0)
+        body_w = body[len(body) // 2] if body else max(bw for bw, _ in rows)
+        need = max(3, body_w * HEAD_MIN_WIDTH)                # a head is at least this wide
+        hold = max(3, int(fig_h * 0.06))                      # ... for at least this many rows
+        for y in range(top, top + int(fig_h * 0.6)):
+            if all(rows[yy][0] >= need for yy in range(y, min(h, y + hold))):
+                band = [rows[yy][1] for yy in range(y, min(h, y + int(fig_h * 0.1))) if rows[yy][1] is not None]
+                band.sort()
+                return band[len(band) // 2] * k if band else None
+        return None
     except Exception:
         return None
 
