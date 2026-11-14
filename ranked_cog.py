@@ -1,7 +1,7 @@
 """Ranked matchmaking cog.
 
 Commands:
-  rcmp ranked   join the ranked queue (2 overs, same-tier opponents only)
+  rcmp ranked   join the ranked queue (5 overs, same-tier opponents only)
   rcrank        your tier / stars / season record     (rcrank @user for someone else)
   rcrankrewards  every tier's tier-up + season-end reward, your progress, season end time
   rcranktop     global top 10 by stars

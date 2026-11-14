@@ -86,7 +86,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Spawn Channel", "/spawn channel", "Slash command. Pick the channel where cricketers spawn in your server (needs Manage Server and at least 40 members in the server)."),
     ]),
     "ranked": ("Ranked", "Ranked mode, tiers and rewards", [
-        ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 2 overs against a player of a similar tier.", "rcmp ranked"),
+        ("Find a Match", "rcmp ranked", "Join the ranked queue. Every ranked match is 5 overs against a player of a similar tier.", "rcmp ranked"),
         ("Your Rank", "rcrank [@user]", "Your tier, stars and season record as a card.", "rcrank"),
         ("Top Players", "rcranktop", "Global top 10 by stars this season."),
         ("Rank Rewards", "rcrankrewards", "Rewards for every tier, what you already claimed, and when the season ends."),

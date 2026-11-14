@@ -430,7 +430,7 @@ async def _ranked_credits_announce(channel, game):
             r = res.get(who.id)
             if r:
                 lines.append(
-                    f"{who.mention}: **+{r['credits']}** Star Pass credits "
+                    f"{who.mention}: **+{r['credits']}** Star Pass credits {'(win)' if r.get('won') else '(tie)' if r.get('tie') else '(loss)'} "
                     f"({r['n']}/{starpass.STARPASS_RANKED_MATCHES_PER_DAY} ranked matches today)"
                 )
         if lines:
@@ -458,16 +458,17 @@ def _save_match_record(game):
         quest.on_match_end(game, inn1_uid, inn2_uid, t1, t2)
     except Exception as e:
         print(f"[quest] match tracking failed: {type(e).__name__}: {e}")
-    # Star Pass credits for finished RANKED matches (once per game; ties count as played).
+    idx = game.winner_index()                # scores level -> boundary count, then fewer wickets lost
+    # Star Pass credits for finished RANKED matches (once per game): win 100, loss / tie 50.
     if getattr(game, "ranked", False) and not game.__dict__.get("_ranked_credits_done"):
         game._ranked_credits_done = True
         try:
             import starpass
             if starpass.STARPASS_RANKED_VS_BOT or not getattr(game, "is_bot_match", False):
-                game.ranked_credits = starpass.award_ranked_match_credits([inn1_uid, inn2_uid])
+                win_uid = None if idx is None else (inn2_uid if idx == 1 else inn1_uid)
+                game.ranked_credits = starpass.award_ranked_match_credits([inn1_uid, inn2_uid], win_uid)
         except Exception as e:
             print(f"[starpass] ranked credits failed: {type(e).__name__}: {e}")
-    idx = game.winner_index()                # scores level -> boundary count, then fewer wickets lost
     if idx is None:
         if getattr(game, "ranked", False):   # a real tie (everything level): no star change
             game.ranked_result = {}

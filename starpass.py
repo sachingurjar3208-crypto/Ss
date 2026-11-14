@@ -40,8 +40,10 @@ import economy
 # ── Settings ─────────────────────────────────────────────────────────────────
 STARPASS_PREMIUM_ROLE_ID = 1561987229294006322
 STARPASS_QUEST_CREDITS = 80          # credits for every finished daily quest
-STARPASS_RANKED_CREDITS = 50         # credits for every finished RANKED match (each real player)
-STARPASS_RANKED_MATCHES_PER_DAY = 6  # only the first 6 ranked matches of the day (IST) pay credits
+STARPASS_RANKED_WIN_CREDITS = 100    # credits for a RANKED win
+STARPASS_RANKED_LOSS_CREDITS = 50    # credits for a RANKED loss (and for a tie)
+STARPASS_RANKED_CREDITS = STARPASS_RANKED_LOSS_CREDITS   # old name, kept for anything that still reads it
+STARPASS_RANKED_MATCHES_PER_DAY = 3  # only the first 3 ranked matches of the day (IST) pay credits
 STARPASS_RANKED_VS_BOT = True        # False = ranked matches against the bot pay no credits
 PREMIUM_BONUS_CREDITS = 1000         # one-time bonus per season for the Premium role
 LEVEL_COST_EARLY = 300               # credits for each of levels 2 .. EARLY_LAST_LEVEL
@@ -469,9 +471,10 @@ def award_quest_credits(conn, user_id: int, finished_quests: int) -> int:
 _IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def award_ranked_match_credits(user_ids) -> dict:
-    """A ranked match just finished: give STARPASS_RANKED_CREDITS to every real player, but only
-    for their first STARPASS_RANKED_MATCHES_PER_DAY ranked matches of the day (IST).
+def award_ranked_match_credits(user_ids, winner_id=None) -> dict:
+    """A ranked match just finished: the winner gets STARPASS_RANKED_WIN_CREDITS, the loser (and both
+    players of a tie, winner_id None) STARPASS_RANKED_LOSS_CREDITS, but only for their first
+    STARPASS_RANKED_MATCHES_PER_DAY ranked matches of the day (IST).
     One database transaction, so a crash can never pay without counting. Does nothing when no
     season is running. Returns {user_id: {"credits": x, "n": matches_counted_today}} for the
     players who were paid (empty dict if nobody was)."""
@@ -500,9 +503,11 @@ def award_ranked_match_credits(user_ids) -> dict:
                 "ON CONFLICT(user_id, day) DO UPDATE SET n = n + 1",
                 (uid, day),
             )
+            won = winner_id is not None and str(uid) == str(winner_id)
+            amount = STARPASS_RANKED_WIN_CREDITS if won else STARPASS_RANKED_LOSS_CREDITS
             for season in seasons:
-                _add_credits(conn, int(season["id"]), uid, STARPASS_RANKED_CREDITS)
-            out[uid] = {"credits": STARPASS_RANKED_CREDITS, "n": n + 1}
+                _add_credits(conn, int(season["id"]), uid, amount)
+            out[uid] = {"credits": amount, "n": n + 1, "won": won, "tie": winner_id is None}
     return out
 
 
