@@ -129,10 +129,11 @@ def _loss_profit_weights(lo: int, hi: int, price: int, relative: dict | None = N
 
 _BRONZE_PRICE, _SILVER_PRICE, _GOLD_PRICE, _LEGEND_PRICE = 1_500, 60_000, 690_000, 4_000_000
 _HALLOWEEN_PRICE = 250_000
-_RETRO_PRICE = 750_000
+_RETRO_PRICE = 1_000_000
 
-# Retro Stars Pack: % chance per OVR (only the OVRs the set has). 70% of packs give an 86/87
-# (sells for less than the pack), 30% give 88+; on average a pack sells back for ~91% of its price.
+# Retro Stars Pack: % chance per OVR (only the OVRs the set has).
+# At 1,000,000: 88% of packs sell back for less than the price (86-88), 89 is a small profit, 94-97 a big one;
+# on average a pack sells back for ~69% of its price.
 RETRO_OVR_WEIGHTS: dict[int, float] = {
     86: 42, 87: 28, 88: 18, 89: 9.5,
     94: 1.6, 95: 0.6, 96: 0.2, 97: 0.1,
