@@ -528,6 +528,8 @@ def _spaced(draw, xy, text, font, fill, spacing):
         x += w + spacing * S
 
 
+BADGE_POS = (112, 305)   # playstyle badge: top-left, under the brand and event tag
+BADGE_BOX = 116
 PANEL_SHOW_BG = True     # stats panel shows the card background (texture / photo) under a theme tint
 PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = flat colour)
 PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
@@ -616,11 +618,18 @@ def _draw_panel(canvas, card_row, role, accent, themed):
     d = ImageDraw.Draw(canvas)
     _spaced(d, _q(cx, 1410), "OVR", lab_f, (225, 230, 240, 255), 4)
 
-    # flag (left of the hexagon) and first playstyle badge (right)
+    # role icon (left of the hexagon), flag (right); playstyle badge sits top-right of the card
+    try:
+        import role_icons
+        icon = role_icons.get_icon(ci._col(card_row, "role") or role)
+        if icon is not None:
+            ci._draw_logo(canvas, icon, _q(380, 1300), 0, 0, 100, box=96 * S)
+    except Exception:
+        pass
     try:
         flag = ci._load_country_logo(ci._col(card_row, "country"))
         if flag is not None:
-            ci._draw_logo(canvas, flag, _q(372, 1300), 0, 0, 100, box=76 * S)
+            ci._draw_logo(canvas, flag, _q(656, 1300), 0, 0, 100, box=76 * S)
         else:
             country = str(ci._col(card_row, "country", "") or "").upper().strip()
             if country:
@@ -632,13 +641,13 @@ def _draw_panel(canvas, card_row, role, accent, themed):
                 step = f.size / S + 4
                 y0 = 1300 - step * (len(lines) - 1) / 2
                 for k, ln in enumerate(lines):
-                    d.text(_q(372, y0 + k * step), ln, font=f, fill=WHITE, anchor="mm")
+                    d.text(_q(656, y0 + k * step), ln, font=f, fill=WHITE, anchor="mm")
     except Exception:
         pass
     try:
         badge = ci._load_playstyle_badge(card_row, 1)
         if badge is not None:
-            ci._draw_logo(canvas, badge, _q(664, 1300), 0, 0, 100, box=82 * S)
+            ci._draw_logo(canvas, badge, _q(*BADGE_POS), 0, 0, 100, box=BADGE_BOX * S)
     except Exception:
         pass
 
