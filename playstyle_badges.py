@@ -372,7 +372,56 @@ def _i_mind_games(m):
         _line(d, a, b, 34)
 
 
+def _i_accumulator(m):
+    """Bar chart that keeps growing + an arrow going up: builds a long innings."""
+    d = ImageDraw.Draw(m)
+    base = C + 250
+    w, gap = 110, 40
+    x0 = C - (4 * w + 3 * gap) / 2
+    for i, h in enumerate((150, 260, 370, 480)):
+        x = x0 + i * (w + gap)
+        d.rounded_rectangle((x, base - h, x + w, base), radius=18, fill=255)
+    _line(d, (C - 300, C + 40), (C + 230, C - 290), 40)
+    _arrow_head(d, (C + 270, C - 320), -32, 120)
+
+
+def _i_blitz(m):
+    """Lightning bolt with speed lines: explosive start."""
+    d = ImageDraw.Draw(m)
+    bolt = [(C + 70, C - 330), (C - 170, C + 40), (C - 10, C + 40), (C - 90, C + 340),
+            (C + 190, C - 70), (C + 30, C - 70), (C + 150, C - 330)]
+    d.polygon(bolt, fill=255)
+    _speed_lines(m, C - 150, C + 150, n=3, length=170, gap=80, w=30)
+
+
+def _i_disruptor(m):
+    """A ball smashing through a chain (the partnership) that breaks apart."""
+    d = ImageDraw.Draw(m)
+    for cx, ang in ((C - 190, -18), (C + 190, 18)):
+        link = Image.new("L", (S, S), 0)
+        ld = ImageDraw.Draw(link)
+        ld.rounded_rectangle((cx - 150, C + 60, cx + 150, C + 230), radius=85, outline=255, width=46)
+        link = link.rotate(ang, center=(cx, C + 145), resample=Image.BICUBIC)
+        m.paste(255, (0, 0), link)
+    for ang in (-150, -30, 200, -20 + 360):             # impact sparks around the ball
+        a = math.radians(ang)
+        _line(d, (C + 205 * math.cos(a), C - 150 + 205 * math.sin(a)),
+              (C + 280 * math.cos(a), C - 150 + 280 * math.sin(a)), 24)
+    _ball(m, C, C - 150, 160, tilt=-25)
+
+
+def _i_maestro(m):
+    """Crossed bat and ball under a crown: the complete all-rounder."""
+    m.paste(_bat(m, C - 40, C + 70, 560, 120, -38))
+    _ball(m, C + 175, C + 160, 115, tilt=-20)
+    _crown(m, C, C - 255, 330)
+
+
 ICONS = {
+    "Accumulator": _i_accumulator,
+    "Blitz": _i_blitz,
+    "Disruptor": _i_disruptor,
+    "Maestro": _i_maestro,
     "Swing Master": _i_swing_master,
     "Swing King": _i_swing_king,
     "Yorker King": _i_yorker_king,

@@ -333,6 +333,9 @@ _BAT_LINES = {
         "{n} goes 360°, there is no safe place to bowl!",
         "Mr 360 {n} finds the gap again!",
     ],
+    "Blitz": ["{n} is in Blitz mode, the powerplay is on fire!", "Blitz! {n} tears into the new ball!"],
+    "Accumulator": ["{n} is well set now and cashing in!", "The Accumulator {n} keeps piling on the runs!"],
+    "Maestro": ["Maestro {n} makes it look easy!", "Class from the Maestro, {n}!"],
 }
 
 _BOWL_LINES = {
@@ -345,7 +348,31 @@ _BOWL_LINES = {
     "Early Breaker": ["Early Breaker {n} strikes at the start!", "{n} breaks through early!"],
     "Spell Finisher": ["{n} finishes the spell in style!", "Spell Finisher {n} saves his best for last!"],
     "Mind Games": ["Mind games from {n}, the batter never saw it coming!", "{n} changes it up and gets his man!"],
+    "Disruptor": ["Disruptor {n} breaks the partnership!", "{n} ends the stand, the Disruptor strikes!"],
+    "Maestro": ["Maestro {n} strikes with the ball too!", "The Maestro {n} does it again!"],
 }
+
+def total_overs_of(game) -> int:
+    return int(getattr(game, "overs", 20) or 20)
+
+
+def _striker_balls(game) -> int:
+    try:
+        return int(game.striker_balls_faced())
+    except Exception:
+        return 0
+
+
+def _partnership_before(game) -> int:
+    """Partnership runs just before this wicket (the game may already have reset it to 0)."""
+    try:
+        hist = getattr(game, "partnership_history", None) or []
+        if hist and int(game.partnership_runs or 0) == 0:
+            return int(hist[-1].runs or 0)
+        return int(game.partnership_runs or 0)
+    except Exception:
+        return 0
+
 
 _STYLE_GAP_BALLS = 6   # the same player + playstyle can't repeat its line within one over
 
@@ -380,8 +407,14 @@ def playstyle_line(
                 fired.append("Cover Drive Specialist")
             if "Mr360" in bat_attrs and shot_internal in _SHOTS_360:
                 fired.append("Mr360")
+            if "Blitz" in bat_attrs and over_index < max(1, round(total_overs_of(game) * 0.30)):
+                fired.append("Blitz")
+            if "Accumulator" in bat_attrs and _striker_balls(game) >= 30:
+                fired.append("Accumulator")
             if "Aggressive" in bat_attrs:
                 fired.append("Aggressive")
+            if "Maestro" in bat_attrs:
+                fired.append("Maestro")
             for style in fired:   # strongest / most specific first (list order)
                 if _style_ok(game, striker_name, style, _STYLE_GAP_BALLS):
                     return random.choice(_BAT_LINES[style]).format(n=short_name(striker_name))
@@ -414,6 +447,10 @@ def playstyle_line(
                         fired.append("Spell Finisher")
             if "Lethal Pace" in bowl_attrs and delivery_internal in _PACE_DELIVERIES:
                 fired.append("Lethal Pace")
+            if "Disruptor" in bowl_attrs and _partnership_before(game) >= 30:
+                fired.append("Disruptor")
+            if "Maestro" in bowl_attrs:
+                fired.append("Maestro")
             for style in fired:
                 if _style_ok(game, bowler_name, style, 0):
                     return random.choice(_BOWL_LINES[style]).format(n=short_name(bowler_name))

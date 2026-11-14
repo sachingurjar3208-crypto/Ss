@@ -229,6 +229,18 @@ ATTR_EFFECTS = {
     "Spell Finisher":  {"wkt_mult":         1.25,   # +25% wickets in the bowler's final over(s)
                         "run_reduce":       0.90},  # -10% runs in the bowler's final over(s)
     "Mind Games":      {"wkt_mult":         1.25},  # +25% wickets when the delivery type changes
+    # ── Playstyles added Nov 2026 ────────────────────────────────────────────
+    # Accumulator (bat): the longer he bats, the better. Grows from 0 to full at 30 balls faced.
+    "Accumulator":     {"acc_run_mult":     1.15,   # up to +15% 1s/2s/3s/4s/6s
+                        "acc_wkt_reduce":   0.85},  # up to -15% wicket chance
+    # Blitz (bat): fast start, a big strike rate in the powerplay only.
+    "Blitz":           {"pp_boundary_mult": 1.25,   # +25% fours/sixes in the powerplay
+                        "pp_dot_reduce":    0.85},  # -15% dot balls in the powerplay
+    # Disruptor (bowl): partnership breaker.
+    "Disruptor":       {"partner_wkt_mult": 1.20},  # +20% wickets when the partnership is 30+ runs
+    # Maestro (all-rounder): a little better at both, all match long.
+    "Maestro":         {"allround_bat_mult": 1.08,  # batting: +8% 1s/2s/3s/4s/6s
+                        "allround_wkt_mult": 1.08}, # bowling: +8% wickets
     # Elite Spell: only the bowlers of the hardest ranked BOTS get this (ranked.py). Never shown to users.
     "Elite Spell":     {"run_reduce":       0.84,   # -16% 1s/2s/3s/4s
                         "six_reduce":       0.65,   # sixes 35% rarer
@@ -484,6 +496,25 @@ def calculate_outcome(
         sm = AE_BAT["Clinical"]["single_mult"]
         w["1"] = w["1"] * sm; w["2"] = w["2"] * sm
 
+    # ACCUMULATOR: grows with the balls he has faced (full effect at 30 balls)
+    if "Accumulator" in batsman_attrs:
+        acc = AE_BAT["Accumulator"]
+        ramp = min(1.0, max(0, balls_since_wicket) / 30) if balls_since_wicket < 999 else 0.0
+        rm = 1 + (acc["acc_run_mult"] - 1) * ramp
+        for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * rm
+        w["W"] = w["W"] * (1 + (acc["acc_wkt_reduce"] - 1) * ramp)
+
+    # BLITZ: more boundaries, fewer dots, powerplay only
+    if "Blitz" in batsman_attrs and phase == "powerplay":
+        bz = AE_BAT["Blitz"]
+        w["4"] = w["4"] * bz["pp_boundary_mult"]; w["6"] = w["6"] * bz["pp_boundary_mult"]
+        w["0"] = w["0"] * bz["pp_dot_reduce"]
+
+    # MAESTRO (batting side)
+    if "Maestro" in batsman_attrs:
+        mm = AE_BAT["Maestro"]["allround_bat_mult"]
+        for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * mm
+
     # CHASE MASTER / CHASER: +scoring when chasing (innings 2).
     # "Chaser" is the legacy name for "Chase Master" — they are mutually
     # exclusive. If a player somehow has both (old data), only the stronger
@@ -627,6 +658,14 @@ def calculate_outcome(
         and delivery_internal != prev_delivery
     ):
         w["W"] = w["W"] * AE_BOWL["Mind Games"]["wkt_mult"]
+
+    # DISRUPTOR: partnership breaker (30+ run stand)
+    if "Disruptor" in bowler_attrs and partnership_runs >= 30:
+        w["W"] = w["W"] * AE_BOWL["Disruptor"]["partner_wkt_mult"]
+
+    # MAESTRO (bowling side)
+    if "Maestro" in bowler_attrs:
+        w["W"] = w["W"] * AE_BOWL["Maestro"]["allround_wkt_mult"]
 
     # SPELL FINISHER: better bowling in the bowler's own last over(s).
     #   max 1 over  -> that over | max 2 overs -> last 1 | max 3 overs -> last 1

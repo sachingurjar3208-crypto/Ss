@@ -37,6 +37,10 @@ NARRATIVES: dict[str, str] = {
     "Mystery": "Mystery bowler: +30% wickets and -8% boundaries on Mystery-button deliveries.",
     "Spell Finisher": "Bowler who saves his best for his last over(s): +25% wickets, -10% runs (last 1 over, last 2 if he bowls 4).",
     "Mind Games": "Trickster bowler: +25% wickets when the delivery type changes from the previous ball.",
+    "Accumulator": "Batter who builds long innings: the more balls he faces, the better he plays (up to +15% runs, -15% wicket chance at 30 balls).",
+    "Blitz": "Explosive starter: +25% fours/sixes and -15% dot balls in the powerplay.",
+    "Disruptor": "Partnership breaker: +20% wickets when the batting pair has added 30+ runs.",
+    "Maestro": "All-rounder: +8% batting and +8% wickets, all match long.",
 }
 
 NARRATIVE_NAMES: list[str] = list(NARRATIVES)
