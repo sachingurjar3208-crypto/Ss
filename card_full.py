@@ -42,6 +42,7 @@ WHITE = (245, 246, 250, 255)
 FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
 # Player is moved sideways so its HEAD sits exactly on the card's centre line (a bat or a
 # stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
+CENTER_ON_BODY = True            # middle of the body (bat / trophy / raised arm ignored) on the OVR line
 CENTER_ON_HEAD = False           # False: the whole image is centred on the OVR line (no head guessing)
 HEAD_MAX_WIDTH = 0.62     # a row wider than this (x body width) is shoulders, not head
 HEAD_MIN_WIDTH = 0.3      # head = first part from the top at least 30% as wide as the body (skips raised arms)
@@ -404,7 +405,7 @@ def _draw_player(canvas, card_row, fg):
                 y = max(y, HEAD_TOP_MIN * S)
                 pos = (box["x"] + (box["w"] - resized.width) // 2, y)
         if not manual:
-            hx = _head_center_x(resized) if CENTER_ON_HEAD else None
+            hx = _head_center_x(resized) if CENTER_ON_HEAD else (_body_center_x(resized) if CENTER_ON_BODY else None)
             if hx is None:
                 hx = resized.width / 2                    # middle of the image on the card's centre line
             pos = (int(CARD_CX * S - hx), pos[1])
@@ -452,6 +453,41 @@ def _head_width(player):
         # lower part of the widths (the face), so a cap brim or a hand on the cap doesn't inflate it
         hw = sorted(core)[int(len(core) * HEAD_PCT)] if core else 0
         return hw * k if hw > 4 else None
+    except Exception:
+        return None
+
+
+def _body_center_x(player):
+    """x of the middle of the BODY: half of the player's solid pixels (shoulders to waist) lie left
+    of it and half right. A bat, trophy, helmet or raised arm is a small part of that, so it
+    hardly moves the centre (the plain middle of the image would move a lot)."""
+    try:
+        k = max(1, player.width // 300)
+        a = player.getchannel("A").resize((max(1, player.width // k), max(1, player.height // k)))
+        a = a.point(lambda v: 255 if v >= 60 else 0)
+        bb = a.getbbox()
+        if not bb:
+            return None
+        fig_h = bb[3] - bb[1]
+        band = a.crop((0, bb[1] + int(fig_h * 0.18), a.width, bb[1] + int(fig_h * 0.62)))
+        px = band.load()
+        centres = []                                  # middle of the widest solid run on each row
+        for y in range(band.height):
+            best, start, best_c = 0, None, None
+            for x in range(band.width + 1):
+                solid = x < band.width and px[x, y]
+                if solid and start is None:
+                    start = x
+                elif not solid and start is not None:
+                    if x - start > best:
+                        best, best_c = x - start, (start + x) / 2
+                    start = None
+            if best_c is not None:
+                centres.append(best_c)
+        if not centres:
+            return None
+        centres.sort()
+        return centres[len(centres) // 2] * k
     except Exception:
         return None
 
