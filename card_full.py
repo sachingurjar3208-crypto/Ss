@@ -43,6 +43,7 @@ FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
 # Player is moved sideways so its HEAD sits exactly on the card's centre line (a bat or a
 # stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
 CENTER_ON_HEAD = True
+HEAD_MAX_WIDTH = 0.62     # a row wider than this (x body width) is shoulders, not head
 HEAD_MIN_WIDTH = 0.3      # head = first part from the top at least 30% as wide as the body (skips raised arms)
 CARD_CX = OUT_W / 2
 # Same size for every player: the cutout is scaled so the HEAD is this wide (output px),
@@ -493,7 +494,16 @@ def _head_info(player):
         hold = max(3, int(fig_h * 0.06))                      # ... for at least this many rows
         for y in range(top, top + int(fig_h * 0.6)):
             if all(rows[yy][0] >= need for yy in range(y, min(h, y + hold))):
-                band = [rows[yy][1] for yy in range(y, min(h, y + int(fig_h * 0.1))) if rows[yy][1] is not None]
+                # head rows only: stop as soon as the row gets wider than a head (shoulders, raised arm)
+                band = []
+                for yy in range(y, min(h, y + int(fig_h * 0.12))):
+                    bw, bc = rows[yy]
+                    if bc is None or bw > body_w * HEAD_MAX_WIDTH:
+                        break
+                    band.append(bc)
+                if len(band) < 3:
+                    band = [rows[yy][1] for yy in range(y, min(h, y + max(3, int(fig_h * 0.03))))
+                            if rows[yy][1] is not None]
                 band.sort()
                 return (y * k, band[len(band) // 2] * k) if band else None
         return None
