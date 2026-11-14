@@ -206,13 +206,45 @@ def _draw(role: str) -> Image.Image:
     return img.resize((OUT, OUT), Image.LANCZOS)
 
 
-def get_icon(role) -> Image.Image | None:
+from pathlib import Path
+
+ICON_DIR = Path(__file__).parent / "role_icons"
+# which image file each role / bowling type uses (files live in role_icons/)
+FILES = {
+    "BAT": "bat.png",
+    "AR": "allrounder.png",
+    "WK": "keeper.png",
+    "Fast": "fast.png",
+    "Medium Pacer": "medium.png",
+    "Off Spin": "offspin.png",
+    "Leg Spin": "legspin.png",
+    "Orthodox": "legspin.png",      # left-arm orthodox turns the same way as leg spin
+    "Top Spinner": "offspin.png",
+}
+
+
+def _file_icon(name):
+    path = ICON_DIR / name
+    if not path.is_file():
+        return None
+    try:
+        return Image.open(path).convert("RGBA")
+    except Exception:
+        return None
+
+
+def get_icon(role, bowling_type=None) -> Image.Image | None:
+    """Icon for the card: the image in role_icons/ when there is one, otherwise the drawn one."""
     key = str(role or "").upper().strip()
     key = {"RBOWL": "BOWL", "BOWLER": "BOWL", "BATTER": "BAT", "ALLROUNDER": "AR", "KEEPER": "WK"}.get(key, key)
     if key not in ("BAT", "BOWL", "AR", "WK"):
         return None
+    bt = str(bowling_type or "").strip()
+    file_key = key if key != "BOWL" else (bt if bt in FILES else "Fast")
+    cache_key = (key, file_key)
     with _LOCK:
-        hit = _MEM.get(key)
+        hit = _MEM.get(cache_key)
         if hit is None:
-            hit = _MEM[key] = _draw(key)
+            hit = _file_icon(FILES.get(file_key, "")) or _draw(key)
+            _MEM[cache_key] = hit
         return hit

@@ -541,6 +541,7 @@ def _spaced(draw, xy, text, font, fill, spacing):
 
 BADGE_POS = (112, 305)   # playstyle badge: top-left, under the brand and event tag
 BADGE_BOX = 116
+ROLE_ICON_BOX = 104      # role icon left of the OVR hexagon
 PANEL_SHOW_BG = True     # stats panel shows the card background (texture / photo) under a theme tint
 PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = flat colour)
 PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
@@ -632,9 +633,9 @@ def _draw_panel(canvas, card_row, role, accent, themed):
     # role icon (left of the hexagon), flag (right); playstyle badge sits top-right of the card
     try:
         import role_icons
-        icon = role_icons.get_icon(ci._col(card_row, "role") or role)
+        icon = role_icons.get_icon(ci._col(card_row, "role") or role, ci._col(card_row, "bowling_type"))
         if icon is not None:
-            ci._draw_logo(canvas, icon, _q(380, 1300), 0, 0, 100, box=96 * S)
+            ci._draw_logo(canvas, icon, _q(378, 1300), 0, 0, 100, box=ROLE_ICON_BOX * S)
     except Exception:
         pass
     try:
