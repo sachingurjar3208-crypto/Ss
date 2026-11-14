@@ -51,8 +51,10 @@ AUTO_HEAD_SIZE = False           # old "measure the head" rule (off: results cha
 # FIXED rule (default): the top of the player is always at PLAYER_TOP and the photo is scaled so it
 # reaches down to the stats panel. Same result every time a card is drawn or edited.
 FILL_HEIGHT = True
+HEAD_TO_TARGET = True            # size every player so the TOP OF THE HEAD sits on HEAD_TARGET_Y
+HEAD_TARGET_Y = 100              # output px from the top of the card
 PLAYER_TOP = 205                 # output px from the top of the card where the head starts
-PLAYER_MAX_W = 1000              # a very wide photo (arms out) is not made wider than this
+PLAYER_MAX_W = 1700              # a very wide photo (arms out) is not made wider than this
 HEAD_W = 240                     # face width on the card (output px); bigger = bigger players
 HEAD_PCT = 0.3                   # which row width counts as the face (0.5 = median, lower ignores caps / hands more)
 HEAD_TOP_MIN = 150               # the head never goes higher than this (keeps clear of the top edge)
@@ -371,7 +373,12 @@ def _draw_player(canvas, card_row, fg):
         )
         if FILL_HEIGHT and not manual:
             bottom = (PANEL_TOP + 25) * S                 # a little under the panel's top line
-            k = (bottom - PLAYER_TOP * S) / resized.height
+            info = _head_info(resized) if HEAD_TO_TARGET else None
+            if info and resized.height - info[0] > resized.height * 0.3:
+                # every card: the top of the head lands on the same line (a raised bat may go above)
+                k = (bottom - HEAD_TARGET_Y * S) / (resized.height - info[0])
+            else:
+                k = (bottom - PLAYER_TOP * S) / resized.height
             k = min(k, PLAYER_MAX_W * S / resized.width)
             k *= fsc / 100                                # /foregroundfix size on top (bottom stays put)
             resized = resized.resize((max(1, int(resized.width * k)), max(1, int(resized.height * k))),
@@ -448,7 +455,12 @@ def _head_width(player):
 
 
 def _head_center_x(player):
-    """x of the head's centre inside the cutout.
+    info = _head_info(player)
+    return info[1] if info else None
+
+
+def _head_info(player):
+    """(top y, centre x) of the head inside the cutout.
 
     Every row's WIDEST solid run is measured. A raised arm, finger, bat or stick is thin, so it is
     skipped: the head is the first part from the top that is wide enough (compared with the body)
@@ -483,7 +495,7 @@ def _head_center_x(player):
             if all(rows[yy][0] >= need for yy in range(y, min(h, y + hold))):
                 band = [rows[yy][1] for yy in range(y, min(h, y + int(fig_h * 0.1))) if rows[yy][1] is not None]
                 band.sort()
-                return band[len(band) // 2] * k if band else None
+                return (y * k, band[len(band) // 2] * k) if band else None
         return None
     except Exception:
         return None
