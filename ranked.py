@@ -5,6 +5,7 @@ No Discord code here (except the tiny FakeMember stand-in), so it is easy to tes
 HOW IT WORKS
 - Win a ranked match = +1 star, lose = -1 star (never below 0). Ties change nothing.
 - Tiers by stars: Bronze 0 | Silver 20 | Gold 40 | Platinum 60 | Legendary 100 | Ruby 200.
+- Legendary XIs may only use cards up to 95 OVR (TIER_MAX_OVR).
 - Reaching a tier gives a ONE-TIME reward per season (TIER_UP_REWARDS).
 - After Ruby stars keep counting (no more tier rewards): the global top list is by stars.
 - Every month (UTC) the season resets automatically: everyone goes back to 0 stars and
@@ -92,9 +93,23 @@ BOT_PROFILES = {
     # bowl_boost = extra BOWL points for every bot bowler (max 99): their bowlers take more wickets
     # and give away fewer runs and sixes.
     # elite = the bowlers also get the hidden "Elite Spell" playstyle (logic.py): tighter, far fewer sixes.
-    "Legendary": {"ovr": (92, 99), "skill": 1.00, "bowl_boost": 7, "elite": True},    # very hard
+    "Legendary": {"ovr": (92, 95), "skill": 1.00, "bowl_boost": 7, "elite": True},    # very hard (95 cap)
     "Ruby":      {"ovr": (93, 99), "skill": 1.00, "bowl_boost": 9, "elite": True},    # hardest: best cards + always the smart choice
 }
+
+
+# Highest card OVR allowed in the XI for a tier (tiers not listed: no limit).
+TIER_MAX_OVR = {
+    "Legendary": 95,
+}
+
+
+def over_cap_cards(cards, tier: str) -> list:
+    """Cards in this XI above the tier's OVR limit (empty list = XI is allowed)."""
+    cap = TIER_MAX_OVR.get(tier)
+    if cap is None:
+        return []
+    return [c for c in cards if int(c["ovr"] or 0) > cap]
 
 
 # ── Tiers ────────────────────────────────────────────────────────────────────
