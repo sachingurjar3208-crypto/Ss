@@ -348,6 +348,32 @@ def set_team_name(user_id, team_name: str) -> None:
         conn.execute("UPDATE users SET team_name = ? WHERE user_id = ?", (team_name, _uid(user_id)))
 
 
+# -- Favourite player shown on rcprofile (rcfavourite) --
+def _ensure_favourite(conn) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS profile_favourite (user_id INTEGER PRIMARY KEY, player_key TEXT NOT NULL)")
+
+
+def get_favourite(user_id) -> str | None:
+    conn = _conn()
+    try:
+        _ensure_favourite(conn)
+        r = conn.execute("SELECT player_key FROM profile_favourite WHERE user_id = ?", (_uid(user_id),)).fetchone()
+        return r["player_key"] if r else None
+    finally:
+        conn.close()
+
+
+def set_favourite(user_id, player_key: str | None) -> None:
+    with _tx() as conn:
+        _ensure_favourite(conn)
+        if player_key:
+            conn.execute("INSERT INTO profile_favourite (user_id, player_key) VALUES (?, ?) "
+                         "ON CONFLICT(user_id) DO UPDATE SET player_key = excluded.player_key",
+                         (_uid(user_id), player_key))
+        else:
+            conn.execute("DELETE FROM profile_favourite WHERE user_id = ?", (_uid(user_id),))
+
+
 def list_users() -> list[sqlite3.Row]:
     conn = _conn()
     try:

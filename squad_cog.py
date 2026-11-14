@@ -1032,9 +1032,9 @@ class SquadCog(commands.Cog, name="Squad"):
 
     # -- profile ---------------------------------------------------------
     @commands.command(name="rcprofile")
-    @commands.cooldown(1, 5, commands.BucketType.user)
+    @commands.cooldown(1, 30, commands.BucketType.user)
     async def rcprofile(self, ctx: commands.Context, member: Optional[discord.Member] = None):
-        """Show your team profile."""
+        """Show your profile card (image): team, tier, record, top 3 cards, favourite, coins."""
         target = member or ctx.author
         if target.bot:
             await ctx.send("Bots don't have profiles.")
@@ -1043,6 +1043,61 @@ class SquadCog(commands.Cog, name="Squad"):
         if user is None:
             await ctx.send(f"**{esc(target.display_name)}** hasn't debuted yet.")
             return
+        try:
+            async with ctx.typing():
+                buf = await self._profile_image(target, user)
+            await ctx.send(file=discord.File(buf, filename="profile.png"))
+        except Exception as e:
+            print(f"[rcprofile] image failed, sending the text profile ({type(e).__name__}: {e})")
+            await self._profile_embed(ctx, target, user)
+        if target.id == ctx.author.id:
+            await quest.track_and_notify(ctx, ctx.author.id, {"profile_view": 1})
+
+    async def _profile_image(self, target, user):
+        import profile_image
+        import ranked
+        from match_records import get_totals
+        try:
+            avatar = await target.display_avatar.replace(size=256, static_format="png").read()
+        except Exception:
+            avatar = None
+
+        def collect():
+            keys = set(economy.owned_keys(target.id))
+            owned = [c for c in (card_db.get_card(k) for k in keys) if c is not None]
+            owned.sort(key=lambda c: int(c["ovr"] or 0), reverse=True)
+            fav_key = economy.get_favourite(target.id)
+            if fav_key not in keys:
+                fav_key = user["captain_key"] if user["captain_key"] in keys else None
+            fav = card_db.get_card(fav_key) if fav_key else None
+            rk = ranked.get_player(target.id)
+            matches, wins = get_totals(target.id)
+            return {
+                "team": user["team_name"], "manager": target.display_name, "avatar": avatar,
+                "tier": rk["tier"], "stars": rk["stars"], "matches": matches, "wins": wins,
+                "cards": [c["image_path"] for c in owned[:3]],
+                "favourite": fav["displayname"] if fav is not None and fav["displayname"] else (fav["playername"] if fav is not None else None),
+                "owned": len(keys), "total": len(card_db.list_all_cards()), "coins": user["purse"],
+            }
+
+        data = await asyncio.to_thread(collect)
+        return await asyncio.to_thread(profile_image.build_profile_image, data)
+
+    @commands.command(name="rcfavourite", aliases=["rcfavorite", "rcfav"])
+    @commands.cooldown(1, 10, commands.BucketType.user)
+    async def rcfavourite(self, ctx: commands.Context, *, player: str):
+        """Pick the favourite player shown on your rcprofile (a card you own)."""
+        if not await _need_debut(ctx):
+            return
+        card, err = sl.resolve_owned(ctx.author.id, security.clean_input(player))
+        if card is None:
+            await ctx.send(f"❌ {err}")
+            return
+        economy.set_favourite(ctx.author.id, card["playername_key"])
+        await ctx.send(f"✅ **{esc(card['playername'])}** is now your favourite player. See it with `rcprofile`.")
+
+    async def _profile_embed(self, ctx, target, user):
+        """Old text profile, used only if the image can't be drawn."""
         cards = sl.xi_cards(target.id)
         cap = card_db.get_card(user["captain_key"]) if user["captain_key"] else None
         try:
@@ -1064,8 +1119,6 @@ class SquadCog(commands.Cog, name="Squad"):
         embed.add_field(name="<:Streak:1558139736617390292> Daily streak", value=str(user["daily_streak"]))
         embed.add_field(name=f"Form (last {len(form)})", value=f"{form_txt}\n{wins} win(s)" if form else form_txt)
         await ctx.send(embed=embed)
-        if target.id == ctx.author.id:
-            await quest.track_and_notify(ctx, ctx.author.id, {"profile_view": 1})
 
     # -- help ------------------------------------------------------------
     # Normal users: once every 2 minutes. Premium members: no cooldown at all.

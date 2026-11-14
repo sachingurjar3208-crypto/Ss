@@ -127,6 +127,19 @@ def get_head_to_head(user_id: int | str, opp_id: int | str) -> dict:
     return row
 
 
+def get_totals(user_id: int | str) -> tuple[int, int]:
+    """(matches played, matches won) over every recorded match."""
+    conn = _conn()
+    try:
+        r = conn.execute("SELECT COUNT(*), COALESCE(SUM(won), 0) FROM match_participants WHERE user_id = ?",
+                         (str(user_id),)).fetchone()
+        return int(r[0] or 0), int(r[1] or 0)
+    except Exception:
+        return 0, 0
+    finally:
+        conn.close()
+
+
 def get_form(user_id: int | str, limit: int = 5) -> list[dict]:
     """Return the last `limit` completed matches for a user, most-recent first."""
     user_id = str(user_id)
