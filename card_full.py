@@ -528,13 +528,39 @@ def _spaced(draw, xy, text, font, fill, spacing):
         x += w + spacing * S
 
 
+PANEL_SHOW_BG = True     # stats panel shows the card background (texture / photo) under a theme tint
+PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = flat colour)
+
+
+def _panel_fill(themed):
+    """Theme gradient, or the card background mirrored into the panel and tinted in the theme colour."""
+    grad = themed["panel_fill"]
+    raw = themed.get("raw_bg")
+    if not PANEL_SHOW_BG or raw is None:
+        return grad
+    top = int(PANEL_TOP * S)
+    h = H - top
+    # mirror the brighter middle of the background (sky / stadium) down into the panel
+    src = raw.crop((0, top - h - int(260 * S), W, top - int(260 * S))).transpose(Image.FLIP_TOP_BOTTOM)
+    src = ImageOps.autocontrast(src.convert("L"), cutoff=1)
+    tinted = Image.new("RGB", (W, h))
+    g = grad.crop((0, top, W, H))
+    # multiply-style tint: theme colour keeps the panel readable, the photo adds grain and detail
+    lit = ImageChops.multiply(g, Image.merge("RGB", (src, src, src)).point(lambda v: int(80 + v * 0.95)))
+    lit = ImageChops.add(lit, g.point(lambda v: v // 3))
+    tinted.paste(Image.blend(g, lit, PANEL_BG_MIX * 2 if PANEL_BG_MIX < 0.5 else 1.0), (0, 0))
+    out = grad.copy()
+    out.paste(tinted, (0, top))
+    return out
+
+
 def _draw_panel(canvas, card_row, role, accent, themed):
     st = _static()
     acc = accent + (255,)
     dim = accent + (150,)
 
-    # panel body (90% opaque, so a custom background still shows a little)
-    canvas.paste(themed["panel_fill"], (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
+    # panel body: the card's own background shows through, tinted in the theme colour
+    canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
 
     fx = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     fd = ImageDraw.Draw(fx)
@@ -817,7 +843,10 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     th = _theme(card_row)
     themed = _themed(th)
     accent = th["accent"] or _accent(card_row["ovr"])
-    canvas = (_card_bg(card_row) or themed["bg"]).convert("RGBA")
+    raw_bg = _card_bg(card_row)
+    if raw_bg is not None:
+        themed = dict(themed, raw_bg=raw_bg)
+    canvas = (raw_bg or themed["bg"]).convert("RGBA")
 
     if LAYOUT == "v2":
         _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas)
