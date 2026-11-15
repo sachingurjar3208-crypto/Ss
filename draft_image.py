@@ -16,6 +16,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 import card_cache
+import draft_gold as dg
 
 _HERE = Path(__file__).parent
 BG_FILE = _HERE / "draft_bg.png"           # 1280x720 blue backdrop
@@ -60,7 +61,8 @@ THEMES = {
                     title=WHITE, dim=(170, 215, 195), pill=(4, 46, 34), pill_line=(110, 235, 170),
                     ticket=(130, 240, 180), hole=(4, 46, 34), card=(8, 60, 44), q=(130, 230, 175),
                     guar=(3, 34, 26), gold=(255, 196, 70), dot=(80, 150, 120),
-                    btn=(232, 248, 240), btn_off=(120, 160, 145), btn_text=(6, 50, 36), btn_ticket=(10, 140, 90)),
+                    btn=(232, 248, 240), btn_off=(120, 160, 145), btn_text=(6, 50, 36), btn_ticket=(10, 140, 90),
+                    style="gold"),
 }
 
 # Theme of the NORMAL draft when it has a custom background (/draftbg). "default" = the blue look.
@@ -248,11 +250,20 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
     d = ImageDraw.Draw(img)
     col = th["pool"][pool]
 
-    d.text((60, 62), _title(look), font=_fit_font(_LAB, _title(look), 880, 64), fill=th["title"], anchor="lm")
+    gold = th.get("style") == "gold"
+    if gold:
+        dg.fancy_text(img, (58, 64), _title(look), _NUM, 74, stops=dg.SILVER, anchor="lm",
+                      outline=(20, 40, 34), glow=(60, 220, 150))
+        dg.plate(img, (60, 112, 300, 152), stops=dg.POOL_STOPS[pool], border=dg.POOL_EDGE[pool], slant=16)
+        dg.fancy_text(img, (180, 132), POOL_NAMES[pool], _NUM, 30, stops=[dg.POOL_INK[pool]] * 2,
+                      outline=(255, 240, 200), outline_w=0, shadow=False, italic=0.15)
+        d = ImageDraw.Draw(img)
+    else:
+        d.text((60, 62), _title(look), font=_fit_font(_LAB, _title(look), 880, 64), fill=th["title"], anchor="lm")
 
-    # pool tab
-    d.rounded_rectangle([60, 112, 300, 152], radius=6, fill=col)
-    d.text((180, 132), POOL_NAMES[pool], font=_f(_LAB, 30), fill=(20, 20, 30), anchor="mm")
+        # pool tab
+        d.rounded_rectangle([60, 112, 300, 152], radius=6, fill=col)
+        d.text((180, 132), POOL_NAMES[pool], font=_f(_LAB, 30), fill=(20, 20, 30), anchor="mm")
 
     gx, gy, ch, gap = 60, 168, 250, 16
     if pool == "C":
@@ -267,7 +278,11 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
         for i, c in enumerate(chunk):
             x = gx + (i % 3) * (int(ch * 0.684) + gap)
             y = gy + (i // 3) * (ch + gap)
-            _paste_card(img, c, x, y, ch)
+            if gold:
+                dg.card_glow(img, (x, y, x + int(ch * 0.684), y + ch))
+            cw_used = _paste_card(img, c, x, y, ch)
+            if gold:
+                dg.card_frame(img, (x, y, x + cw_used, y + ch))
         if not chunk:
             d.text((gx, gy + 40), "No cards added to this pool yet", font=_f(_LAB, 30), fill=th["dim"], anchor="lm")
 
@@ -281,12 +296,22 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
             d.ellipse([x0 + i * 24 - 5, 700 - 5, x0 + i * 24 + 5, 700 + 5], fill=WHITE if i == page else th["dot"])
 
     # right side info
-    d.text((1230, 215), POOL_NAMES[pool], font=_f(_LAB, 120), fill=col, anchor="rm")
     if pool == "C":
         sub = f"RANDOM CARD  {c_range[0]}-{c_range[1]} OVR"
     else:
         sub = "FIXED CARDS ONLY"
-    d.text((1230, 290), sub, font=_f(_LAB, 38), fill=th["title"], anchor="rm")
+    if gold:
+        if pool == "C":                                    # the metal font has no "-"
+            sub = f"RANDOM CARD  {c_range[0]} TO {c_range[1]} OVR"
+        dg.fancy_text(img, (1222, 218), POOL_NAMES[pool], _NUM, 128, stops=dg.POOL_STOPS[pool], anchor="rm",
+                      outline=dg.POOL_INK[pool], outline_w=4, glow=tuple(min(255, c) for c in col))
+        dg.plate(img, (760, 268, 1230, 318), stops=dg.DARK, border=(110, 235, 170), slant=22, glow=(40, 200, 130))
+        dg.fancy_text(img, (995, 293), sub, _NUM, 34, stops=[(255, 255, 255), (210, 235, 225)],
+                      outline=(4, 30, 22), outline_w=2, shadow=False)
+        d = ImageDraw.Draw(img)
+    else:
+        d.text((1230, 215), POOL_NAMES[pool], font=_f(_LAB, 120), fill=col, anchor="rm")
+        d.text((1230, 290), sub, font=_f(_LAB, 38), fill=th["title"], anchor="rm")
 
     if len(_base_cache) >= 24:
         _base_cache.pop(next(iter(_base_cache)))
@@ -306,6 +331,14 @@ def build_draft_screen(pool: str, page: int, cards: list, vouchers: int, since_a
     if look and look.get("left"):
         d.text((322, 132), f"ENDS IN {str(look['left']).upper()}", font=_f(_LAB, 28), fill=th["gold"], anchor="lm")
 
+    left = max(1, pity_at - since_a)
+    if th.get("style") == "gold":
+        _gold_dynamic(base, th, vouchers, left, cost_one, cost_multi, multi)
+        buf = io.BytesIO()
+        base.save(buf, format="JPEG", quality=90)
+        buf.seek(0)
+        return buf
+
     # voucher count (top right)
     tw = d.textlength(f"{vouchers:,}", font=_f(_NUM, 44))
     d.rounded_rectangle([1230 - tw - 110, 28, 1230, 92], radius=30, fill=th["pill"], outline=th["pill_line"], width=2)
@@ -313,7 +346,6 @@ def build_draft_screen(pool: str, page: int, cards: list, vouchers: int, since_a
     d.text((1214, 60), f"{vouchers:,}", font=_f(_NUM, 44), fill=WHITE, anchor="rm")
 
     # guarantee pill
-    left = max(1, pity_at - since_a)
     d.rounded_rectangle([640, 470, 1230, 524], radius=10, fill=th["guar"])
     d.rounded_rectangle([640, 470, 790, 524], radius=10, fill=th["pool"]["A"])
     d.text((715, 497), "POOL A", font=_f(_LAB, 32), fill=(20, 20, 30), anchor="mm")
@@ -336,6 +368,41 @@ def build_draft_screen(pool: str, page: int, cards: list, vouchers: int, since_a
     base.save(buf, format="JPEG", quality=88)
     buf.seek(0)
     return buf
+
+
+def _gold_dynamic(base, th, vouchers, left, cost_one, cost_multi, multi):
+    """Voucher pill, guarantee bar and buttons for the gold style."""
+    d = ImageDraw.Draw(base)
+    nf = _f(_NUM, 44)
+    tw = d.textlength(f"{vouchers:,}", font=nf)
+    dg.plate(base, (int(1230 - tw - 120), 30, 1230, 92), stops=dg.DARK, border=(255, 214, 110), slant=14)
+    d = ImageDraw.Draw(base)
+    _ticket(d, int(1230 - tw - 92), 47, 28, (120, 200, 255), (6, 44, 34))
+    d.text((1208, 61), f"{vouchers:,}", font=nf, fill=WHITE, anchor="rm")
+
+    dg.plate(base, (640, 466, 1230, 528), stops=dg.DARK, border=(110, 235, 170), slant=20, glow=(40, 200, 130))
+    dg.plate(base, (640, 466, 812, 528), stops=dg.GOLD, border=(255, 236, 170), slant=20)
+    dg.fancy_text(base, (724, 497), "POOL A", _NUM, 34, stops=[(60, 34, 4)] * 2, outline_w=0, shadow=False)
+    dg.fancy_text(base, (830, 497), "Guaranteed in:", _NUM, 32, stops=[(255, 255, 255), (215, 235, 225)],
+                  anchor="lm", outline=(4, 30, 22), outline_w=2, shadow=False)
+    dg.fancy_text(base, (1205, 497), f"{left} Draft{'s' if left != 1 else ''}", _NUM, 38, stops=dg.GOLD,
+                  anchor="rm", outline=(60, 34, 4), outline_w=2, shadow=False)
+
+    for x0, label, cost, stops, edge in ((640, "1 DRAFT", cost_one, dg.SILVER, (255, 255, 255)),
+                                         (940, f"{multi} DRAFTS", cost_multi, dg.GOLD, (255, 236, 170))):
+        ok = vouchers >= cost
+        if not ok:
+            stops = [tuple(int(c * 0.55) for c in s_) for s_ in stops]
+        dg.plate(base, (x0, 578, x0 + 290, 650), stops=stops, border=edge if ok else (150, 150, 150), slant=18,
+                 glow=(255, 210, 110) if ok and stops is dg.GOLD else None)
+        ink = (30, 30, 36) if ok else (40, 40, 44)
+        dg.fancy_text(base, (x0 + 26, 614), label, _NUM, 33, stops=[ink, ink], anchor="lm", outline_w=0,
+                      shadow=False)
+        d = ImageDraw.Draw(base)
+        cf = _f(_NUM, 40)
+        ctw = d.textlength(str(cost), font=cf)
+        _ticket(d, int(x0 + 262 - ctw - 52), 600, 28, (0, 90, 200), (235, 238, 250))
+        d.text((x0 + 262, 614), str(cost), font=cf, fill=(200, 20, 30) if ok else RED, anchor="rm")
 
 
 # ── Result image ─────────────────────────────────────────────────────────────
