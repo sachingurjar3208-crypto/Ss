@@ -55,9 +55,6 @@ AUTO_HEAD_SIZE = False           # old "measure the head" rule (off: results cha
 # reaches down to the stats panel. Same result every time a card is drawn or edited.
 FILL_HEIGHT = True
 HEAD_TO_TARGET = True            # size every player so the TOP OF THE HEAD sits on HEAD_TARGET_Y
-SAME_HEAD_SIZE = True            # full-body / far-away photos are enlarged so the head is HEAD_TARGET_W wide
-HEAD_TARGET_W = 290              # output px (head + hair width)
-HEAD_MAX_GROW = 1.5              # a close-up head may be at most this much bigger than HEAD_TARGET_W
 HEAD_TARGET_Y = 100              # output px from the top of the card
 PLAYER_TOP = 205                 # output px from the top of the card where the head starts
 PLAYER_MAX_W = 1700              # a very wide photo (arms out) is not made wider than this
@@ -383,32 +380,13 @@ def _draw_player(canvas, card_row, fg):
             if info and resized.height - info[0] > resized.height * 0.3:
                 # every card: the top of the head lands on the same line (a raised bat may go above)
                 k = (bottom - HEAD_TARGET_Y * S) / (resized.height - info[0])
-                if SAME_HEAD_SIZE and info[2]:
-                    # every head about the same size: far-away photos grow, close-ups don't balloon
-                    k = max(k, HEAD_TARGET_W * S / info[2])
-                    k = min(k, HEAD_TARGET_W * HEAD_MAX_GROW * S / info[2])
             else:
                 k = (bottom - PLAYER_TOP * S) / resized.height
-                k = min(k, PLAYER_MAX_W * S / resized.width)
-            k *= fsc / 100                                # /foregroundfix size on top
+            k = min(k, PLAYER_MAX_W * S / resized.width)
+            k *= fsc / 100                                # /foregroundfix size on top (bottom stays put)
             resized = resized.resize((max(1, int(resized.width * k)), max(1, int(resized.height * k))),
                                      Image.LANCZOS)
-            if info and resized.height - info[0] * k > 0:
-                # head top on the line; anything below the panel line is simply hidden behind the panel
-                y = int(HEAD_TARGET_Y * S - info[0] * k)
-                gap = bottom - (y + resized.height)
-                if gap > 0:
-                    # close-up photo that stops above the panel: fade its bottom edge out softly
-                    fade_h = max(1, int(resized.height * 0.22))
-                    a = resized.getchannel("A")
-                    ramp = Image.linear_gradient("L").resize((resized.width, fade_h)).point(lambda v: 255 - v)
-                    mask = Image.new("L", resized.size, 255)
-                    mask.paste(ramp, (0, resized.height - fade_h))
-                    resized = resized.copy()
-                    resized.putalpha(ImageChops.multiply(a, mask))
-            else:
-                y = bottom - resized.height
-            pos = (box["x"] + (box["w"] - resized.width) // 2, y)
+            pos = (box["x"] + (box["w"] - resized.width) // 2, bottom - resized.height)
         elif AUTO_HEAD_SIZE and not manual:
             hw = _head_width(resized)
             if hw:
@@ -583,13 +561,12 @@ def _head_info(player):
 
         for y in range(top, top + int(fig_h * 0.6)):
             if all(head_run(yy) for yy in range(y, min(h, y + hold))):
-                band, widths = [], []                         # head rows only, stop at the shoulders
+                band = []                                     # head rows only, stop at the shoulders
                 for yy in range(y, min(h, y + int(fig_h * 0.12))):
                     r = head_run(yy)
                     if r is None or r[0] > body_w * HEAD_MAX_WIDTH:
                         break
                     band.append(r[1])
-                    widths.append(r[0])
                 if len(band) < 3:
                     band = [head_run(yy)[1] for yy in range(y, min(h, y + 3)) if head_run(yy)]
                 band.sort()
@@ -599,9 +576,7 @@ def _head_info(player):
                 head_top = y                                  # climb to the real top of the head (hair)
                 while head_top - 1 >= top and any(abs(bc - hc) <= bw / 2 + 1 for bw, bc in runs[head_top - 1]):
                     head_top -= 1
-                widths.sort()
-                head_w = widths[int(len(widths) * 0.75)] * k if widths else None   # widest part of the head
-                return (head_top * k, hc * k, head_w)
+                return (head_top * k, hc * k)
         return None
     except Exception:
         return None
