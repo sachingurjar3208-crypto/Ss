@@ -13,10 +13,13 @@ Every day at 21:00 (India time) in AUCTION_CHANNEL_ID:
 Users:  rcauction  |  rcjoin auction (= rcauction join / red JOIN button)  |  rcauction leave
         rcauction notify  |  rcauction history  |  rcauction won
 Admin:  /auction start  /auction cancel  /auction pingrole  /auction status
+        /auction addplayer  /auction removeplayer  /auction lineup   (players for the NEXT auction,
+        even unobtainable ones; they replace random lots in their OVR range and are used once)
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import secrets
@@ -90,8 +93,39 @@ def _col(row, key, default=None):
         return default
 
 
+FORCED_MAX = 10             # most players an admin can add to the next auction
+
+
+def forced_keys() -> list[str]:
+    """Players an admin added (/auction addplayer) for the NEXT auction, in the order added."""
+    try:
+        return [k for k in json.loads(auction.get_setting("forced_lots") or "[]") if isinstance(k, str)]
+    except (ValueError, TypeError):
+        return []
+
+
+def set_forced_keys(keys: list[str]) -> None:
+    auction.set_setting("forced_lots", json.dumps(keys) if keys else None)
+
+
+async def player_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    names = [n for n in await asyncio.to_thread(card_db.list_playernames) if cur in n.lower()]
+    return [app_commands.Choice(name=n[:100], value=n[:100]) for n in names[:25]]
+
+
 def pick_lots() -> list:
-    """2 random 85-89 + 3 random 90-99 cards, no event / signature / EOAE card. Lowest OVR first."""
+    """Admin-added players first (any card, even unobtainable), then random cards fill up to the usual
+    5 lots: 2 random 85-89 + 3 random 90-99, no event / signature / EOAE card. Lowest OVR first."""
+    forced = []
+    for k in forced_keys():
+        c = card_db.get_card(k)
+        if c is not None and all(f["playername_key"] != c["playername_key"] for f in forced):
+            forced.append(c)
+    total = sum(n for _, n in LOT_PLAN)
+    if len(forced) >= total:
+        return sorted(forced, key=lambda c: int(c["ovr"]))
+    taken = {c["playername_key"] for c in forced}
     cards = []
     for c in card_db.list_obtainable_cards():
         if _col(c, "event_key"):
@@ -99,10 +133,15 @@ def pick_lots() -> list:
         if str(_col(c, "s2_theme", "") or "").strip().lower() in ("signature", "eoae"):
             continue
         cards.append(c)
-    out = []
+    out = list(forced)
     for (lo, hi), n in LOT_PLAN:
-        pool = [c for c in cards if lo <= int(c["ovr"]) <= hi]
+        # an added player in this OVR range takes one of the range's random spots
+        n -= sum(1 for c in forced if lo <= int(c["ovr"]) <= hi)
+        if n <= 0:
+            continue
+        pool = [c for c in cards if lo <= int(c["ovr"]) <= hi and c["playername_key"] not in taken]
         out += _rng.sample(pool, min(n, len(pool)))
+    # added players outside 85-99 are extra lots on top of the random ones
     return sorted(out, key=lambda c: int(c["ovr"]))
 
 
@@ -220,6 +259,7 @@ class AuctionCog(commands.Cog, name="Auction"):
         run_id = await asyncio.to_thread(auction.start_run, day)
         if run_id is None:
             return "Today's auction already ran."
+        await asyncio.to_thread(set_forced_keys, [])      # added players are used once
         self.running, self.cancel = True, False
         self.joined, self.left = set(), set()
         self.view = JoinView(self)
@@ -570,6 +610,64 @@ class AuctionCog(commands.Cog, name="Auction"):
         await interaction.response.send_message(
             f"Auction ping role: {role.mention}." if role else "Auction ping removed.", ephemeral=True,
             allowed_mentions=discord.AllowedMentions.none())
+
+    @group.command(name="addplayer", description="Put a player in the NEXT auction (any card, even unobtainable)")
+    @app_commands.describe(player="The card to auction")
+    @app_commands.autocomplete(player=player_autocomplete)
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def a_addplayer(self, interaction: discord.Interaction, player: str):
+        card = await asyncio.to_thread(card_db.get_card, player)
+        if card is None:
+            await interaction.response.send_message(f"No card named {player}. Pick one from the list.", ephemeral=True)
+            return
+        keys = await asyncio.to_thread(forced_keys)
+        if card["playername_key"] in keys:
+            await interaction.response.send_message(f"**{card['playername']}** is already in the next auction.", ephemeral=True)
+            return
+        if len(keys) >= FORCED_MAX:
+            await interaction.response.send_message(f"The next auction already has {FORCED_MAX} added players.", ephemeral=True)
+            return
+        keys.append(card["playername_key"])
+        await asyncio.to_thread(set_forced_keys, keys)
+        warn = ""
+        if economy._event_disabled(card["playername_key"]):
+            warn = "\nWarning: this card's event is disabled, so a winner would get their coins back instead of the card."
+        await interaction.response.send_message(
+            f"Added **{card['playername']}** ({card['ovr']} OVR) to the next auction. "
+            f"Base price {short(sl.sell_value(card))}.\nAdded so far: {len(keys)}.{warn}", ephemeral=True)
+
+    @group.command(name="removeplayer", description="Take an added player out of the next auction")
+    @app_commands.describe(player="The added card to remove")
+    @app_commands.autocomplete(player=player_autocomplete)
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def a_removeplayer(self, interaction: discord.Interaction, player: str):
+        card = await asyncio.to_thread(card_db.get_card, player)
+        keys = await asyncio.to_thread(forced_keys)
+        key = card["playername_key"] if card else player.lower().strip()
+        if key not in keys:
+            await interaction.response.send_message("That player isn't in the next auction's added list.", ephemeral=True)
+            return
+        keys.remove(key)
+        await asyncio.to_thread(set_forced_keys, keys)
+        await interaction.response.send_message(f"Removed. Added players left: {len(keys)}.", ephemeral=True)
+
+    @group.command(name="lineup", description="Players you added to the next auction")
+    @app_commands.check(lambda i: is_staff(i.user))
+    async def a_lineup(self, interaction: discord.Interaction):
+        keys = await asyncio.to_thread(forced_keys)
+        if not keys:
+            await interaction.response.send_message("No added players. The next auction is all random.", ephemeral=True)
+            return
+        rows = []
+        for k in keys:
+            c = await asyncio.to_thread(card_db.get_card, k)
+            rows.append(f"{c['playername']}  {c['ovr']} OVR  base {short(sl.sell_value(c))}" if c else f"{k} (card deleted)")
+        total = sum(n for _, n in LOT_PLAN)
+        fill = max(0, total - len(keys))
+        await interaction.response.send_message(
+            "**Next auction, added players:**\n```\n" + "\n".join(rows) + "\n```" +
+            (f"Up to {fill} random player(s) fill the rest." if fill else "No random players (all lots are added ones)."),
+            ephemeral=True)
 
     @group.command(name="status", description="Auction channel, time, ping role and the live lot")
     @app_commands.check(lambda i: is_staff(i.user))
