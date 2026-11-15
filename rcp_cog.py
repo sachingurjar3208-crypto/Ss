@@ -71,20 +71,21 @@ def _item_emoji(key: str) -> str:
 
 
 def _store_embed(balance: int, bonus: int = 0) -> discord.Embed:
-    e = discord.Embed(title=f"{emojis.RCP}  RUSH CRICKET STORE", color=RCP_COLOR)
-    lines = [f"### Your balance: {fmt_rcp(balance)}"]
+    e = discord.Embed(title=f"{emojis.CART}  RUSH CRICKET STORE", color=RCP_COLOR)
+    lines = [f"### {emojis.RCP} Your balance: {balance:,} RCP"]
     if bonus:
-        lines.append(f"{emojis.PREMIUM} Premium monthly bonus added: **+{bonus:,}** {emojis.RCP}")
+        lines.append(f"{emojis.GIFT} Premium monthly bonus added: **+{bonus:,}** {emojis.RCP}")
     lines.append("")
     for key, it in ITEMS.items():
-        can = "✅" if balance >= it["cost"] else "🔒"
+        can = emojis.TICK if balance >= it["cost"] else emojis.LOCK
         lines.append(f"{_item_emoji(key)} **{it['name']}**\n"
-                     f"{can} **{it['cost']:,}** {emojis.RCP}  ·  `rcstore buy {key}`\n"
+                     f"{can} **{it['cost']:,}** {emojis.RCP}  {emojis.ARROW}  `rcstore buy {key}`\n"
                      f"-# {it['info']}")
         lines.append("")
-    lines.append(f"**How to get {emojis.RCP} RCP**\nOpen a ticket. Premium members get **500** {emojis.RCP} free every month.")
+    lines.append(f"{emojis.TICKET} **How to get RCP**\nOpen a ticket in the server.\n"
+                 f"{emojis.GIFT} Premium members get **500** {emojis.RCP} free every month.")
     e.description = "\n".join(lines)
-    e.set_footer(text="✅ you can buy it now  ·  🔒 you need more RCP")
+    e.set_footer(text="Green tick: you can buy it now  ·  Lock: you need more RCP")
     return e
 
 
@@ -92,8 +93,12 @@ class _BuyView(OwnedView):
     def __init__(self, cog: "RCPCog", member: discord.Member, key: str):
         super().__init__(member.id, timeout=60)
         self.cog, self.member, self.key, self.used = cog, member, key, False
+        try:
+            self.confirm.emoji = discord.PartialEmoji.from_str(emojis.CART)
+        except Exception:
+            pass
 
-    @ui.button(label="Confirm", style=discord.ButtonStyle.success, emoji="✅")
+    @ui.button(label="Confirm", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: ui.Button):
         if self.used:
             await interaction.response.defer()
@@ -202,11 +207,11 @@ class RCPCog(commands.Cog, name="RCP"):
                 if give == "role:premium":
                     end = await asyncio.to_thread(economy.rcp_premium_extend, member.id, 30)
                     bonus = await asyncio.to_thread(economy.rcp_premium_bonus, member.id)
-                    extra = f"\n💎 Monthly bonus: **+{bonus:,} RCP**" if bonus else ""
+                    extra = f"\n{emojis.GIFT} Monthly bonus: **+{bonus:,}** {emojis.RCP}" if bonus else ""
                     bal = await asyncio.to_thread(economy.get_rcp, member.id)
-                    return (f"✅ **Premium** is active until <t:{int(end)}:D>.{extra}\n"
+                    return (f"{emojis.PREMIUM} **Premium** is active until <t:{int(end)}:D>.{extra}\n"
                             f"RCP left: **{fmt_rcp(bal)}**")
-            return f"✅ {_item_emoji(key)} Bought **{it['name']}**. RCP left: **{fmt_rcp(res['balance'])}**"
+            return f"{emojis.CART} Bought {_item_emoji(key)} **{it['name']}**. RCP left: **{fmt_rcp(res['balance'])}**"
         finally:
             self._buying.discard(member.id)
 
@@ -220,7 +225,7 @@ class RCPCog(commands.Cog, name="RCP"):
         got = await premium_bonus(after)
         if got:
             try:
-                await after.send(f"💎 Your Premium is active. You received **{got:,} RCP** for this month.")
+                await after.send(f"{emojis.PREMIUM} Your Premium is active. {emojis.GIFT} You received **{got:,} RCP** for this month.")
             except discord.HTTPException:
                 pass
 
