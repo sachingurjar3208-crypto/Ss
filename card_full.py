@@ -42,6 +42,7 @@ WHITE = (245, 246, 250, 255)
 FG_BOX = {"x": 133, "y": 175, "w": 770, "h": 955}   # centred on the card (518)
 # Player is moved sideways so its HEAD sits exactly on the card's centre line (a bat or a
 # stretched arm doesn't pull it off-centre). False = centre the whole cutout instead.
+HEAD_BODY_MAX_GAP = 0.15        # head guess further than this (x image width) from the body middle is ignored
 CENTER_ON_BODY = True            # middle of the body (bat / trophy / raised arm ignored) on the OVR line
 CENTER_ON_HEAD = False           # False: the whole image is centred on the OVR line (no head guessing)
 HEAD_MAX_WIDTH = 0.62     # a row wider than this (x body width) is shoulders, not head
@@ -405,7 +406,7 @@ def _draw_player(canvas, card_row, fg):
                 y = max(y, HEAD_TOP_MIN * S)
                 pos = (box["x"] + (box["w"] - resized.width) // 2, y)
         if not manual:
-            hx = _head_center_x(resized) if CENTER_ON_HEAD else (_body_center_x(resized) if CENTER_ON_BODY else None)
+            hx = _player_center_x(resized) if CENTER_ON_BODY else None
             if hx is None:
                 hx = resized.width / 2                    # middle of the image on the card's centre line
             pos = (int(CARD_CX * S - hx), pos[1])
@@ -492,6 +493,19 @@ def _body_center_x(player):
         return None
 
 
+def _player_center_x(player):
+    """Where the player's middle is. The head is the best guide (a bat, helmet, trophy or raised
+    arm never changes where the head is); the middle of the body is the check and the fallback,
+    in case the head guess lands somewhere odd."""
+    body = _body_center_x(player)
+    head = _head_center_x(player)
+    if head is None:
+        return body
+    if body is None or abs(head - body) <= player.width * HEAD_BODY_MAX_GAP:
+        return head
+    return body
+
+
 def _head_center_x(player):
     info = _head_info(player)
     return info[1] if info else None
@@ -500,49 +514,69 @@ def _head_center_x(player):
 def _head_info(player):
     """(top y, centre x) of the head inside the cutout.
 
-    Every row's WIDEST solid run is measured. A raised arm, finger, bat or stick is thin, so it is
-    skipped: the head is the first part from the top that is wide enough (compared with the body)
-    and stays wide for a while. The middle of the head rows is used."""
+    1. The lower body (60-95% down) is measured first: its middle and width are the anchor.
+    2. From the top, the head is the first solid part that is wide enough (a raised arm, finger or
+       bat is thin), stays wide for a while, and sits above the body (not off to one side, like a
+       trophy or helmet held high).
+    3. The middle of the head rows is used, stopping where the shoulders begin."""
     try:
         k = max(1, player.width // 240)                       # work small, it's only a measurement
         a = player.getchannel("A").resize((max(1, player.width // k), max(1, player.height // k)))
         w, h = a.size
         px = a.load()
-        rows = []                                             # (width, centre) of the widest run per row
+        runs = []                                             # every solid run on each row: (width, centre)
         for y in range(h):
-            best, run_start, best_c = 0, None, None
+            row, start = [], None
             for x in range(w + 1):
                 solid = x < w and px[x, y] >= 40
-                if solid and run_start is None:
-                    run_start = x
-                elif not solid and run_start is not None:
-                    if x - run_start > best:
-                        best, best_c = x - run_start, (run_start + x) / 2
-                    run_start = None
-            rows.append((best, best_c))
-        filled = [y for y, (bw, _) in enumerate(rows) if bw > 0]
+                if solid and start is None:
+                    start = x
+                elif not solid and start is not None:
+                    row.append((x - start, (start + x) / 2))
+                    start = None
+            runs.append(row)
+        filled = [y for y, r in enumerate(runs) if r]
         if not filled:
             return None
         top, bottom = filled[0], filled[-1]
         fig_h = bottom - top + 1
-        body = sorted(bw for bw, _ in rows[top + int(fig_h * 0.4): top + int(fig_h * 0.75)] if bw > 0)
-        body_w = body[len(body) // 2] if body else max(bw for bw, _ in rows)
+        # lower body: the full solid span of each row (two legs count as one body)
+        lower = []
+        for r in runs[top + int(fig_h * 0.6): top + int(fig_h * 0.95)]:
+            if r:
+                left = min(bc - bw / 2 for bw, bc in r)
+                right = max(bc + bw / 2 for bw, bc in r)
+                lower.append((right - left, (left + right) / 2))
+        if not lower:
+            return None
+        body_w = sorted(bw for bw, _ in lower)[len(lower) // 2]
+        body_c = sorted(bc for _, bc in lower)[len(lower) // 2]
         need = max(3, body_w * HEAD_MIN_WIDTH)                # a head is at least this wide
+        reach = body_w * 0.45                                 # ... and sits above the body
         hold = max(3, int(fig_h * 0.06))                      # ... for at least this many rows
+
+        def head_run(y):
+            ok = [(bw, bc) for bw, bc in runs[y] if bw >= need and abs(bc - body_c) <= reach]
+            return min(ok, key=lambda r: abs(r[1] - body_c)) if ok else None
+
         for y in range(top, top + int(fig_h * 0.6)):
-            if all(rows[yy][0] >= need for yy in range(y, min(h, y + hold))):
-                # head rows only: stop as soon as the row gets wider than a head (shoulders, raised arm)
-                band = []
+            if all(head_run(yy) for yy in range(y, min(h, y + hold))):
+                band = []                                     # head rows only, stop at the shoulders
                 for yy in range(y, min(h, y + int(fig_h * 0.12))):
-                    bw, bc = rows[yy]
-                    if bc is None or bw > body_w * HEAD_MAX_WIDTH:
+                    r = head_run(yy)
+                    if r is None or r[0] > body_w * HEAD_MAX_WIDTH:
                         break
-                    band.append(bc)
+                    band.append(r[1])
                 if len(band) < 3:
-                    band = [rows[yy][1] for yy in range(y, min(h, y + max(3, int(fig_h * 0.03))))
-                            if rows[yy][1] is not None]
+                    band = [head_run(yy)[1] for yy in range(y, min(h, y + 3)) if head_run(yy)]
                 band.sort()
-                return (y * k, band[len(band) // 2] * k) if band else None
+                if not band:
+                    return None
+                hc = band[len(band) // 2]
+                head_top = y                                  # climb to the real top of the head (hair)
+                while head_top - 1 >= top and any(abs(bc - hc) <= bw / 2 + 1 for bw, bc in runs[head_top - 1]):
+                    head_top -= 1
+                return (head_top * k, hc * k)
         return None
     except Exception:
         return None
