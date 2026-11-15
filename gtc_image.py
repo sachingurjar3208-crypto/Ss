@@ -175,7 +175,7 @@ def round_image(fg: Image.Image, round_no: int, total: int) -> io.BytesIO:
     bd.line((0, 0, w, 0), fill=GOLD + (255,), width=4 * S)
     img.paste(bar.convert("RGB"), (0, h - 130 * S), bar.getchannel("A"))
     d = ImageDraw.Draw(img)
-    d.text((w // 2, h - 82 * S), "TYPE THE PLAYER NAME IN CHAT", font=_f(_NUM, 46 * S), fill=WHITE, anchor="mm")
+    d.text((w // 2, h - 82 * S), "TYPE THE FULL NAME IN CHAT", font=_f(_NUM, 46 * S), fill=WHITE, anchor="mm")
     d.text((w // 2, h - 36 * S), "First correct answer wins the point", font=_f(_LAB, 28 * S), fill=MINT, anchor="mm")
 
     out = img.resize((W, H), Image.LANCZOS)

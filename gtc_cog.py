@@ -15,7 +15,7 @@ Players:
     rcgtc notify             get / remove the game ping role
 
 A game = 6 rounds. Each round shows a player photo; the first correct name typed in the channel gets
-1 point (surname or the name on the card is enough, "(S1)"-style tags are not needed, one typo is ok).
+1 point. The FULL name is needed ("(S1)"-style tags are not, Mohd = Mohammed, one typo is ok).
 Hints come after 12 and 22 seconds; after 30 seconds the answer is shown.
 Most points wins 5 RCP (max 15 RCP a day from games). After the 11 PM game the day's top scorer
 gets 5 RCP more and the day's leaderboard is posted.
@@ -162,7 +162,7 @@ class GTCCog(commands.Cog, name="Guess the Cricketer"):
                 color=GREEN,
                 description=(f"{gtc.ROUNDS} rounds start <t:{start}:R>.\n\n"
                              f"{emojis.ARROW} A player photo appears. **Type the name in this channel.**\n"
-                             f"{emojis.ARROW} First correct answer gets **1 point**. Surname is enough.\n"
+                             f"{emojis.ARROW} First correct **full name** gets **1 point**.\n"
                              f"{emojis.ARROW} Most points after {gtc.ROUNDS} rounds wins **{gtc.GAME_WIN_RCP}** {emojis.RCP}"))
             intro.set_footer(text=f"Up to {gtc.DAILY_RCP_CAP} RCP a day from games · Day's top scorer gets +{gtc.DAILY_TOP_RCP} RCP after the 11 PM game")
             await channel.send(ping, embed=intro,
@@ -195,7 +195,7 @@ class GTCCog(commands.Cog, name="Guess the Cricketer"):
         img = await asyncio.to_thread(gtc_image.round_image, fg, i, gtc.ROUNDS)
         e = discord.Embed(title=f"Round {i} of {gtc.ROUNDS}: who is this cricketer?", color=GREEN)
         e.set_image(url="attachment://gtc.jpg")
-        e.set_footer(text=f"{ROUND_SECONDS} seconds · type the name in chat")
+        e.set_footer(text=f"{ROUND_SECONDS} seconds · type the full name in chat")
         game.round = rnd
         await game.channel.send(embed=e, file=discord.File(img, filename="gtc.jpg"))
         start = time.monotonic()
@@ -462,7 +462,7 @@ class GTCCog(commands.Cog, name="Guess the Cricketer"):
             f"{emojis.ARROW} 6 games a day: **9 AM, 11 AM, 2 PM, 7 PM, 8:30 PM, 11 PM** (India time)"
             + (f" in <#{ch}>" if ch else "") + "\n"
             f"{emojis.ARROW} {gtc.ROUNDS} rounds a game. A player photo appears, **type the name in chat**. "
-            f"First correct answer gets 1 point. Surname is enough.\n"
+            f"First correct **full name** gets 1 point (Virat Kohli, not just Kohli).\n"
             f"{emojis.ARROW} Most points wins **{gtc.GAME_WIN_RCP}** {emojis.RCP} (max **{gtc.DAILY_RCP_CAP}** a day)\n"
             f"{emojis.GIFT} Day's top scorer gets **+{gtc.DAILY_TOP_RCP}** {emojis.RCP} after the 11 PM game\n\n"
             f"**Next game:** <t:{gtc.next_game_ts()}:R>")

@@ -3,7 +3,7 @@
 Rules (see gtc_cog.py for the game loop):
 - 6 games a day at 09:00, 11:00, 14:00, 19:00, 20:30, 23:00 India time, in the channel the owner set.
 - A game = ROUNDS rounds. Each round shows a player's photo (foreground); the first person to type
-  the right name in chat gets 1 point.
+  the right FULL name in chat gets 1 point.
 - Most points in a game wins GAME_WIN_RCP (5) RCP. A player can win at most DAILY_RCP_CAP (15) RCP
   a day from games.
 - After the last game of the day (23:00) the day's top scorer gets DAILY_TOP_RCP (5) extra RCP
@@ -94,19 +94,18 @@ def norm(text: str) -> str:
 
 
 def answer_names(card) -> set[str]:
-    """Every name that counts for this card: the full name without its event tag, the name on the
-    card (displayname), the player group, and the surname when it is long enough."""
+    """The FULL name is needed: the card name without its event tag, the player group, or the name
+    on the card (displayname) when that is a full name too (two words or more). A surname alone
+    does not count. Spellings like Mohd / Mohammed / Muhammad are treated as the same."""
     def col(k):
         try:
             return card[k]
         except (IndexError, KeyError):
             return None
-    names = {norm(card["playername"]), norm(col("displayname")), norm(col("player_group"))}
-    full = norm(card["playername"]).split()
-    if len(full) >= 2 and len(full[-1]) >= 4:
-        names.add(full[-1])                         # "kohli", "shami", "siraj"
-    if len(full) >= 2:
-        names.add(" ".join(full[1:]))               # "de villiers" for "ab de villiers"
+    names = {norm(card["playername"]), norm(col("player_group"))}
+    shown = norm(col("displayname"))
+    if len(shown.split()) >= 2:
+        names.add(shown)
     return {n for n in names if len(n) >= 3}
 
 
