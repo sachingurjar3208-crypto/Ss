@@ -112,7 +112,7 @@ def streak_bonus(streak: int) -> int:
 
 
 def fmt_coins(n: int) -> str:
-    return f"{int(n):,} <:CSCoin:1558139683702055062>"
+    return f"{int(n):,} <:rccoin:1571431001006284816>"
 
 
 # ── Live Auction lock ───────────────────────────────────────────────────────

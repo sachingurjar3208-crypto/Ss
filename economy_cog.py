@@ -1401,7 +1401,7 @@ class EconomyCog(commands.Cog, name="Economy"):
         if board == "coins":
             for u in sorted(users, key=lambda u: -u["purse"])[:10]:
                 rows.append((u["team_name"], economy.fmt_coins(u["purse"])))
-            title = "<:CSCoin:1558139683702055062> Richest teams"
+            title = "<:rccoin:1571431001006284816> Richest teams"
         else:
             scored = []
             for u in users:
