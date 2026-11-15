@@ -202,7 +202,7 @@ def _make_roll(pools: dict[str, list], weights: dict[str, float], odds: dict | N
 # ── The draft screen ─────────────────────────────────────────────────────────
 
 def draft_color(pool: str, event: dict | None = None) -> discord.Color:
-    theme = event["theme"] if event else "default"
+    theme = event["theme"] if event else draft_image.MAIN_THEME
     return discord.Color.from_rgb(*draft_image.pool_color(pool, theme))
 
 
@@ -223,7 +223,7 @@ async def _look(event: dict | None) -> dict | None:
     if event is None:
         if bg is None:
             return None
-        return {"theme": "default", "title": "", "bg": bg[0], "stamp": bg[1]}
+        return {"theme": draft_image.MAIN_THEME, "title": "", "bg": bg[0], "stamp": bg[1]}
     return {
         "theme": event["theme"], "title": event["name"], "left": draft_event.fmt_left(event["seconds_left"]),
         "bg": bg[0] if bg else None, "stamp": bg[1] if bg else None,

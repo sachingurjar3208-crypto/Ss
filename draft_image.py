@@ -55,7 +55,16 @@ THEMES = {
                       title=(255, 246, 232), dim=(190, 200, 190), pill=(14, 34, 26), pill_line=(240, 200, 92),
                       ticket=(240, 210, 110), hole=(10, 30, 22), card=(18, 48, 38), q=(130, 210, 150),
                       guar=(12, 30, 24), gold=(250, 214, 110), dot=(100, 140, 120)),
+    "season1": dict(pool={"A": (255, 176, 40), "B": (176, 120, 255), "C": (70, 200, 140)},
+                    top=(2, 30, 22), bot=(10, 90, 60), glow=(60, 220, 140),
+                    title=WHITE, dim=(170, 215, 195), pill=(4, 46, 34), pill_line=(110, 235, 170),
+                    ticket=(130, 240, 180), hole=(4, 46, 34), card=(8, 60, 44), q=(130, 230, 175),
+                    guar=(3, 34, 26), gold=(255, 196, 70), dot=(80, 150, 120),
+                    btn=(232, 248, 240), btn_off=(120, 160, 145), btn_text=(6, 50, 36), btn_ticket=(10, 140, 90)),
 }
+
+# Theme of the NORMAL draft when it has a custom background (/draftbg). "default" = the blue look.
+MAIN_THEME = "season1"
 
 
 def theme_of(look: dict | None) -> dict:
@@ -314,12 +323,14 @@ def build_draft_screen(pool: str, page: int, cards: list, vouchers: int, since_a
     # buttons
     for x0, label, cost in ((640, "1 DRAFT", cost_one), (940, f"{multi} DRAFTS", cost_multi)):
         ok = vouchers >= cost
-        d.rounded_rectangle([x0, 580, x0 + 290, 650], radius=14, fill=(235, 238, 250) if ok else (150, 160, 190))
-        d.text((x0 + 22, 615), label, font=_f(_LAB, 36), fill=(20, 30, 70), anchor="lm")
+        on, off = th.get("btn", (235, 238, 250)), th.get("btn_off", (150, 160, 190))
+        txt = th.get("btn_text", (20, 30, 70))
+        d.rounded_rectangle([x0, 580, x0 + 290, 650], radius=14, fill=on if ok else off)
+        d.text((x0 + 22, 615), label, font=_f(_LAB, 36), fill=txt, anchor="lm")
         nf = _f(_NUM, 38)
         ntw = d.textlength(str(cost), font=nf)
-        _ticket(d, int(x0 + 272 - ntw - 52), 601, 28, (0, 90, 200), (235, 238, 250) if ok else (150, 160, 190))
-        d.text((x0 + 272, 615), str(cost), font=nf, fill=(20, 30, 70) if ok else RED, anchor="rm")
+        _ticket(d, int(x0 + 272 - ntw - 52), 601, 28, th.get("btn_ticket", (0, 90, 200)), on if ok else off)
+        d.text((x0 + 272, 615), str(cost), font=nf, fill=txt if ok else RED, anchor="rm")
 
     buf = io.BytesIO()
     base.save(buf, format="JPEG", quality=88)
