@@ -59,12 +59,13 @@ EVENT_HEADER = "✨ **NEW EDITION!** A **{event}** cricketer appeared! Catch me 
 SPAWN_EXACT: list[tuple[int, int, float]] = [
     # 90-99: extremely rare (together ~0.4%, about 1 in 250 spawns)
     (99, 99, 0.0001), (98, 98, 0.0002), (97, 97, 0.0005), (96, 96, 0.001), (95, 95, 0.005), (94, 94, 0.009),
-    (93, 93, 0.05), (92, 92, 0.09), (91, 91, 0.10), (90, 90, 0.15),
-    (89, 89, 2.0), (88, 88, 2.50),
-    (87, 87, 3.0), (86, 86, 3.50), (85, 85, 4.0), (84, 84, 4.50), (83, 83, 5.0), (82, 82, 5.50),
+    (93, 93, 0.05), (92, 92, 0.09), (91, 91, 0.10), (90, 90, 0.08),
+    # 83-89: halved (was 2.0 / 2.5 / 3.0 / 3.5 / 4.0 / 4.5 / 5.0, together 24.5%)
+    (89, 89, 1.0), (88, 88, 1.25),
+    (87, 87, 1.5), (86, 86, 1.75), (85, 85, 2.0), (84, 84, 2.25), (83, 83, 2.5), (82, 82, 5.50),
     (81, 81, 6.0), (80, 80, 6.50),
 ]
-# 79 and below share whatever is left (100% - the above = 53.442%) in these proportions.
+# 79 and below share whatever is left (100% - the above) in these proportions.
 SPAWN_LOW: list[tuple[int, int, float]] = [
     (79, 79, 24), (78, 78, 26),
     (72, 77, 40),            # 72-77: one random card of these OVRs

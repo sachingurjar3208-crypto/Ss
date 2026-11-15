@@ -49,7 +49,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Playing XI", "rcxi", "Your playing XI in batting order. Use rcxi @user to see another player's XI."),
         ("XI Image", "rcovr", "Your playing XI as an image with the team OVR."),
         ("Auto XI", "rcautoxi", "Pick your best XI automatically."),
-        ("Swap", "rcswap 3 5", "Swap two XI spots. You can also swap by name: rcswap Player A | Player B.", "rcswap"),
+        ("Swap", "rcswap 3 14", "Swap players. 1-11 = XI spot, 12+ = number in rcsquad (s5 = squad number 5). Names work too: rcswap 3 Virat Kohli or rcswap Player A | Player B.", "rcswap"),
         ("Impact Subs", "rcsubs", "View your Impact Player subs (max 4). Use rcsubs add <player>, rcsubs remove <player> or rcsubs clear."),
         ("Captain", "rccaptain <player>", "Set your captain. The player must be in your XI.", "rccaptain"),
     ]),

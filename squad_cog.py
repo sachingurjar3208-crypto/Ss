@@ -882,21 +882,50 @@ class SquadCog(commands.Cog, name="Squad"):
     @commands.command(name="rcswap")
     @commands.cooldown(1, 4, commands.BucketType.user)
     async def rcswap(self, ctx: commands.Context, *, players: str):
-        """Swap two players: `rcswap 3 5` (XI spots) or `rcswap Virat Kohli | Rohit Sharma`."""
+        """Swap two players. A number 1-11 is an XI spot, 12 and up is the number in `rcsquad`
+        (`s5` = squad number 5). Names work too, mixed with numbers:
+        `rcswap 3 14`, `rcswap 3 s5`, `rcswap 3 Virat Kohli`, `rcswap Virat Kohli | Rohit Sharma`."""
         if not await _need_debut(ctx):
             return
         if _in_match(self.bot, ctx.author.id):
             await ctx.send("❌ You can't change your XI during a match.")
             return
         players = security.clean_input(players, 120)
-        parts = [p.strip() for p in players.split("|")] if "|" in players else players.split()
-        if len(parts) != 2:
-            await ctx.send("Usage: `rcswap 3 5` or `rcswap Player One | Player Two`")
+        usage = ("Usage: `rcswap 3 14` (XI spot 3 with squad number 14), `rcswap 3 s5`, "
+                 "`rcswap 3 Virat Kohli` or `rcswap Virat Kohli | Rohit Sharma`")
+        if "|" in players:
+            parts = [p.strip() for p in players.split("|")]
+        else:
+            words = players.split()
+            num = lambda w: w.isdigit() or (w[:1].lower() == "s" and w[1:].isdigit())
+            if len(words) == 2 and all(num(w) for w in words):
+                parts = words
+            elif len(words) >= 2 and num(words[0]):
+                parts = [words[0], " ".join(words[1:])]
+            elif len(words) >= 2 and num(words[-1]):
+                parts = [" ".join(words[:-1]), words[-1]]
+            else:
+                parts = words if len(words) == 2 else []
+        if len(parts) != 2 or not all(parts):
+            await ctx.send(usage)
             return
         xi = economy.get_xi(ctx.author.id)
+        squad = None
         keys = []
         for part in parts:
-            if part.isdigit():
+            squad_no = None
+            if part[:1].lower() == "s" and part[1:].isdigit():
+                squad_no = int(part[1:])
+            elif part.isdigit() and int(part) > economy.XI_SIZE:
+                squad_no = int(part)
+            if squad_no is not None:
+                if squad is None:
+                    squad = squad_entries(ctx.author.id)
+                if not 1 <= squad_no <= len(squad):
+                    await ctx.send(f"❌ Squad number `{squad_no}` doesn't exist. Your squad has {len(squad)} players (see `rcsquad`).")
+                    return
+                keys.append(squad[squad_no - 1]["playername_key"])
+            elif part.isdigit():
                 slot = int(part)
                 if not 1 <= slot <= economy.XI_SIZE or slot not in xi:
                     await ctx.send(f"❌ XI spot `{slot}` is empty or not valid (1-{economy.XI_SIZE}).")
