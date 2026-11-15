@@ -1891,7 +1891,7 @@ def clear_impact_subs(user_id) -> None:
 
 
 # ── RCP (premium currency, bought with real money via staff) ─────────────────
-# ₹1 = 10 RCP. Staff adds RCP with `rcp give`; players spend it with `rcstore buy`.
+# Staff adds RCP with `rcp give`; players spend it with `rcstore buy`.
 # Every change is written to rcp_log, and each purchase is ONE transaction:
 # RCP is never taken without the item being given, or the other way round.
 

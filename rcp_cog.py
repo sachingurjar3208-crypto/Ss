@@ -1,7 +1,7 @@
-"""RCP store: the premium currency (₹1 = 10 RCP).
+"""RCP store: the premium currency (no real-money prices are shown in Discord).
 
 Players
-    rcstore                      the store: RCP packs (bought from staff) and what RCP buys
+    rcstore                      the store: your RCP and what RCP buys
     rcstore buy <item>           spend RCP: premium | starpass | vouchers | legendary
     rcbal                        (economy_cog) also shows RCP
 
@@ -34,13 +34,8 @@ from squad_cog import PREMIUM_ROLE_ID, _is_premium, _need_debut
 
 RCP_MAX_ADMIN = 1_000_000          # most RCP one staff command can add/remove
 
-# What players pay to staff for RCP (shown in rcstore; staff adds the RCP with `rcp give`).
-RCP_PACKS = [            # (rupees, rcp, bonus)
-    (100, 1_000, 0),
-    (250, 2_600, 100),
-    (500, 5_400, 400),
-    (1_000, 11_200, 1_200),
-]
+# Real-money prices are never shown inside Discord: players get RCP through a ticket and staff
+# adds it with `rcp give`.
 
 # What RCP buys. give: "role:premium" | "role:starpass" | "vouchers" | "pack:<type>"
 ITEMS = {
@@ -77,13 +72,10 @@ async def premium_bonus(member) -> int:
 def _store_embed(balance: int, bonus: int = 0) -> discord.Embed:
     e = discord.Embed(title="RUSH CRICKET STORE", color=RCP_COLOR)
     e.description = f"Your RCP: **{fmt_rcp(balance)}**" + (f"\n💎 Premium monthly bonus added: **+{bonus:,} RCP**" if bonus else "")
-    e.add_field(name="Buy RCP", inline=False, value="\n".join(
-        f"{emojis.RCP} **{rcp:,} RCP**  ·  ₹{rs:,}" + (f"   *(+{bonus_:,} bonus)*" if bonus_ else "")
-        for rs, rcp, bonus_ in RCP_PACKS) + "\nOpen a ticket to buy RCP.")
+    e.add_field(name="Get RCP", inline=False, value="Open a ticket to get RCP. Premium members get 500 RCP free every month.")
     e.add_field(name="Spend RCP", inline=False, value="\n".join(
         f"**{it['name']}**  ·  {it['cost']:,} RCP  ·  `rcstore buy {key}`\n> {it['info']}"
         for key, it in ITEMS.items()))
-    e.set_footer(text="₹1 = 10 RCP")
     return e
 
 
