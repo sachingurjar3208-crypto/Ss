@@ -85,6 +85,7 @@ async def load_cogs():
         "economy_cog",
         "pack_cog",
         "draft_cog",
+        "rcp_cog",
         "quest_cog",
         "starpass_cog",
         "summary_theme_cog",

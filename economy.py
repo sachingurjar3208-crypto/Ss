@@ -1888,3 +1888,150 @@ def clear_impact_subs(user_id) -> None:
     with _tx() as conn:
         _ensure_impact_subs_table(conn)
         conn.execute("DELETE FROM impact_subs WHERE user_id = ?", (uid,))
+
+
+# ── RCP (premium currency, bought with real money via staff) ─────────────────
+# ₹1 = 10 RCP. Staff adds RCP with `rcp give`; players spend it with `rcstore buy`.
+# Every change is written to rcp_log, and each purchase is ONE transaction:
+# RCP is never taken without the item being given, or the other way round.
+
+RCP_PREMIUM_MONTHLY = 500            # free RCP for Premium members, once every 30 days
+RCP_PREMIUM_EVERY = 30 * DAY
+
+
+def _ensure_rcp_tables(conn) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS rcp (user_id INTEGER PRIMARY KEY, amount INTEGER NOT NULL DEFAULT 0 "
+                 "CHECK (amount >= 0))")
+    conn.execute("CREATE TABLE IF NOT EXISTS rcp_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, "
+                 "delta INTEGER NOT NULL, reason TEXT, balance_after INTEGER NOT NULL, ts REAL NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS rcp_premium (user_id INTEGER PRIMARY KEY, last_grant REAL NOT NULL DEFAULT 0, "
+                 "expires REAL NOT NULL DEFAULT 0)")
+
+
+def _rcp_change(conn, uid: int, delta: int, reason: str) -> int:
+    row = conn.execute("SELECT amount FROM rcp WHERE user_id = ?", (uid,)).fetchone()
+    cur = int(row["amount"]) if row else 0
+    new = max(0, cur + int(delta))
+    conn.execute("INSERT INTO rcp (user_id, amount) VALUES (?, ?) "
+                 "ON CONFLICT(user_id) DO UPDATE SET amount = excluded.amount", (uid, new))
+    conn.execute("INSERT INTO rcp_log (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, ?, ?)",
+                 (uid, new - cur, (reason or "")[:120], new, time.time()))
+    return new
+
+
+def get_rcp(user_id) -> int:
+    conn = _conn()
+    try:
+        _ensure_rcp_tables(conn)
+        row = conn.execute("SELECT amount FROM rcp WHERE user_id = ?", (_uid(user_id),)).fetchone()
+        return int(row["amount"]) if row else 0
+    finally:
+        conn.close()
+
+
+def add_rcp(user_id, amount: int, reason: str = "") -> int | None:
+    """Give RCP. Returns the new balance, or None if the user hasn't debuted."""
+    uid, amount = _uid(user_id), int(amount)
+    if amount <= 0:
+        return None
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return None
+        return _rcp_change(conn, uid, amount, reason)
+
+
+def remove_rcp(user_id, amount: int, reason: str = "") -> tuple[int, int] | None:
+    """Take RCP away (stops at 0). Returns (removed, new_balance) or None if the user hasn't debuted."""
+    uid, amount = _uid(user_id), int(amount)
+    if amount <= 0:
+        return None
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return None
+        row = conn.execute("SELECT amount FROM rcp WHERE user_id = ?", (uid,)).fetchone()
+        cur = int(row["amount"]) if row else 0
+        new = _rcp_change(conn, uid, -amount, reason)
+        return cur - new, new
+
+
+def rcp_buy(user_id, cost: int, item: str, give: str, qty: int = 1) -> dict:
+    """Spend RCP on an in-game item in ONE transaction.
+    give = "vouchers" (adds qty vouchers) or "pack:<type>" (adds qty packs) or "none" (role items:
+    the cog gives the role and calls rcp_refund if that fails).
+    Returns {"ok": True, "balance": n} or {"ok": False, "reason": "debut"|"funds", "balance": n}."""
+    uid, cost = _uid(user_id), int(cost)
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return {"ok": False, "reason": "debut", "balance": 0}
+        row = conn.execute("SELECT amount FROM rcp WHERE user_id = ?", (uid,)).fetchone()
+        have = int(row["amount"]) if row else 0
+        if have < cost:
+            return {"ok": False, "reason": "funds", "balance": have}
+        new = _rcp_change(conn, uid, -cost, f"buy {item}")
+        if give == "vouchers":
+            _voucher_change(conn, uid, int(qty), f"RCP store: {item}")
+        elif give.startswith("pack:"):
+            conn.execute("INSERT INTO packs (user_id, pack_type, qty) VALUES (?, ?, ?) "
+                         "ON CONFLICT(user_id, pack_type) DO UPDATE SET qty = qty + excluded.qty",
+                         (uid, give[5:], int(qty)))
+        return {"ok": True, "balance": new}
+
+
+def rcp_refund(user_id, amount: int, item: str) -> int:
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        return _rcp_change(conn, _uid(user_id), int(amount), f"refund {item}")
+
+
+def rcp_premium_bonus(user_id) -> int:
+    """Give the monthly Premium RCP if 30 days passed since the last one. Returns RCP given (0 = not due)."""
+    uid, now = _uid(user_id), time.time()
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return 0
+        row = conn.execute("SELECT last_grant FROM rcp_premium WHERE user_id = ?", (uid,)).fetchone()
+        if row and now - float(row["last_grant"]) < RCP_PREMIUM_EVERY:
+            return 0
+        conn.execute("INSERT INTO rcp_premium (user_id, last_grant) VALUES (?, ?) "
+                     "ON CONFLICT(user_id) DO UPDATE SET last_grant = excluded.last_grant", (uid, now))
+        _rcp_change(conn, uid, RCP_PREMIUM_MONTHLY, "Premium monthly RCP")
+        return RCP_PREMIUM_MONTHLY
+
+
+def rcp_premium_extend(user_id, days: int = 30) -> float:
+    """Premium bought with RCP: push its end date (stacks on top of a running one). Returns the new end time."""
+    uid, now = _uid(user_id), time.time()
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        row = conn.execute("SELECT expires FROM rcp_premium WHERE user_id = ?", (uid,)).fetchone()
+        start = max(now, float(row["expires"])) if row else now
+        end = start + days * DAY
+        conn.execute("INSERT INTO rcp_premium (user_id, expires) VALUES (?, ?) "
+                     "ON CONFLICT(user_id) DO UPDATE SET expires = excluded.expires", (uid, end))
+        return end
+
+
+def rcp_premium_expired() -> list[int]:
+    """Users whose RCP-bought Premium has ended (their role should be removed). Clears their end date."""
+    now = time.time()
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        rows = conn.execute("SELECT user_id FROM rcp_premium WHERE expires > 0 AND expires <= ?", (now,)).fetchall()
+        ids = [int(r["user_id"]) for r in rows]
+        if ids:
+            conn.executemany("UPDATE rcp_premium SET expires = 0 WHERE user_id = ?", [(i,) for i in ids])
+        return ids
+
+
+def rcp_premium_end(user_id) -> float:
+    conn = _conn()
+    try:
+        _ensure_rcp_tables(conn)
+        row = conn.execute("SELECT expires FROM rcp_premium WHERE user_id = ?", (_uid(user_id),)).fetchone()
+        return float(row["expires"]) if row else 0.0
+    finally:
+        conn.close()

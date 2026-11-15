@@ -800,14 +800,22 @@ class EconomyCog(commands.Cog, name="Economy"):
     @commands.command(name="rcbal")
     @economy_cooldown()
     async def rcbal(self, ctx: commands.Context):
-        """Show your coins and vouchers."""
+        """Show your coins, vouchers and RCP."""
         if not await _need_debut(ctx):
             return
         coins = economy.get_balance(ctx.author.id)
         vouchers = economy.get_vouchers(ctx.author.id)
+        bonus = 0
+        try:
+            from rcp_cog import premium_bonus
+            bonus = await premium_bonus(ctx.author)
+        except Exception:
+            pass
+        rcp = economy.get_rcp(ctx.author.id)
         await ctx.send(
             f"Purse: **{economy.fmt_coins(coins)}**\n"
-            f"{emojis.VOUCHER} Vouchers: **{vouchers:,}**"
+            f"{emojis.VOUCHER} Vouchers: **{vouchers:,}**\n"
+            f"{emojis.RCP} RCP: **{rcp:,}**" + (f"  *(+{bonus:,} Premium monthly bonus)*" if bonus else "")
         )
 
     # -- rewards ---------------------------------------------------------

@@ -28,7 +28,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     "start": ("Start", "Create your team and first players", [
         ("Debut", "rcdebut", "Create your team. Do this first."),
         ("Starter Pack", "rcstarterpack", "Claim your one-time starter squad."),
-        ("Coins", "rcbal", "See your coins and vouchers."),
+        ("Coins", "rcbal", "See your coins, vouchers and RCP."),
         ("Profile", "rcprofile", "Your team profile: OVR, captain, streak and recent form."),
         ("Team Name", "rcteamname <name>", "Change your team name.", "rcteamname"),
     ]),
@@ -54,7 +54,8 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Captain", "rccaptain <player>", "Set your captain. The player must be in your XI.", "rccaptain"),
     ]),
     "economy": ("Economy", "Buy, sell, trade and leaderboard", [
-        ("Coins", "rcbal", "See your coins and vouchers."),
+        ("Coins", "rcbal", "See your coins, vouchers and RCP."),
+        ("RCP Store", "rcstore", "Buy Premium, Star Pass, vouchers and Legendary packs with RCP. Buy with rcstore buy <item>."),
         ("Buy a Player", "rcbuy <player>", "Buy a player card with coins.", "rcbuy"),
         ("Sell a Player", "rcsell <player>", "Sell one of your players. You get 60% of the buy price.", "rcsell"),
         ("Multi Sell", "rcms 1 20", "Sell cards by squad number (1 to 20 of rcsquad). XI players and copies can be sold too.", "rcms"),
