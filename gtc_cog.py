@@ -1,7 +1,7 @@
 """Guess the Cricketer: 6 games a day in one channel, played in normal chat.
 
 Owner (only the bot owner):
-    admin gtc start          daily games run in THIS channel (09, 11, 14, 19, 21, 23 India time)
+    admin gtc start          daily games run in THIS channel (09:00, 11:00, 14:00, 19:00, 21:30, 23:00 India time)
     admin gtc remove         daily games stop in this channel (a running game here stops too)
     admin gtc play           start one game right now, in any channel
     admin gtc stop           stop the running game
@@ -459,7 +459,7 @@ class GTCCog(commands.Cog, name="Guess the Cricketer"):
         t, a = st["today"], st["all"]
         e = discord.Embed(title="Guess the Cricketer", color=GREEN)
         e.description = (
-            f"{emojis.ARROW} 6 games a day: **9 AM, 11 AM, 2 PM, 7 PM, 9 PM, 11 PM** (India time)"
+            f"{emojis.ARROW} 6 games a day: **9 AM, 11 AM, 2 PM, 7 PM, 9:30 PM, 11 PM** (India time)"
             + (f" in <#{ch}>" if ch else "") + "\n"
             f"{emojis.ARROW} {gtc.ROUNDS} rounds a game. A player photo appears, **type the name in chat**. "
             f"First correct answer gets 1 point. Surname is enough.\n"
