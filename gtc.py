@@ -1,7 +1,7 @@
 """Guess the Cricketer (GTC): database + name matching. No Discord code here.
 
 Rules (see gtc_cog.py for the game loop):
-- 6 games a day at 09:00, 11:00, 14:00, 19:00, 21:30, 23:00 India time, in the channel the owner set.
+- 6 games a day at 09:00, 11:00, 14:00, 19:00, 20:30, 23:00 India time, in the channel the owner set.
 - A game = ROUNDS rounds. Each round shows a player's photo (foreground); the first person to type
   the right name in chat gets 1 point.
 - Most points in a game wins GAME_WIN_RCP (5) RCP. A player can win at most DAILY_RCP_CAP (15) RCP
@@ -26,7 +26,7 @@ from datetime import datetime, timedelta, timezone
 import economy
 
 IST = timezone(timedelta(hours=5, minutes=30))
-GAME_HOURS = [(9, 0), (11, 0), (14, 0), (19, 0), (21, 30), (23, 0)]   # India time
+GAME_HOURS = [(9, 0), (11, 0), (14, 0), (19, 0), (20, 30), (23, 0)]   # India time
 ROUNDS = 6
 GAME_WIN_RCP = 5
 DAILY_RCP_CAP = 15
