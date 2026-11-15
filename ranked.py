@@ -92,7 +92,7 @@ BOT_PROFILES = {
     # bowl_boost = extra BOWL points for every bot bowler (max 99): their bowlers take more wickets
     # and give away fewer runs and sixes.
     # elite = the bowlers also get the hidden "Elite Spell" playstyle (logic.py): tighter, far fewer sixes.
-    "Legendary": {"ovr": (92, 95), "skill": 1.00, "bowl_boost": 7, "elite": True},    # very hard; bot XI built from cards up to 95 OVR
+    "Legendary": {"ovr": (92, 95), "skill": 1.00, "bowl_boost": 2, "elite": True},    # very hard; bot XI built from cards up to 95 OVR
     "Ruby":      {"ovr": (93, 99), "skill": 1.00, "bowl_boost": 9, "elite": True},    # hardest: best cards + always the smart choice
 }
 
