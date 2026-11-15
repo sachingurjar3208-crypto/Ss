@@ -65,13 +65,26 @@ async def premium_bonus(member) -> int:
         return 0
 
 
+def _item_emoji(key: str) -> str:
+    return {"premium": emojis.PREMIUM, "starpass": emojis.STAR_PASS,
+            "vouchers": emojis.VOUCHER, "legendary": emojis.LEGENDARY_PACK}.get(key, emojis.RCP)
+
+
 def _store_embed(balance: int, bonus: int = 0) -> discord.Embed:
-    e = discord.Embed(title="RUSH CRICKET STORE", color=RCP_COLOR)
-    e.description = f"Your RCP: **{fmt_rcp(balance)}**" + (f"\n💎 Premium monthly bonus added: **+{bonus:,} RCP**" if bonus else "")
-    e.add_field(name="Get RCP", inline=False, value="Open a ticket to get RCP. Premium members get 500 RCP free every month.")
-    e.add_field(name="Spend RCP", inline=False, value="\n".join(
-        f"**{it['name']}**  ·  {it['cost']:,} RCP  ·  `rcstore buy {key}`\n> {it['info']}"
-        for key, it in ITEMS.items()))
+    e = discord.Embed(title=f"{emojis.RCP}  RUSH CRICKET STORE", color=RCP_COLOR)
+    lines = [f"### Your balance: {fmt_rcp(balance)}"]
+    if bonus:
+        lines.append(f"{emojis.PREMIUM} Premium monthly bonus added: **+{bonus:,}** {emojis.RCP}")
+    lines.append("")
+    for key, it in ITEMS.items():
+        can = "✅" if balance >= it["cost"] else "🔒"
+        lines.append(f"{_item_emoji(key)} **{it['name']}**\n"
+                     f"{can} **{it['cost']:,}** {emojis.RCP}  ·  `rcstore buy {key}`\n"
+                     f"-# {it['info']}")
+        lines.append("")
+    lines.append(f"**How to get {emojis.RCP} RCP**\nOpen a ticket. Premium members get **500** {emojis.RCP} free every month.")
+    e.description = "\n".join(lines)
+    e.set_footer(text="✅ you can buy it now  ·  🔒 you need more RCP")
     return e
 
 
@@ -143,8 +156,8 @@ class RCPCog(commands.Cog, name="RCP"):
             return
         view = _BuyView(self, ctx.author, key)
         view.message = await ctx.send(
-            f"Buy **{it['name']}** for **{fmt_rcp(it['cost'])}**?\nYou have **{fmt_rcp(bal)}**, "
-            f"after this **{fmt_rcp(bal - it['cost'])}**.", view=view)
+            f"{_item_emoji(key)} Buy **{it['name']}** for **{fmt_rcp(it['cost'])}**?\n"
+            f"You have **{fmt_rcp(bal)}**, after this **{fmt_rcp(bal - it['cost'])}**.", view=view)
 
     def _starpass_role_id(self) -> int:
         try:
@@ -193,7 +206,7 @@ class RCPCog(commands.Cog, name="RCP"):
                     bal = await asyncio.to_thread(economy.get_rcp, member.id)
                     return (f"✅ **Premium** is active until <t:{int(end)}:D>.{extra}\n"
                             f"RCP left: **{fmt_rcp(bal)}**")
-            return f"✅ Bought **{it['name']}**. RCP left: **{fmt_rcp(res['balance'])}**"
+            return f"✅ {_item_emoji(key)} Bought **{it['name']}**. RCP left: **{fmt_rcp(res['balance'])}**"
         finally:
             self._buying.discard(member.id)
 
