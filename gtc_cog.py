@@ -15,7 +15,7 @@ Players:
     rcgtc notify             get / remove the game ping role
 
 A game = 6 rounds. Each round shows a player photo; the first correct name typed in the channel gets
-1 point. The FULL name is needed ("(S1)"-style tags are not, Mohd = Mohammed, one typo is ok).
+1 point. The FULL name is needed ("(S1)"-style tags are not, Mohd = Mohammed, no typos).
 Hints come after 12 and 22 seconds; after 30 seconds the answer is shown.
 Most points wins 5 RCP (max 15 RCP a day from games). After the 11 PM game the day's top scorer
 gets 5 RCP more and the day's leaderboard is posted.

@@ -132,10 +132,10 @@ def _close(a: str, b: str) -> bool:
 
 
 def is_correct(guess: str, names: set[str]) -> bool:
+    """Exact full name only (no typos). Capital letters, dots, extra spaces and "(S1)"-style tags
+    don't matter, and Mohd / Mohammed / Muhammad count as the same word."""
     g = norm(guess)
-    if len(g) < 3:
-        return False
-    return any(_close(g, n) for n in names)
+    return len(g) >= 3 and g in names
 
 
 # ── results ───────────────────────────────────────────────────────────────────
