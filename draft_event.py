@@ -29,7 +29,7 @@ DURATIONS = {"3D": 3, "7D": 7, "10D": 10, "15D": 15, "30D": 30}
 # they had in the previous event (so 40/50 in Halloween is still 40/50 in the next event).
 CARRY_OVER_PITY = True
 THEMES = ("default", "halloween", "diwali", "christmas")      # looks, see draft_image.THEMES
-MAIN_NAMES = {"main", "normal", "draft", "default", "star"}
+MAIN_NAMES = {"main", "normal", "draft", "default", "star", "season-1", "season1", "s1"}
 
 
 def norm_key(text) -> str:

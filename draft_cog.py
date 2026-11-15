@@ -486,8 +486,11 @@ async def _pool_card_autocomplete(interaction: discord.Interaction, current: str
 async def _event_autocomplete(interaction: discord.Interaction, current: str):
     cur = current.lower()
     items = await asyncio.to_thread(draft_event.list_keys)
-    return [app_commands.Choice(name=f"{name} ({key})"[:100], value=key)
-            for key, name in items if cur in key or cur in name.lower()][:25]
+    # the normal draft (currently the Season 1 draft) is always the first choice
+    main = [app_commands.Choice(name="Season 1 (normal draft)", value="main")] \
+        if (not cur or cur in "season 1 normal draft main") else []
+    return (main + [app_commands.Choice(name=f"{name} ({key})"[:100], value=key)
+                    for key, name in items if key != "main" and (cur in key or cur in name.lower())])[:25]
 
 
 async def _event_ref(name: str | None) -> dict | None:
