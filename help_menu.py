@@ -103,6 +103,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     "other": ("Other", "Bot info and card list", [
         ("Bot Info", "rc about", "Bot latency, uptime and usage statistics.", "rc about"),
         ("All Cards", "/rcrarity", "Slash command. Lists all cards by OVR with BAT, BOWL and price. Only you can see it."),
+        ("Guess the Cricketer", "rcgtc", "6 games a day in chat: type the player's name first to score. Winner gets 5 RCP. rcgtc lb, rcgtc top, rcgtc notify.", "rcgtc"),
         ("Signature Box", "rcbox", "Spin for the Signature card and 9 other rewards. Every reward drops once, spin 10 always gives the Signature card. `rcp` shows your RC Points.", "rcbox"),
         ("Playstyles", "rcplaystyles [name]", "Every playstyle badge with its name. Add a name to see that badge in Silver, Gold and Golden Pink.", "rcplaystyles"),
         ("Help", "rchelp", "This menu."),

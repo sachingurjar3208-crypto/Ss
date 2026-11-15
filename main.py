@@ -103,6 +103,7 @@ async def load_cogs():
         "playstyle_info_cog",
         "sigbox_cog",
         "auction_cog",
+        "gtc_cog",
         "spawn_cog",
         "redeem_cog",
         "backup_cog",
