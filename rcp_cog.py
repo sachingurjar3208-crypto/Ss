@@ -5,10 +5,8 @@ Players
     rcstore buy <item>           spend RCP: premium | starpass | vouchers | legendary
     rcbal                        (economy_cog) also shows RCP
 
-Staff (owner / full-admin role, main server only)
-    rcp check @user              see someone's RCP and Premium end date
-    rcp give @user <n>           add RCP after a payment
-    rcp remove @user <n>         take RCP away (stops at 0)
+RCP is the SAME wallet as the Signature Box RC Points (sigbox.py). Staff adds or removes it with
+the existing `admin rcp give | remove | check` (admin_cog), players see it with `rcp` and rcbal.
 
 Premium members get RCP_PREMIUM_MONTHLY (500) free RCP every 30 days: given when the role
 arrives, and again whenever they open rcstore / rcbal once 30 days have passed.
@@ -18,7 +16,6 @@ Premium given by staff by hand has no end date here and is never removed by the 
 from __future__ import annotations
 
 import asyncio
-import time
 
 import discord
 from discord import ui
@@ -32,10 +29,9 @@ from bot_guard import ADMIN_GUILD_ID
 from security import OwnedView, esc
 from squad_cog import PREMIUM_ROLE_ID, _is_premium, _need_debut
 
-RCP_MAX_ADMIN = 1_000_000          # most RCP one staff command can add/remove
 
 # Real-money prices are never shown inside Discord: players get RCP through a ticket and staff
-# adds it with `rcp give`.
+# adds it with `admin rcp give`.
 
 # What RCP buys. give: "role:premium" | "role:starpass" | "vouchers" | "pack:<type>"
 ITEMS = {
@@ -236,59 +232,6 @@ class RCPCog(commands.Cog, name="RCP"):
     @expire_loop.before_loop
     async def _wait_ready(self):
         await self.bot.wait_until_ready()
-
-    # -- staff -------------------------------------------------------------------
-    @commands.group(name="rcp", invoke_without_command=True)
-    @security.owner_or_admin_role()
-    async def rcp(self, ctx: commands.Context):
-        await ctx.send("`rcp check @user`\n`rcp give @user <number>`\n`rcp remove @user <number>`")
-
-    @rcp.command(name="check")
-    @security.owner_or_admin_role()
-    async def rcp_check(self, ctx: commands.Context, member: discord.Member):
-        if ctx.guild is None or ctx.guild.id != ADMIN_GUILD_ID:
-            return
-        if not await asyncio.to_thread(economy.user_exists, member.id):
-            await ctx.send("❌ That user hasn't debuted.")
-            return
-        bal = await asyncio.to_thread(economy.get_rcp, member.id)
-        end = await asyncio.to_thread(economy.rcp_premium_end, member.id)
-        prem = f"\nRCP Premium until <t:{int(end)}:D>" if end > time.time() else ""
-        await ctx.send(f"{emojis.RCP} **{esc(member.display_name)}** has **{bal:,} RCP**.{prem}")
-
-    @rcp.command(name="give")
-    @security.owner_or_admin_role()
-    async def rcp_give(self, ctx: commands.Context, member: discord.Member, amount: int):
-        if ctx.guild is None or ctx.guild.id != ADMIN_GUILD_ID:
-            return
-        if not 1 <= amount <= RCP_MAX_ADMIN:
-            await ctx.send(f"❌ Give between 1 and {RCP_MAX_ADMIN:,} RCP at a time.")
-            return
-        new = await asyncio.to_thread(economy.add_rcp, member.id, amount, f"Staff give by {ctx.author.id}")
-        if new is None:
-            await ctx.send("❌ That user hasn't debuted.")
-            return
-        await ctx.send(f"✅ Gave **{fmt_rcp(amount)}** to {esc(member.display_name)}. They now have **{fmt_rcp(new)}**.")
-        try:
-            await member.send(f"{emojis.RCP} You received **{amount:,} RCP**. Spend it with `rcstore`.")
-        except discord.HTTPException:
-            pass
-
-    @rcp.command(name="remove")
-    @security.owner_or_admin_role()
-    async def rcp_remove(self, ctx: commands.Context, member: discord.Member, amount: int):
-        if ctx.guild is None or ctx.guild.id != ADMIN_GUILD_ID:
-            return
-        if not 1 <= amount <= RCP_MAX_ADMIN:
-            await ctx.send(f"❌ Remove between 1 and {RCP_MAX_ADMIN:,} RCP at a time.")
-            return
-        out = await asyncio.to_thread(economy.remove_rcp, member.id, amount, f"Staff remove by {ctx.author.id}")
-        if out is None:
-            await ctx.send("❌ That user hasn't debuted.")
-            return
-        removed, new = out
-        await ctx.send(f"✅ Removed **{fmt_rcp(removed)}** from {esc(member.display_name)}. They now have **{fmt_rcp(new)}**.")
-
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(RCPCog(bot))
