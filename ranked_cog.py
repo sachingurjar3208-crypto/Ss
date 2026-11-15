@@ -210,12 +210,6 @@ class RankedCog(commands.Cog, name="Ranked"):
 
         info = await asyncio.to_thread(ranked.get_player, me.id)
         tier = info["tier"]
-        too_high = await asyncio.to_thread(lambda: ranked.over_cap_cards(sl.xi_cards(me.id), tier))
-        if too_high:
-            names = ", ".join(f"{c['playername']} ({c['ovr']})" for c in too_high)
-            await ctx.send(f"❌ **{tier}** ranked allows cards up to **{ranked.TIER_MAX_OVR[tier]} OVR** only. "
-                           f"Swap these out of your XI: {names}")
-            return
         entry = _Entry(uid=me.id, member=me, channel=ctx.channel, guild_id=ctx.guild.id, tier=tier)
 
         from views import active_games
