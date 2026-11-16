@@ -16,6 +16,7 @@ Only OWNER_ID may run these (same owner as /cardmaker).
 """
 
 from __future__ import annotations
+import emojis
 
 import re
 
@@ -117,7 +118,7 @@ class StadiumCog(commands.Cog):
         )
 
         st = data.find_stadium(stadium)
-        embed = self._stadium_embed(st, title=("✅ Stadium updated" if existing else "✅ New stadium added"))
+        embed = self._stadium_embed(st, title=(f"{emojis.TICK} Stadium updated" if existing else f"{emojis.TICK} New stadium added"))
         await interaction.response.send_message(embed=embed)
 
     # ── /stadiumgif ──────────────────────────────────────────────────
@@ -138,7 +139,7 @@ class StadiumCog(commands.Cog):
             await interaction.response.send_message("❌ `link` must start with http:// or https://", ephemeral=True)
             return
         media.upsert_stadium(st["name"], gif_url=gif_url)
-        embed = discord.Embed(title="✅ Stadium GIF saved", description=f"**{st['name']}**",
+        embed = discord.Embed(title=f"{emojis.TICK} Stadium GIF saved", description=f"**{st['name']}**",
                               color=discord.Color.from_rgb(8, 22, 60))
         embed.set_image(url=gif_url)
         await interaction.response.send_message(embed=embed)
@@ -169,7 +170,7 @@ class StadiumCog(commands.Cog):
         with_gif = [s["name"] for s in stadiums if s["gif_url"]]
         without = [s["name"] for s in stadiums if not s["gif_url"]]
         embed = discord.Embed(title="🎞️ Stadium GIFs", color=discord.Color.from_rgb(8, 22, 60))
-        embed.add_field(name=f"✅ GIF set ({len(with_gif)})",
+        embed.add_field(name=f"{emojis.TICK} GIF set ({len(with_gif)})",
                         value="\n".join(with_gif)[:1000] or "None", inline=False)
         embed.add_field(name=f"❌ No GIF ({len(without)})",
                         value="\n".join(without)[:1000] or "None", inline=False)
@@ -239,7 +240,7 @@ class StadiumCog(commands.Cog):
         if isinstance(error, MaintenanceActive):
             return   # the user was already told about maintenance
         if isinstance(error, app_commands.CheckFailure):
-            msg = "🔒 Only the bot owner or an admin can use this command."
+            msg = f"{emojis.LOCK} Only the bot owner or an admin can use this command."
             if interaction.response.is_done():
                 await interaction.followup.send(msg, ephemeral=True)
             else:

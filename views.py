@@ -2047,8 +2047,8 @@ class TossView(_TimeoutMixin, ui.View):
         self._add_buttons()
 
     def _add_buttons(self):
-        head_btn = ui.Button(label="HEADS", emoji="🪙", style=discord.ButtonStyle.primary,   row=0)
-        tail_btn = ui.Button(label="TAILS", emoji="🪙", style=discord.ButtonStyle.secondary, row=0)
+        head_btn = ui.Button(label="HEADS", emoji=emojis.COIN, style=discord.ButtonStyle.primary,   row=0)
+        tail_btn = ui.Button(label="TAILS", emoji=emojis.COIN, style=discord.ButtonStyle.secondary, row=0)
         head_btn.callback = self._make_callback("Head")
         tail_btn.callback = self._make_callback("Tail")
         self.add_item(head_btn)
@@ -3178,7 +3178,7 @@ class ImpactPlayerSwapView(ui.View):
         self.stop()
         incoming_name = _pname(self.incoming)
         await interaction.response.edit_message(
-            content=f"✅ **{incoming_name}** is on in place of **{outgoing_name}**.",
+            content=f"{emojis.TICK} **{incoming_name}** is on in place of **{outgoing_name}**.",
             view=None,
         )
 

@@ -18,6 +18,7 @@ it hands "rcmp ranked" over to RankedCog.start_ranked().
 """
 
 from __future__ import annotations
+import emojis
 
 import asyncio
 import io
@@ -549,7 +550,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             await ctx.send(f"❌ **{r['name']}** is already running (ends <t:{r['end']}:R>). End it first with `rcseasonend`.")
             return
         await ctx.send(
-            f"✅ **{r['name']}** started! Everyone starts at 0 ⭐.\n"
+            f"{emojis.TICK} **{r['name']}** started! Everyone starts at 0 ⭐.\n"
             f"Ends automatically <t:{r['end']}:f> (<t:{r['end']}:R>), after **{r['days']}** days."
         )
 
@@ -590,7 +591,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             return
         r = await asyncio.to_thread(ranked.admin_give_stars, ctx.author.id, member.id, amount)
         await ctx.send(
-            f"✅ **{esc(member.display_name)}**: **{r['old']}** → **{r['new']}** ⭐ "
+            f"{emojis.TICK} **{esc(member.display_name)}**: **{r['old']}** → **{r['new']}** ⭐ "
             f"({ranked.tier_emoji(r['tier_new'])} {r['tier_new']})\n"
             f"`{amount:+d}` stars by {esc(ctx.author.display_name)}. No tier rewards were paid.",
             allowed_mentions=discord.AllowedMentions.none(),
@@ -605,7 +606,7 @@ class RankedCog(commands.Cog, name="Ranked"):
         try:
             await ctx.author.send(text)
         except Exception:
-            await ctx.send("✅ Done. (I couldn't DM you the details, so turn on DMs from this server.)",
+            await ctx.send(f"{emojis.TICK} Done. (I couldn't DM you the details, so turn on DMs from this server.)",
                            allowed_mentions=discord.AllowedMentions.none())
 
     async def _find_card_name(self, query: str) -> str | None:
@@ -641,9 +642,9 @@ class RankedCog(commands.Cog, name="Ranked"):
             await self._admin_reply(ctx, f"❌ {e}")
             return
         if pct == 0:
-            await self._admin_reply(ctx, f"✅ Buff for **{name}** cleared.")
+            await self._admin_reply(ctx, f"{emojis.TICK} Buff for **{name}** cleared.")
         else:
-            await self._admin_reply(ctx, f"✅ **{name}**: `{pct:+g}%` saved. Hidden from players.")
+            await self._admin_reply(ctx, f"{emojis.TICK} **{name}**: `{pct:+g}%` saved. Hidden from players.")
 
     @commands.command(name="rcbuffoff")
     async def rcbuffoff(self, ctx: commands.Context, *, player: str = ""):
@@ -657,7 +658,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             await self._admin_reply(ctx, f"❌ No single card matches **{player.strip()}**.")
             return
         had = await asyncio.to_thread(player_buffs.clear_buff, ctx.author.id, name)
-        await self._admin_reply(ctx, f"✅ Buff for **{name}** removed." if had else f"ℹ️ **{name}** had no buff.")
+        await self._admin_reply(ctx, f"{emojis.TICK} Buff for **{name}** removed." if had else f"ℹ️ **{name}** had no buff.")
 
     @commands.command(name="rcbufflist")
     async def rcbufflist(self, ctx: commands.Context):
@@ -692,7 +693,7 @@ class RankedCog(commands.Cog, name="Ranked"):
             return
         old = await asyncio.to_thread(ranked.admin_reset_player, ctx.author.id, member.id)
         await ctx.send(
-            f"✅ **{esc(member.display_name)}** ranked reset: was **{old['stars']}** ⭐, "
+            f"{emojis.TICK} **{esc(member.display_name)}** ranked reset: was **{old['stars']}** ⭐, "
             f"{old['wins']}W/{old['losses']}L → now **0** ⭐, 0W/0L.",
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -722,7 +723,7 @@ class RankedCog(commands.Cog, name="Ranked"):
         await self.cog_check_staff(ctx)
         had = await asyncio.to_thread(ranked.admin_unban, ctx.author.id, member.id)
         if had:
-            await ctx.send(f"✅ **{esc(member.display_name)}** can play ranked again.",
+            await ctx.send(f"{emojis.TICK} **{esc(member.display_name)}** can play ranked again.",
                            allowed_mentions=discord.AllowedMentions.none())
         else:
             await ctx.send(f"ℹ️ **{esc(member.display_name)}** had no ranked ban.",
@@ -744,7 +745,7 @@ class _ConfirmEndSeason(OwnedView):
             return
         sent, failed = await self.cog._deliver_season_dms()
         await interaction.edit_original_response(
-            content=(f"✅ **{res['season']}** ended. Rewards paid to **{res['paid']}** player(s): "
+            content=(f"{emojis.TICK} **{res['season']}** ended. Rewards paid to **{res['paid']}** player(s): "
                      f"**{sent}** DM(s) sent, **{failed}** could not be DMed "
                      f"(they will see it next time they use `rcrank`). Stars are reset; start the next one with `rcseasonstart`.")
         )
@@ -763,7 +764,7 @@ class _ConfirmResetAll(OwnedView):
     async def confirm(self, interaction: discord.Interaction, button: ui.Button):
         n = await asyncio.to_thread(ranked.admin_reset_all, interaction.user.id)
         self.stop()
-        await interaction.response.edit_message(content=f"✅ Ranked reset for **{n}** player(s).", view=None)
+        await interaction.response.edit_message(content=f"{emojis.TICK} Ranked reset for **{n}** player(s).", view=None)
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel(self, interaction: discord.Interaction, button: ui.Button):

@@ -256,7 +256,7 @@ def _grant_bundle(conn, uid: int, spec: dict, source: str, idx_cache: list) -> t
     if spec.get("coins"):
         n = int(spec["coins"])
         economy._apply_coins(conn, uid, n, source)
-        lines.append(f"💰 **{n:,}** coins")
+        lines.append(f"{emojis.COIN} **{n:,}** coins")
     for pack, qty in (spec.get("packs") or {}).items():
         conn.execute(
             "INSERT INTO packs (user_id, pack_type, qty) VALUES (?, ?, ?) "
@@ -343,7 +343,7 @@ def _settle_season(conn, old_season: str) -> dict:
         lines, pending = _grant_bundle(conn, uid, spec, f"Ranked {old_season} ({tier})", idx_cache)
         text = (
             f"🏁 **Ranked {old_season} ended!** You finished {tier_emoji(tier)} **{tier}** "
-            f"with **{stars}** ⭐\n🎁 Rewards: " + " · ".join(lines)
+            f"with **{stars}** ⭐\n{emojis.GIFT} Rewards: " + " · ".join(lines)
             + ("\n⚠️ A card is waiting for you: use `rcpending`." if pending else "")
         )
         conn.execute("INSERT INTO ranked_notices (user_id, text, ts) VALUES (?, ?, ?)", (uid, text, time.time()))

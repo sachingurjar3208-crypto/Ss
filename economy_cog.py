@@ -157,7 +157,7 @@ class ConfirmView(OwnedView):
             self.confirm.disabled = True
             self.confirm.style = discord.ButtonStyle.secondary
 
-    @ui.button(label="Confirm", style=discord.ButtonStyle.success, emoji="✅")
+    @ui.button(label="Confirm", style=discord.ButtonStyle.success, emoji=emojis.TICK)
     async def confirm(self, interaction: discord.Interaction, button: ui.Button):
         if self.used:  # a second click can never run the action twice
             await interaction.response.defer()
@@ -202,13 +202,13 @@ def _buy_action(channel, uid: int, key: str) -> Callable[[], Awaitable[str]]:
         if not sl.pack_available(key):
             return "❌ That pack isn't on sale right now."
         if economy.is_pack_off(key):
-            return "🔒 This pack is turned off right now."
+            return f"{emojis.LOCK} This pack is turned off right now."
         err = economy.buy_pack(uid, key, spec["price"])
         if err:
             return f"❌ {err}"
         await quest.track_and_notify(channel, uid, {"packs_bought": 1})
         return (
-            f"✅ Bought 1× {spec['emoji']} {spec['label']} for {economy.fmt_coins(spec['price'])}. "
+            f"{emojis.TICK} Bought 1× {spec['emoji']} {spec['label']} for {economy.fmt_coins(spec['price'])}. "
             f"Open it with `rcopen {key}`."
         )
     return do_buy
@@ -222,7 +222,7 @@ def _shop_embed(uid: int) -> discord.Embed:
         lo, hi = spec["range"]
         extra = " · event players only" if spec.get("event") else ""
         if key in off:
-            extra += " · 🔒 not available right now"
+            extra += f" · {emojis.LOCK} not available right now"
         have = f" · you own **{owned[key]}**" if owned.get(key) else ""
         lines.append(
             f"{spec['emoji']} **{spec['label']}**\n"
@@ -277,7 +277,7 @@ class PackShopView(OwnedView):
             confirm.message = interaction.message
             text = f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?"
             if off:
-                text += "\n🔒 This pack isn't available right now."
+                text += f"\n{emojis.LOCK} This pack isn't available right now."
             await interaction.response.edit_message(content=text, embed=None, view=confirm)
         except Exception:
             _pending_confirm.discard(uid)
@@ -354,7 +354,7 @@ async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable
         raise
 
 
-LOCKED_CARD_TEXT = "🔒 This card isn't sold in the shop"
+LOCKED_CARD_TEXT = f"{emojis.LOCK} This card isn't sold in the shop"
 
 
 class BuySellView(OwnedView):
@@ -369,7 +369,7 @@ class BuySellView(OwnedView):
             self.yes.disabled = True
             self.yes.style = discord.ButtonStyle.secondary
 
-    @ui.button(emoji="✅", style=discord.ButtonStyle.success)
+    @ui.button(emoji=emojis.TICK, style=discord.ButtonStyle.success)
     async def yes(self, interaction: discord.Interaction, button: ui.Button):
         if self.used:  # a second click can never run the action twice
             await interaction.response.defer()
@@ -467,7 +467,7 @@ class BuyBrowseView(OwnedView):
         msg = await interaction.edit_original_response(embed=embed, attachments=[file], view=self)
         card_cache.remember(path, msg)
 
-    @ui.button(emoji="✅", style=discord.ButtonStyle.success, row=0)
+    @ui.button(emoji=emojis.TICK, style=discord.ButtonStyle.success, row=0)
     async def yes(self, interaction: discord.Interaction, button: ui.Button):
         if self.used:
             await interaction.response.defer()
@@ -619,7 +619,7 @@ class PendingCardView(OwnedView):
     async def keep(self, interaction: discord.Interaction, button: ui.Button):
         await self.finish(interaction, "keep")
 
-    @ui.button(label="Sell it", style=discord.ButtonStyle.success, emoji="💰")
+    @ui.button(label="Sell it", style=discord.ButtonStyle.success, emoji=emojis.COIN)
     async def sell(self, interaction: discord.Interaction, button: ui.Button):
         await self.finish(interaction, "sell")
 
@@ -678,7 +678,7 @@ class PendingCardView(OwnedView):
         if err:
             result = f"❌ {err}"
         elif action == "sell":
-            result = f"💰 Sold **{esc(self.card['playername'])}** for **{_plain_coins(new_value)}**."
+            result = f"{emojis.COIN} Sold **{esc(self.card['playername'])}** for **{_plain_coins(new_value)}**."
         elif action == "keep":
             result = (f"📥 **{esc(self.card['playername'])}** joined your squad. A copy of a card you already have "
                       f"stays on the bench (the XI can't hold the same player twice).")
@@ -847,13 +847,13 @@ class EconomyCog(commands.Cog, name="Economy"):
                 return
             if res.get("locked"):
                 await ctx.send(
-                    f"🔒 The monthly reward unlocks **1 month after your debut**. "
+                    f"{emojis.LOCK} The monthly reward unlocks **1 month after your debut**. "
                     f"Come back in **{fmt_wait(res['wait'])}**."
                 )
                 return
             await ctx.send(f"⏳ You already claimed your {kind} reward. Come back in **{fmt_wait(res['wait'])}**.")
             return
-        lines = [f"{REWARD_EMOJI.get(kind, '🎁')} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**"]
+        lines = [f"{REWARD_EMOJI.get(kind, emojis.GIFT)} {kind.title()} reward: **+{economy.fmt_coins(res['coins'])}**"]
         if kind == "weekly" and res.get("vouchers"):
             lines.append(f"{emojis.VOUCHER} Weekly vouchers: **+{res['vouchers']}**")
         if kind == "daily":
@@ -1081,7 +1081,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             view = ConfirmView(uid, _buy_action(ctx.channel, uid, key), locked=off)
             text = f"Buy 1× {spec['emoji']} **{spec['label']}** for **{economy.fmt_coins(spec['price'])}**?"
             if off:
-                text += "\n🔒 This pack isn't available right now."
+                text += f"\n{emojis.LOCK} This pack isn't available right now."
             view.message = await ctx.send(text, view=view)
         except Exception:
             _pending_confirm.discard(uid)
@@ -1328,7 +1328,7 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send("❌ You can't change your squad during a match.")
             return
         if not await send_next_pending(ctx, ctx.author.id):
-            await ctx.send(f"✅ No cards are waiting. Squad: **{economy.squad_count(ctx.author.id)}/"
+            await ctx.send(f"{emojis.TICK} No cards are waiting. Squad: **{economy.squad_count(ctx.author.id)}/"
                            f"{economy.squad_limit(ctx.author.id)}**.")
 
     # -- trade -----------------------------------------------------------

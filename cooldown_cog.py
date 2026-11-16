@@ -12,6 +12,7 @@ Only the bot owner can run it, it exists only in the main server
 """
 
 from __future__ import annotations
+import emojis
 
 import asyncio
 
@@ -73,19 +74,19 @@ class CooldownCog(commands.Cog):
 
         lines = []
         if done["starter"]:
-            lines.append("🎁 Starter pack: **reset** (they can use `rcstarterpack` again)")
+            lines.append(f"{emojis.GIFT} Starter pack: **reset** (they can use `rcstarterpack` again)")
         if done["weekly"]:
             lines.append("📅 Weekly pack: **reset** (`rcweekly` is ready)")
         if done["daily"]:
             lines.append("☀️ Daily pack: **reset** (`rcdaily` is ready, streak kept)")
         await interaction.response.send_message(
-            f"✅ Cooldown reset for **{name}**\n" + "\n".join(lines), ephemeral=True
+            f"{emojis.TICK} Cooldown reset for **{name}**\n" + "\n".join(lines), ephemeral=True
         )
 
     @reset.error
     async def reset_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CheckFailure):
-            msg = "🔒 Only the bot owner can use this command."
+            msg = f"{emojis.LOCK} Only the bot owner can use this command."
         else:
             msg = f"⚠️ Something went wrong: `{error}`"
         if interaction.response.is_done():

@@ -17,6 +17,7 @@ Tables: redeem_codes (code PK, rewards JSON, max_uses, used, expires, active, cr
         redeem_claims (code, user_id, ts)  PRIMARY KEY (code, user_id)
 """
 from __future__ import annotations
+import emojis
 
 import json
 import re
@@ -235,7 +236,7 @@ def _give(conn, uid: int, r: dict, source: str, idx_cache: list) -> tuple[str, b
     k, a, v = r["kind"], int(r.get("amount", 1)), r.get("value")
     if k == "coins":
         economy._apply_coins(conn, uid, a, source)
-        return f"💰 **{a:,}** coins", False
+        return f"{emojis.COIN} **{a:,}** coins", False
     if k == "vouchers":
         economy._voucher_change(conn, uid, a, source)
         return f"{emojis.VOUCHER} **{a}** Draft Voucher{'s' if a != 1 else ''}", False

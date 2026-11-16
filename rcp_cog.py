@@ -156,7 +156,7 @@ class RCPCog(commands.Cog, name="RCP"):
             await ctx.send("❌ No Star Pass season is running right now. Your RCP is safe, try again when a season starts.")
             return
         if it["give"] == "role:starpass" and self._has_starpass(ctx.author):
-            await ctx.send("✅ You already have this season's Star Pass.")
+            await ctx.send(f"{emojis.TICK} You already have this season's Star Pass.")
             return
         bal = await asyncio.to_thread(economy.get_rcp, ctx.author.id)
         if bal < it["cost"]:
