@@ -17,6 +17,7 @@ from discord.ext import commands
 
 # Import card_image early to trigger font startup checks
 import card_image as _card_image_startup_check
+import economy
 import security
 from bot_guard import ADMIN_GUILD_ID, GuardedTree, MaintenancePrefixBlocked, maintenance_prefix_check
 import logging
@@ -72,6 +73,11 @@ async def on_command_error(ctx: commands.Context, error: commands.CommandError):
     """Text commands blocked by maintenance were already answered: stay quiet. Everything else = default."""
     if isinstance(error, MaintenancePrefixBlocked):
         return
+    if isinstance(getattr(error, "original", None), economy.UndoLocked):
+        await ctx.send(str(error.original))
+        return
+    if isinstance(error, commands.CheckFailure) and str(error) == "undo lock":
+        return
     # security.py turns cooldowns / bad input / bugs into short friendly messages.
     await security.handle_command_error(ctx, error)
 
@@ -104,6 +110,7 @@ async def load_cogs():
         "sigbox_cog",
         "auction_cog",
         "gtc_cog",
+        "undo_cog",
         "spawn_cog",
         "redeem_cog",
         "backup_cog",

@@ -17,6 +17,7 @@ SAFETY RULES used everywhere in this file
 
 from __future__ import annotations
 
+import contextvars
 import secrets
 import sqlite3
 import time
@@ -119,6 +120,102 @@ def fmt_coins(n: int) -> str:
 # True while a Live Auction runs (auction_cog sets it). Selling, trading and the
 # daily / weekly / monthly coin claims are paused, so nobody can raise coins mid-auction.
 AUCTION_LOCK = False
+
+
+# ── Undo support ──────────────────────────────────────────────────────────────
+# Every card that enters or leaves a squad (or the waiting list) is written to card_log, every pack
+# change to pack_log (by a database trigger), and coin rows carry the action's tag. That history lets
+#   rcundo           a player take back their LAST sell within UNDO_SELL_SECONDS (coins go back too), and
+#   admin undo       the owner roll a player back to an earlier time.
+# While the owner's undo runs, that player is LOCKED: any coin / card / voucher change for them fails
+# (so nothing can be sold, spent or moved in between, from any command, button or chat bid).
+UNDO_SELL_SECONDS = 300
+_TAG: contextvars.ContextVar = contextvars.ContextVar("econ_tag", default=None)
+UNDO_LOCK: dict[int, float] = {}          # user_id -> lock expiry (time.time())
+
+
+class UndoLocked(Exception):
+    """Raised inside a transaction when a locked player's coins / cards / vouchers would change."""
+    def __init__(self):
+        super().__init__("Your account is being checked by the owner. Try again in a minute.")
+
+
+def is_undo_locked(user_id) -> bool:
+    exp = UNDO_LOCK.get(int(user_id))
+    if exp is None:
+        return False
+    if exp < time.time():
+        UNDO_LOCK.pop(int(user_id), None)
+        return False
+    return True
+
+
+def _guard(uid: int) -> None:
+    tag = _TAG.get() or ""
+    if not tag.startswith("undo") and is_undo_locked(uid):
+        raise UndoLocked()
+
+
+_UNDO_READY = False
+
+
+def _ensure_undo_tables(conn) -> None:
+    global _UNDO_READY
+    if _UNDO_READY:
+        return
+    conn.execute("CREATE TABLE IF NOT EXISTS card_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, "
+                 "player_key TEXT NOT NULL, delta INTEGER NOT NULL, place TEXT NOT NULL, tag TEXT, ts REAL NOT NULL, "
+                 "undone INTEGER NOT NULL DEFAULT 0)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_card_log_user ON card_log (user_id, ts)")
+    conn.execute("CREATE TABLE IF NOT EXISTS pack_log (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, "
+                 "pack_type TEXT NOT NULL, delta INTEGER NOT NULL, ts REAL NOT NULL, undone INTEGER NOT NULL DEFAULT 0)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_pack_log_user ON pack_log (user_id, ts)")
+    conn.execute("CREATE TABLE IF NOT EXISTS undo_meta (key TEXT PRIMARY KEY, value TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS undo_done (tag TEXT PRIMARY KEY, ts REAL NOT NULL)")
+    conn.execute("INSERT OR IGNORE INTO undo_meta (key, value) VALUES ('history_since', ?)", (str(time.time()),))
+    for table in ("ledger", "voucher_log"):
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if not cols:
+            continue
+        if "tag" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN tag TEXT")
+        if "undone" not in cols:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN undone INTEGER NOT NULL DEFAULT 0")
+    # packs are changed from many files: a trigger logs every change wherever it comes from
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS trg_pack_ins AFTER INSERT ON packs BEGIN
+                    INSERT INTO pack_log (user_id, pack_type, delta, ts)
+                    VALUES (NEW.user_id, NEW.pack_type, NEW.qty, (julianday('now') - 2440587.5) * 86400.0); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS trg_pack_upd AFTER UPDATE OF qty ON packs WHEN NEW.qty != OLD.qty BEGIN
+                    INSERT INTO pack_log (user_id, pack_type, delta, ts)
+                    VALUES (NEW.user_id, NEW.pack_type, NEW.qty - OLD.qty, (julianday('now') - 2440587.5) * 86400.0); END""")
+    conn.execute("""CREATE TRIGGER IF NOT EXISTS trg_pack_del AFTER DELETE ON packs BEGIN
+                    INSERT INTO pack_log (user_id, pack_type, delta, ts)
+                    VALUES (OLD.user_id, OLD.pack_type, -OLD.qty, (julianday('now') - 2440587.5) * 86400.0); END""")
+    _UNDO_READY = True
+
+
+def _tagged(prefix: str):
+    """Give every coin / card row written by this action one shared tag (sell:abc123, trade:...)."""
+    def wrap(fn):
+        def inner(*a, **kw):
+            if _TAG.get():                                   # already inside a tagged action
+                return fn(*a, **kw)
+            token = _TAG.set(f"{prefix}:{secrets.token_hex(6)}")
+            try:
+                return fn(*a, **kw)
+            finally:
+                _TAG.reset(token)
+        inner.__name__, inner.__doc__ = fn.__name__, fn.__doc__
+        return inner
+    return wrap
+
+
+def _log_card(conn, uid: int, key: str, delta: int, place: str) -> None:
+    if not delta:
+        return
+    _ensure_undo_tables(conn)
+    conn.execute("INSERT INTO card_log (user_id, player_key, delta, place, tag, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                 (uid, key, int(delta), place, _TAG.get(), time.time()))
 AUCTION_LOCK_MSG = "The Live Auction is running. Selling, trading and coin claims are paused until it ends."
 
 
@@ -395,11 +492,13 @@ def _apply_coins(conn: sqlite3.Connection, uid: int, amount: int, reason: str) -
     row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
     if row is None:
         return None
+    _guard(uid)
+    _ensure_undo_tables(conn)
     new_balance = min(MAX_PURSE, int(row["purse"]) + int(amount))
     conn.execute("UPDATE users SET purse = ? WHERE user_id = ?", (new_balance, uid))
     conn.execute(
-        "INSERT INTO ledger (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, ?, ?)",
-        (uid, int(amount), (reason or "")[:120], new_balance, time.time()),
+        "INSERT INTO ledger (user_id, delta, reason, balance_after, ts, tag) VALUES (?, ?, ?, ?, ?, ?)",
+        (uid, int(amount), (reason or "")[:120], new_balance, time.time(), _TAG.get()),
     )
     return new_balance
 
@@ -542,7 +641,9 @@ def _holds(conn: sqlite3.Connection, uid: int, key: str) -> bool:
 
 
 def _pending_add(conn: sqlite3.Connection, uid: int, key: str, source: str) -> None:
+    _guard(uid)
     _ensure_pending_table(conn)
+    _log_card(conn, uid, key, 1, "pending")
     conn.execute(
         "INSERT INTO pending_cards (user_id, player_key, source, ts, qty) VALUES (?, ?, ?, ?, 1) "
         "ON CONFLICT(user_id, player_key) DO UPDATE SET qty = qty + 1",
@@ -555,6 +656,8 @@ def _pending_take(conn: sqlite3.Connection, uid: int, key: str) -> bool:
     q = _pending_qty(conn, uid, key)
     if q <= 0:
         return False
+    _guard(uid)
+    _log_card(conn, uid, key, -1, "pending")
     if q > 1:
         conn.execute("UPDATE pending_cards SET qty = qty - 1 WHERE user_id = ? AND player_key = ?", (uid, key))
     else:
@@ -565,6 +668,8 @@ def _pending_take(conn: sqlite3.Connection, uid: int, key: str) -> bool:
 def _add_copy(conn: sqlite3.Connection, uid: int, key: str, fill_xi: bool = True) -> bool:
     """Add one card to the squad. A copy of a card already owned just raises qty (and stays on the
     bench). Returns True if it was a NEW card (a new owned row)."""
+    _guard(uid)
+    _log_card(conn, uid, key, 1, "squad")
     if _own_qty(conn, uid, key) > 0:
         conn.execute("UPDATE owned SET qty = qty + 1 WHERE user_id = ? AND player_key = ?", (uid, key))
         return False
@@ -581,6 +686,8 @@ def _remove_copies(conn: sqlite3.Connection, uid: int, key: str, n: int = 1) -> 
     q = _own_qty(conn, uid, key)
     if q <= 0:
         return None
+    _guard(uid)
+    _log_card(conn, uid, key, -min(int(n), q), "squad")
     if q > n:
         conn.execute("UPDATE owned SET qty = qty - ? WHERE user_id = ? AND player_key = ?", (int(n), uid, key))
         return None
@@ -1153,6 +1260,7 @@ def buy_card(user_id, player_key: str, price: int) -> str | None:
         return None
 
 
+@_tagged("sell")
 def sell_card(user_id, player_key: str, value: int, replacement_key: str | None) -> str | None:
     """Sell ONE copy of a card for `value` coins. If that was the last copy and the card was in
     the XI, the `replacement_key` (a bench player) takes its batting spot."""
@@ -1177,6 +1285,7 @@ def sell_card(user_id, player_key: str, value: int, replacement_key: str | None)
         return None
 
 
+@_tagged("sell")
 def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) -> tuple[str | None, int]:
     """Sell many cards in ONE transaction (all or nothing). XI players can be sold too.
 
@@ -1424,6 +1533,8 @@ def get_vouchers(user_id) -> int:
 def _voucher_change(conn: sqlite3.Connection, uid: int, delta: int, reason: str) -> int:
     """Add/remove vouchers inside an open transaction. Never below 0, never above MAX_VOUCHERS."""
     _ensure_draft_tables(conn)
+    _guard(uid)
+    _ensure_undo_tables(conn)
     row = conn.execute("SELECT amount FROM vouchers WHERE user_id = ?", (uid,)).fetchone()
     cur = int(row["amount"]) if row else 0
     new = max(0, min(MAX_VOUCHERS, cur + int(delta)))
@@ -1433,8 +1544,8 @@ def _voucher_change(conn: sqlite3.Connection, uid: int, delta: int, reason: str)
         (uid, new),
     )
     conn.execute(
-        "INSERT INTO voucher_log (user_id, delta, reason, balance_after, ts) VALUES (?, ?, ?, ?, ?)",
-        (uid, new - cur, (reason or "")[:120], new, time.time()),
+        "INSERT INTO voucher_log (user_id, delta, reason, balance_after, ts, tag) VALUES (?, ?, ?, ?, ?, ?)",
+        (uid, new - cur, (reason or "")[:120], new, time.time(), _TAG.get()),
     )
     return new
 
@@ -1634,9 +1745,11 @@ def claim_starter(user_id, keys: list[str], xi_order: list[str]) -> str | None:
             )
         now = time.time()
         for k in keys:
-            conn.execute(
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO owned (user_id, player_key, acquired_at) VALUES (?, ?, ?)", (uid, k, now)
             )
+            if cur.rowcount:
+                _log_card(conn, uid, k, 1, "squad")
         conn.execute("DELETE FROM xi WHERE user_id = ?", (uid,))
         seen_groups: set[str] = set()
         slot = 0
@@ -1685,6 +1798,7 @@ def reset_cooldowns(user_id, starter: bool = False, weekly: bool = False, daily:
 
 # ── Trading ─────────────────────────────────────────────────────────────────
 
+@_tagged("trade")
 def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> str | None:
     """Swap one player each between two users, atomically. Both players pay `fee`
     coins (every trade, always). Everything is re-checked inside the transaction,
@@ -2049,3 +2163,161 @@ def rcp_premium_end(user_id) -> float:
         _ensure_rcp_tables(conn)
         row = conn.execute("SELECT expires FROM rcp_premium WHERE user_id = ?", (_uid(user_id),)).fetchone()
         return float(row["expires"]) if row else 0.0
+
+
+# ── Undo ─────────────────────────────────────────────────────────────────────
+def undo_history_since() -> float:
+    """Time the card history started (an undo can't reach further back)."""
+    with _tx() as conn:
+        _ensure_undo_tables(conn)
+        row = conn.execute("SELECT value FROM undo_meta WHERE key = 'history_since'").fetchone()
+        return float(row["value"]) if row else time.time()
+
+
+def undo_last_sell(user_id) -> dict:
+    """Player undo: take back the LAST sell (one rcsell / rcms) made in the last UNDO_SELL_SECONDS.
+    The cards come back to the bench and exactly the coins that sell paid are taken away.
+    {"ok": True, "cards": [keys], "coins": n} or {"ok": False, "reason": none|auction|coins|squad, ...}"""
+    uid, now = _uid(user_id), time.time()
+    if AUCTION_LOCK:
+        return {"ok": False, "reason": "auction"}
+    with _tx() as conn:
+        _ensure_undo_tables(conn)
+        row = conn.execute(
+            "SELECT tag, MAX(ts) AS t FROM card_log WHERE user_id = ? AND tag LIKE 'sell:%' AND undone = 0 AND ts >= ? "
+            "GROUP BY tag ORDER BY t DESC LIMIT 1", (uid, now - UNDO_SELL_SECONDS)).fetchone()
+        if not row or not row["tag"]:
+            return {"ok": False, "reason": "none"}
+        tag = row["tag"]
+        if conn.execute("SELECT 1 FROM undo_done WHERE tag = ?", (tag,)).fetchone():
+            return {"ok": False, "reason": "none"}
+        cards = conn.execute("SELECT player_key, delta FROM card_log WHERE user_id = ? AND tag = ? AND undone = 0 "
+                             "AND delta < 0", (uid, tag)).fetchall()
+        coins = int(conn.execute("SELECT COALESCE(SUM(delta), 0) FROM ledger WHERE user_id = ? AND tag = ? AND undone = 0",
+                                 (uid, tag)).fetchone()[0])
+        purse = int(conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()["purse"])
+        if purse < coins:
+            return {"ok": False, "reason": "coins", "need": coins, "have": purse}
+        back = sum(-int(r["delta"]) for r in cards)
+        if _squad_count(conn, uid) + back > _limit(conn, uid):
+            return {"ok": False, "reason": "squad", "limit": _limit(conn, uid)}
+        token = _TAG.set(f"undo:{tag}")
+        try:
+            keys = []
+            for r in cards:
+                for _ in range(-int(r["delta"])):
+                    _add_copy(conn, uid, r["player_key"], fill_xi=False)
+                    keys.append(r["player_key"])
+            if coins:
+                _apply_coins(conn, uid, -coins, "Undo sell")
+        finally:
+            _TAG.reset(token)
+        conn.execute("UPDATE card_log SET undone = 1 WHERE user_id = ? AND tag = ?", (uid, tag))
+        conn.execute("UPDATE ledger SET undone = 1 WHERE user_id = ? AND tag = ?", (uid, tag))
+        conn.execute("INSERT INTO undo_done (tag, ts) VALUES (?, ?)", (tag, now))
+        return {"ok": True, "cards": keys, "coins": coins}
+
+
+def _undo_rows(conn, uid: int, since: float) -> dict:
+    """Everything that changed for this player since `since` and can be reversed.
+    Trades are left out (the other player is involved) and listed separately; earlier undos are left out."""
+    cards = conn.execute("SELECT id, player_key, delta, place, tag, ts FROM card_log WHERE user_id = ? AND ts >= ? "
+                         "AND undone = 0 AND COALESCE(tag, '') NOT LIKE 'undo%' ORDER BY id DESC", (uid, since)).fetchall()
+    coins = conn.execute("SELECT id, delta, reason, tag FROM ledger WHERE user_id = ? AND ts >= ? AND undone = 0 "
+                         "AND COALESCE(tag, '') NOT LIKE 'undo%'", (uid, since)).fetchall()
+    vouchers = conn.execute("SELECT id, delta, tag FROM voucher_log WHERE user_id = ? AND ts >= ? AND undone = 0 "
+                            "AND COALESCE(tag, '') NOT LIKE 'undo%'", (uid, since)).fetchall()
+    packs = conn.execute("SELECT id, pack_type, delta FROM pack_log WHERE user_id = ? AND ts >= ? AND undone = 0 "
+                         "ORDER BY id DESC", (uid, since)).fetchall()
+    trade = lambda r: (r["tag"] or "").startswith("trade:")
+    return {"cards": [r for r in cards if not trade(r)], "coins": [r for r in coins if not trade(r)],
+            "vouchers": [r for r in vouchers if not trade(r)], "packs": list(packs),
+            "trades": sorted({r["tag"] for r in cards if trade(r)} | {r["tag"] for r in coins if trade(r)})}
+
+
+def undo_preview(user_id, since: float) -> dict:
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_undo_tables(conn)
+        rows = _undo_rows(conn, uid, since)
+        gained, lost = {}, {}
+        for r in rows["cards"]:
+            d = gained if int(r["delta"]) > 0 else lost
+            d[r["player_key"]] = d.get(r["player_key"], 0) + abs(int(r["delta"]))
+        packs = {}
+        for r in rows["packs"]:
+            packs[r["pack_type"]] = packs.get(r["pack_type"], 0) + int(r["delta"])
+        partners = []
+        for t in rows["trades"]:
+            other = conn.execute("SELECT DISTINCT user_id FROM card_log WHERE tag = ? AND user_id != ?", (t, uid)).fetchall()
+            partners += [int(o["user_id"]) for o in other]
+        purse = int(conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()["purse"])
+        return {"gained": gained, "lost": lost,
+                "coins": sum(int(r["delta"]) for r in rows["coins"]),
+                "vouchers": sum(int(r["delta"]) for r in rows["vouchers"]),
+                "packs": {k: v for k, v in packs.items() if v}, "trades": len(rows["trades"]),
+                "trade_partners": sorted(set(partners)), "purse": purse}
+
+
+def undo_apply(user_id, since: float, by: int) -> dict:
+    """Owner undo: reverse every card / coin / voucher / pack change of this player since `since`
+    (newest first), in ONE transaction. Trades are not touched. Coins may go below zero (a debt that
+    blocks spending) so coins already spent can't be kept. Returns what happened."""
+    uid, now = _uid(user_id), time.time()
+    tag = f"undo:{by}:{secrets.token_hex(4)}"
+    token = _TAG.set(tag)
+    try:
+        with _tx() as conn:
+            _ensure_undo_tables(conn)
+            rows = _undo_rows(conn, uid, since)
+            removed, returned, missing = [], [], []
+            for r in rows["cards"]:                       # newest first
+                key, d = r["player_key"], int(r["delta"])
+                if d > 0:                                 # the card came in: take it out again
+                    for _ in range(d):
+                        if _own_qty(conn, uid, key) > 0:
+                            _remove_copies(conn, uid, key, 1)
+                            removed.append(key)
+                        elif _pending_take(conn, uid, key):
+                            removed.append(key)
+                        else:
+                            missing.append(key)
+                else:                                     # the card went out: give it back (bench / waiting)
+                    for _ in range(-d):
+                        if r["place"] == "pending":
+                            _pending_add(conn, uid, key, "undo")
+                        else:
+                            _add_copy(conn, uid, key, fill_xi=False)
+                        returned.append(key)
+            coins = sum(int(r["delta"]) for r in rows["coins"])
+            if coins:
+                row = conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()
+                new = int(row["purse"]) - coins
+                conn.execute("UPDATE users SET purse = ? WHERE user_id = ?", (new, uid))
+                conn.execute("INSERT INTO ledger (user_id, delta, reason, balance_after, ts, tag) VALUES (?, ?, ?, ?, ?, ?)",
+                             (uid, -coins, "Owner undo", new, now, tag))
+            vouchers = sum(int(r["delta"]) for r in rows["vouchers"])
+            if vouchers:
+                _voucher_change(conn, uid, -vouchers, "Owner undo")
+            for r in rows["packs"]:                       # pack_log rows written by this undo are skipped below
+                d = int(r["delta"])
+                if d > 0:
+                    conn.execute("UPDATE packs SET qty = MAX(0, qty - ?) WHERE user_id = ? AND pack_type = ?",
+                                 (d, uid, r["pack_type"]))
+                elif d < 0:
+                    conn.execute("INSERT INTO packs (user_id, pack_type, qty) VALUES (?, ?, ?) "
+                                 "ON CONFLICT(user_id, pack_type) DO UPDATE SET qty = qty + excluded.qty",
+                                 (uid, r["pack_type"], -d))
+            conn.execute("DELETE FROM packs WHERE user_id = ? AND qty <= 0", (uid,))
+            ids = lambda key: [(int(r["id"]),) for r in rows[key]]
+            conn.executemany("UPDATE card_log SET undone = 1 WHERE id = ?", ids("cards"))
+            conn.executemany("UPDATE ledger SET undone = 1 WHERE id = ?", ids("coins"))
+            conn.executemany("UPDATE voucher_log SET undone = 1 WHERE id = ?", ids("vouchers"))
+            conn.executemany("UPDATE pack_log SET undone = 1 WHERE id = ?", ids("packs"))
+            # this undo's own pack changes must never be undone by a later undo
+            conn.execute("UPDATE pack_log SET undone = 1 WHERE user_id = ? AND ts >= ?", (uid, now - 1))
+            purse = int(conn.execute("SELECT purse FROM users WHERE user_id = ?", (uid,)).fetchone()["purse"])
+            return {"removed": removed, "returned": returned, "missing": missing, "coins": -coins,
+                    "vouchers": -vouchers, "trades": len(rows["trades"]), "purse": purse}
+    finally:
+        _TAG.reset(token)
