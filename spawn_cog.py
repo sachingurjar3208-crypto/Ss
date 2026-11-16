@@ -59,7 +59,7 @@ EVENT_HEADER = "✨ **NEW EDITION!** A **{event}** cricketer appeared! Catch me 
 SPAWN_EXACT: list[tuple[int, int, float]] = [
     # 90-99: extremely rare (together ~0.4%, about 1 in 250 spawns)
     (99, 99, 0.0001), (98, 98, 0.0002), (97, 97, 0.0005), (96, 96, 0.001), (95, 95, 0.005), (94, 94, 0.009),
-    (93, 93, 0.05), (92, 92, 0.09), (91, 91, 0.10), (90, 90, 0.08),
+    (93, 93, 0.05), (92, 92, 0.09), (91, 91, 0.10), (90, 90, 0.12),
     # 83-89: halved (was 2.0 / 2.5 / 3.0 / 3.5 / 4.0 / 4.5 / 5.0, together 24.5%)
     (89, 89, 1.0), (88, 88, 1.25),
     (87, 87, 1.5), (86, 86, 1.75), (85, 85, 2.0), (84, 84, 2.25), (83, 83, 2.5), (82, 82, 5.50),
@@ -396,6 +396,7 @@ class SpawnCog(commands.Cog):
         self.busy.add(g.id)
         try:
             data, tried = None, set()
+            chosen = card is not None                 # admin picked this card: never swap it for a random one
             for _ in range(4):                      # a card that can't be drawn -> try another
                 if card is None:
                     card = await asyncio.to_thread(chooser or pick_card, tried)
@@ -404,6 +405,8 @@ class SpawnCog(commands.Cog):
                 data = await spawn_blur.blurred_card(card)
                 if data:
                     break
+                if chosen:
+                    return f"Could not draw {card['playername']}'s spawn image (check its foreground)."
                 tried.add(card["playername_key"])
                 card = None
             if not data:

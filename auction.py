@@ -171,7 +171,8 @@ def recover() -> int:
         for r in rows:
             conn.execute("UPDATE auction_bids SET status = 'refunded' WHERE id = ?", (r["id"],))
             economy._apply_coins(conn, int(r["user_id"]), int(r["amount"]), f"auction refund (bot restart, lot {r['lot']})")
-        conn.execute("UPDATE auction_runs SET status = 'aborted' WHERE status = 'running'")
+        # free the day again, so today's auction can be started again after the restart
+        conn.execute("UPDATE auction_runs SET status = 'aborted', day = NULL WHERE status = 'running'")
         return len(rows)
 
 

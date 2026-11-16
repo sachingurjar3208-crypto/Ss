@@ -30,6 +30,9 @@ def is_staff(user) -> bool:
     """Owner, or a member holding the admin role."""
     if getattr(user, "id", None) == OWNER_ID:
         return True
+    guild = getattr(user, "guild", None)
+    if guild is None or guild.id != ADMIN_GUILD_ID:     # admin role counts in the main server only
+        return False
     roles = getattr(user, "roles", None) or []
     return any(r.id in ADMIN_ROLE_IDS for r in roles)
 

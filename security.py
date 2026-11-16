@@ -44,6 +44,11 @@ FULL_ADMIN_ROLE_IDS = {1556644558929010769}
 
 
 def has_full_admin_role(user) -> bool:
+    """Full-admin role in the MAIN server only."""
+    from bot_guard import ADMIN_GUILD_ID
+    guild = getattr(user, "guild", None)
+    if guild is None or guild.id != ADMIN_GUILD_ID:
+        return False
     roles = getattr(user, "roles", None) or []
     return any(r.id in FULL_ADMIN_ROLE_IDS for r in roles)
 

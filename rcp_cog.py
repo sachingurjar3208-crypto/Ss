@@ -16,6 +16,7 @@ Premium given by staff by hand has no end date here and is never removed by the 
 from __future__ import annotations
 
 import asyncio
+import time
 
 import discord
 from discord import ui
@@ -151,6 +152,9 @@ class RCPCog(commands.Cog, name="RCP"):
             if it["give"].startswith("role:"):
                 await ctx.send("❌ Buy Premium and Star Pass in the main Rush Cricket server (the role lives there).")
                 return
+        if it["give"] == "role:starpass" and not await asyncio.to_thread(starpass.get_active_season):
+            await ctx.send("❌ No Star Pass season is running right now. Your RCP is safe, try again when a season starts.")
+            return
         if it["give"] == "role:starpass" and self._has_starpass(ctx.author):
             await ctx.send("✅ You already have this season's Star Pass.")
             return
@@ -195,6 +199,7 @@ class RCPCog(commands.Cog, name="RCP"):
                 rid = PREMIUM_ROLE_ID if give == "role:premium" else self._starpass_role_id()
                 role = guild.get_role(rid) if guild else None
                 gm = guild.get_member(member.id) if guild else None
+                had_role = bool(gm and role and role in gm.roles)
                 try:
                     if role is None or gm is None:
                         raise RuntimeError("role or member not found")
@@ -205,7 +210,10 @@ class RCPCog(commands.Cog, name="RCP"):
                     await asyncio.to_thread(economy.rcp_refund, member.id, it["cost"], it["name"])
                     return "❌ Couldn't give the role, so your RCP was refunded. Please open a ticket."
                 if give == "role:premium":
-                    end = await asyncio.to_thread(economy.rcp_premium_extend, member.id, 30)
+                    # role already there and no RCP time running = it came from staff: never remove it later
+                    rcp_running = await asyncio.to_thread(economy.rcp_premium_end, member.id) > time.time()
+                    end = await asyncio.to_thread(economy.rcp_premium_extend, member.id, 30,
+                                                  had_role and not rcp_running)
                     bonus = await asyncio.to_thread(economy.rcp_premium_bonus, member.id)
                     extra = f"\n{emojis.GIFT} Monthly bonus: **+{bonus:,}** {emojis.RCP}" if bonus else ""
                     bal = await asyncio.to_thread(economy.get_rcp, member.id)

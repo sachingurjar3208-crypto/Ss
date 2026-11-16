@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 
 import discord
 from PIL import Image
@@ -350,6 +350,16 @@ class GTCCog(commands.Cog, name="Guess the Cricketer"):
                 return
         now = datetime.now(gtc.IST)
         slot = min(gtc.GAME_HOURS, key=lambda hm: abs((hm[0] * 60 + hm[1]) - (now.hour * 60 + now.minute)))
+        if slot == gtc.GAME_HOURS[0]:
+            # yesterday's 11 PM game didn't run (bot was down): give its day bonus + leaderboard now
+            yday = (now - timedelta(days=1)).date().isoformat()
+            try:
+                top = await asyncio.to_thread(gtc.close_day, yday)
+                if top:
+                    await asyncio.to_thread(sigbox.rcp_change, top["user_id"], gtc.DAILY_TOP_RCP, "Guess the Cricketer day top")
+                    await self._post_board(ch, yday, top)
+            except Exception as e:
+                print(f"[gtc] late day close failed: {type(e).__name__}: {e}")
         msg = await self.run_game(ch, f"{slot[0]:02d}:{slot[1]:02d}", last_of_day=(slot == LAST_SLOT))
         if msg not in ("Done.", "Stopped."):
             print(f"[gtc] {slot}: {msg}")

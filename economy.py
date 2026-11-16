@@ -1908,6 +1908,11 @@ def _ensure_rcp_tables(conn) -> None:
                  "delta INTEGER NOT NULL, reason TEXT, balance_after INTEGER NOT NULL, ts REAL NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS rcp_premium (user_id INTEGER PRIMARY KEY, last_grant REAL NOT NULL DEFAULT 0, "
                  "expires REAL NOT NULL DEFAULT 0)")
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(rcp_premium)")}
+    if "staff_role" not in cols:
+        # 1 = the member already had a staff-given Premium role when they bought Premium with RCP:
+        # when the RCP time ends the bot must NOT remove that role.
+        conn.execute("ALTER TABLE rcp_premium ADD COLUMN staff_role INTEGER NOT NULL DEFAULT 0")
     if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='rcp'").fetchone():
         for r in conn.execute("SELECT user_id, amount FROM rcp WHERE amount > 0").fetchall():
             conn.execute("INSERT INTO rcp_wallet (user_id, amount) VALUES (?, ?) "
@@ -2007,29 +2012,36 @@ def rcp_premium_bonus(user_id) -> int:
         return RCP_PREMIUM_MONTHLY
 
 
-def rcp_premium_extend(user_id, days: int = 30) -> float:
-    """Premium bought with RCP: push its end date (stacks on top of a running one). Returns the new end time."""
+def rcp_premium_extend(user_id, days: int = 30, had_staff_role: bool = False) -> float:
+    """Premium bought with RCP: push its end date (stacks on top of a running one). Returns the new end time.
+    had_staff_role = the member already had the Premium role from staff (and no RCP time running):
+    remembered, so the bot never removes that role when the RCP time ends."""
     uid, now = _uid(user_id), time.time()
     with _tx() as conn:
         _ensure_rcp_tables(conn)
-        row = conn.execute("SELECT expires FROM rcp_premium WHERE user_id = ?", (uid,)).fetchone()
-        start = max(now, float(row["expires"])) if row else now
+        row = conn.execute("SELECT expires, staff_role FROM rcp_premium WHERE user_id = ?", (uid,)).fetchone()
+        running = bool(row) and float(row["expires"]) > now
+        start = float(row["expires"]) if running else now
         end = start + days * DAY
-        conn.execute("INSERT INTO rcp_premium (user_id, expires) VALUES (?, ?) "
-                     "ON CONFLICT(user_id) DO UPDATE SET expires = excluded.expires", (uid, end))
+        staff = int(row["staff_role"]) if (row and running) else int(bool(had_staff_role))
+        conn.execute("INSERT INTO rcp_premium (user_id, expires, staff_role) VALUES (?, ?, ?) "
+                     "ON CONFLICT(user_id) DO UPDATE SET expires = excluded.expires, staff_role = excluded.staff_role",
+                     (uid, end, staff))
         return end
 
 
 def rcp_premium_expired() -> list[int]:
-    """Users whose RCP-bought Premium has ended (their role should be removed). Clears their end date."""
+    """Users whose RCP-bought Premium has ended AND whose role came only from RCP (role should be removed).
+    A member who also had a staff-given role keeps it. Clears the end date of everyone whose time ended."""
     now = time.time()
     with _tx() as conn:
         _ensure_rcp_tables(conn)
-        rows = conn.execute("SELECT user_id FROM rcp_premium WHERE expires > 0 AND expires <= ?", (now,)).fetchall()
-        ids = [int(r["user_id"]) for r in rows]
-        if ids:
-            conn.executemany("UPDATE rcp_premium SET expires = 0 WHERE user_id = ?", [(i,) for i in ids])
-        return ids
+        rows = conn.execute("SELECT user_id, staff_role FROM rcp_premium WHERE expires > 0 AND expires <= ?",
+                            (now,)).fetchall()
+        ended = [int(r["user_id"]) for r in rows]
+        if ended:
+            conn.executemany("UPDATE rcp_premium SET expires = 0, staff_role = 0 WHERE user_id = ?", [(i,) for i in ended])
+        return [int(r["user_id"]) for r in rows if not int(r["staff_role"])]
 
 
 def rcp_premium_end(user_id) -> float:

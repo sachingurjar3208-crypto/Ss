@@ -259,7 +259,6 @@ class AuctionCog(commands.Cog, name="Auction"):
         run_id = await asyncio.to_thread(auction.start_run, day)
         if run_id is None:
             return "Today's auction already ran."
-        await asyncio.to_thread(set_forced_keys, [])      # added players are used once
         self.running, self.cancel = True, False
         self.joined, self.left = set(), set()
         self.view = JoinView(self)
@@ -305,6 +304,8 @@ class AuctionCog(commands.Cog, name="Auction"):
         finally:
             economy.AUCTION_LOCK = False
             await asyncio.to_thread(auction.end_run, run_id, "cancelled" if self.cancel else "done")
+            if not self.cancel:
+                await asyncio.to_thread(set_forced_keys, [])    # added players are used once (kept if cancelled)
             self.running, self.lot = False, None
 
     async def _sleep(self, seconds: float) -> bool:

@@ -106,6 +106,12 @@ def answer_names(card) -> set[str]:
     shown = norm(col("displayname"))
     if len(shown.split()) >= 2:
         names.add(shown)
+    # a name that starts with a single initial ("a raghuvanshi", "s sreesanth") also counts without it,
+    # because the initial is not really part of the name people know
+    for n in list(names):
+        w = n.split()
+        if len(w) >= 2 and len(w[0]) == 1:
+            names.add(" ".join(w[1:]))
     return {n for n in names if len(n) >= 3}
 
 

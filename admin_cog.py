@@ -36,11 +36,12 @@ import squad_logic as sl
 from bot_guard import ADMIN_GUILD_ID, OWNER_ID
 from security import esc
 
-ADMIN_ROLE_IDS = {1556267277249155156, *security.FULL_ADMIN_ROLE_IDS}
+ADMIN_ROLE_IDS = set(security.FULL_ADMIN_ROLE_IDS)    # main-server admin role only
 
 
 def _has_admin_role(ctx: commands.Context) -> bool:
-    if ctx.guild is None or not isinstance(ctx.author, discord.Member):
+    """Admin role in the MAIN server only: a role with the same power in another server never counts."""
+    if ctx.guild is None or ctx.guild.id != ADMIN_GUILD_ID or not isinstance(ctx.author, discord.Member):
         return False
     return any(r.id in ADMIN_ROLE_IDS for r in ctx.author.roles)
 
