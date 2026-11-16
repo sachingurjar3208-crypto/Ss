@@ -113,6 +113,8 @@ def _gradient_bg(theme: str) -> Image.Image:
     ImageDraw.Draw(glow).ellipse([W - 620, -260, W + 160, 420], fill=tuple(int(c * 0.55) for c in th["glow"]))
     glow = glow.filter(ImageFilter.GaussianBlur(120))
     img = ImageChops.add(img, glow)
+    if len(_bg_cache) >= 12:
+        _bg_cache.pop(next(iter(_bg_cache)))
     _bg_cache[key] = img
     return img
 

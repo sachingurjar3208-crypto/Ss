@@ -75,7 +75,7 @@ def _accent(card_row):
     return COUNTRY_ACCENT.get(str(ci._col(card_row, "country", "") or "").strip().lower(), DEFAULT_ACCENT)
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=4)   # each is a 2x card canvas (~25 MB)
 def _background(accent) -> Image.Image:
     a1, a2 = accent
     bg = Image.new("RGB", (CW, CH))

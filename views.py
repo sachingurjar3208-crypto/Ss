@@ -1431,7 +1431,8 @@ async def _process_delivery(
         # NotFound/HTTPException (expired token), InteractionResponded, or RuntimeError
         # (autoplay's stand-in interaction). The ack is cosmetic - carry on; the result
         # is posted as a normal channel message if edit_original_response can't be used.
-        print(f"[match recovery] shot ack skipped ({type(_ack_err).__name__}: {_ack_err})")
+        if not str(_ack_err).startswith("autoplay"):
+            print(f"[match recovery] shot ack skipped ({type(_ack_err).__name__}: {_ack_err})")
 
     bname = _pname(bowler)
     sname = _pname(striker)
@@ -2512,7 +2513,8 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
                 # view only — keeps the existing message text/embed as it is
                 await interaction.response.edit_message(view=self)
             except Exception as e:
-                print(f"[fast bowl] stage1 edit failed ({type(e).__name__}: {e})")
+                if not str(e).startswith("autoplay"):   # bot clicking for a player: nothing on screen to edit
+                    print(f"[fast bowl] stage1 edit failed ({type(e).__name__}: {e})")
         return callback
 
     def _make_stage2_callback(self, delivery_button: str):

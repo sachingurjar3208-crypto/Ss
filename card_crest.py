@@ -47,7 +47,7 @@ def _masks():
     return outer, inner, line
 
 
-@lru_cache(maxsize=16)
+@lru_cache(maxsize=4)   # each is a 2x card canvas (~25 MB)
 def _interior(accent) -> Image.Image:
     a1, a2 = accent
     base = tuple(max(0, int(c * 0.62)) for c in a1)

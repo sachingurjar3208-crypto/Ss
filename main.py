@@ -143,6 +143,24 @@ def init_databases():
         print(f"✗ Career cleanup failed: {type(e).__name__}: {e}")
 
 
+async def _memory_trim_loop():
+    """Every 10 min: free unused Python objects and hand the freed RAM back to Linux.
+    Without this the process keeps old image memory forever and slowly spills into swap."""
+    import ctypes, gc
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+    except OSError:
+        libc = None
+    while True:
+        await asyncio.sleep(600)
+        try:
+            gc.collect()
+            if libc is not None:
+                libc.malloc_trim(0)
+        except Exception as e:
+            print(f"[memory] trim skipped ({type(e).__name__}: {e})")
+
+
 async def main():
     """Run the bot."""
     token = os.getenv("DISCORD_TOKEN")
@@ -152,6 +170,7 @@ async def main():
     init_databases()
     async with bot:
         await load_cogs()
+        asyncio.get_running_loop().create_task(_memory_trim_loop())
         await bot.start(token)
 
 

@@ -84,7 +84,7 @@ def _marble_pil(seed: int, festive: bool) -> Image.Image:
     return img.resize((CW, CH), Image.BICUBIC)
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=2)   # each is a 2x card canvas (~25 MB); seed differs per card
 def _marble(seed: int, festive: bool = False) -> Image.Image:
     """Black marble with gold smoke and thin gold veins (made at half size, then scaled up)."""
     if np is None:
