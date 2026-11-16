@@ -633,7 +633,7 @@ class DraftCog(commands.Cog, name="Draft"):
         if new is None:
             await ctx.send("❌ That user hasn't debuted.")
             return
-        await ctx.send(f"{emojis.TICK} Gave **{amount:,}** {emojis.VOUCHER} to {esc(member.display_name)}. They now have **{new:,}**.")
+        await ctx.send(f"✅ Gave **{amount:,}** {emojis.VOUCHER} to {esc(member.display_name)}. They now have **{new:,}**.")
 
     @rcvoucher.command(name="remove")
     @security.owner_or_admin_role()
@@ -648,7 +648,7 @@ class DraftCog(commands.Cog, name="Draft"):
             await ctx.send("❌ That user hasn't debuted.")
             return
         removed, new = out
-        await ctx.send(f"{emojis.TICK} Removed **{removed:,}** {emojis.VOUCHER} from {esc(member.display_name)}. They now have **{new:,}**.")
+        await ctx.send(f"✅ Removed **{removed:,}** {emojis.VOUCHER} from {esc(member.display_name)}. They now have **{new:,}**.")
 
     # -- owner / admin: pool cards + chances (SLASH commands, main server only) --
     pool = app_commands.Group(
@@ -663,7 +663,7 @@ class DraftCog(commands.Cog, name="Draft"):
     async def _staff_only(interaction: discord.Interaction) -> bool:
         if is_staff(interaction.user):
             return True
-        await interaction.response.send_message(f"{emojis.LOCK} Only the bot owner or an admin can use this.", ephemeral=True)
+        await interaction.response.send_message("🔒 Only the bot owner or an admin can use this.", ephemeral=True)
         return False
 
     @pool.command(name="add", description="Put a card in Pool A or B with its chance (run again to change it)")
@@ -696,7 +696,7 @@ class DraftCog(commands.Cog, name="Draft"):
         share = shares_for(pools, letter, ev).get(card["playername_key"], 0)
         where = f"{esc(ev['name'])} · " if ev else ""
         await interaction.followup.send(
-            f"{emojis.TICK} **{esc(card['playername'])}** ({card['ovr']} OVR) is in **{where}Pool {letter}** with chance **{chance:g}** "
+            f"✅ **{esc(card['playername'])}** ({card['ovr']} OVR) is in **{where}Pool {letter}** with chance **{chance:g}** "
             f"→ **{share:g}%** of Pool {letter} (Pool {letter} now has {len(pools[letter])} card(s)).",
             ephemeral=True,
         )
@@ -722,7 +722,7 @@ class DraftCog(commands.Cog, name="Draft"):
             return
         await asyncio.to_thread(get_pools, True, ev)
         where = f"{esc(ev['name'])} · " if ev else ""
-        await interaction.followup.send(f"{emojis.TICK} Removed **{esc(card['playername'])}** from {where}Pool {was}.", ephemeral=True)
+        await interaction.followup.send(f"✅ Removed **{esc(card['playername'])}** from {where}Pool {was}.", ephemeral=True)
 
     @pool.command(name="list", description="Show the cards of Pool A or B with their real chance %")
     @app_commands.describe(pool="Pool A or Pool B", event="Event draft (e.g. halloween). Empty = the normal draft")
@@ -903,7 +903,7 @@ class DraftCog(commands.Cog, name="Draft"):
             return
         where = f" of **{esc(ev['name'])}**" if ev else ""
         await self._anim_done(
-            interaction, f"{emojis.TICK} Animation **{res['pathname']}** saved for **Pool {res['pool']}**{where}.", res)
+            interaction, f"✅ Animation **{res['pathname']}** saved for **Pool {res['pool']}**{where}.", res)
 
     @pool.command(name="animation_remove", description="Delete a Pool animation")
     @app_commands.describe(pathname="Name of the animation to delete")
@@ -936,7 +936,7 @@ class DraftCog(commands.Cog, name="Draft"):
             return
         await self._anim_done(
             interaction,
-            f"{emojis.TICK} **{res['pathname']}** replaced. The old animation is deleted; Pool {res['pool']} now uses the new one.",
+            f"✅ **{res['pathname']}** replaced. The old animation is deleted; Pool {res['pool']} now uses the new one.",
             res,
         )
 

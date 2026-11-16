@@ -13,7 +13,6 @@ Owner / admins (slash, only in your server, hidden from everyone else):
         active False = the code is fully off, nobody can redeem it
 """
 from __future__ import annotations
-import emojis
 
 import asyncio
 
@@ -30,7 +29,7 @@ REASON_TEXT = {
     "off": "❌ This code is not active.",
     "expired": "⌛ This code has expired.",
     "used_up": "❌ This code has been fully redeemed. Better luck next time!",
-    "already": f"{emojis.TICK} You already redeemed this code.",
+    "already": "✅ You already redeemed this code.",
     "not_debuted": "You haven't debuted yet. Type `rcdebut` first.",
     "banned": "❌ You can't redeem codes.",
 }
@@ -93,7 +92,7 @@ class RedeemCog(commands.Cog):
                 return
             await ctx.send(REASON_TEXT.get(res["reason"], "❌ Couldn't redeem that code."))
             return
-        embed = discord.Embed(title=f"{emojis.GIFT} Code {res['code']} redeemed!",
+        embed = discord.Embed(title=f"🎁 Code {res['code']} redeemed!",
                               description="\n".join(res["lines"]) or "Nothing to give.",
                               color=discord.Color.from_rgb(240, 198, 104))
         embed.set_footer(text=f"Redeemed by {ctx.author.display_name}")
@@ -141,7 +140,7 @@ class RedeemCog(commands.Cog):
         c = redeem.norm_code(code)
         lim = f"{quantity} players" if quantity else "unlimited players"
         await interaction.response.send_message(
-            f"{emojis.TICK} Code **{c}** is live.\nRewards: " + " + ".join(redeem.describe(r) for r in rewards)
+            f"✅ Code **{c}** is live.\nRewards: " + " + ".join(redeem.describe(r) for r in rewards)
             + f"\nLimit: {lim}\nPlayers type: `rcredeem {c}`", ephemeral=True)
 
     @group.command(name="status", description="Turn a code on (True) or fully off (False)")

@@ -7,7 +7,6 @@ server-only) which main.py installs.
 """
 
 from __future__ import annotations
-import emojis
 
 import asyncio
 import io
@@ -163,7 +162,7 @@ class SquadView(OwnedView):
             idx = start + i
             key = c["playername_key"]
             first = idx == 0 or self.cards[idx - 1]["playername_key"] != key
-            tag = f"  {emojis.TICK} XI" if key in self.in_xi and first else ("  ♻️ copy" if not first else "")
+            tag = "  ✅ XI" if key in self.in_xi and first else ("  ♻️ copy" if not first else "")
             lines.append(f"`{idx + 1}.` " + _card_line(c, tag))
         lines = lines or ["No players yet."]
         limit = f"/{self.limit}" if self.limit else ""
@@ -481,7 +480,7 @@ class SquadCog(commands.Cog, name="Squad"):
         if getattr(game, "ranked", False):
             is_mod = False   # ranked: only the two players can end it (a mod of one server can't void a result)
         if not (is_player or is_mod):
-            await ctx.send(f"{emojis.LOCK} Only the two players (or a moderator) can cancel this match.")
+            await ctx.send("🔒 Only the two players (or a moderator) can cancel this match.")
             return
         active_games.pop(ctx.channel.id, None)
         game._afk_sent = True   # stops any pending timeout from fining anyone
@@ -506,7 +505,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send("❌ There is no match running in this channel.")
             return
         if ctx.author.id not in (game.challenger.id, game.opponent.id):
-            await ctx.send(f"{emojis.LOCK} Only the two players can resume this match.")
+            await ctx.send("🔒 Only the two players can resume this match.")
             return
         if game.batting_user_id is None:
             await ctx.send("The match hasn't started yet — finish the toss first.")
@@ -573,7 +572,7 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         team_ovr = sl.average_ovr(xi)
         embed = discord.Embed(
-            title=f"{emojis.GIFT} Starter Pack opened!",
+            title="🎁 Starter Pack opened!",
             description=f"Team **{esc(user['team_name'])}** · Team OVR **{team_ovr}** · {len(xi)} players",
             color=discord.Color.gold(),
         )
@@ -992,7 +991,7 @@ class SquadCog(commands.Cog, name="Squad"):
             if err:
                 await ctx.send(f"❌ {err}")
                 return
-            await ctx.send(f"{emojis.TICK} **{esc(card['playername'])}** added to your Impact Player subs.")
+            await ctx.send(f"✅ **{esc(card['playername'])}** added to your Impact Player subs.")
             return
 
         if action in ("remove", "rem", "delete", "del"):
@@ -1010,7 +1009,7 @@ class SquadCog(commands.Cog, name="Squad"):
             if err:
                 await ctx.send(f"❌ {err}")
                 return
-            await ctx.send(f"{emojis.TICK} **{esc(card['playername'])}** removed from your Impact Player subs.")
+            await ctx.send(f"✅ **{esc(card['playername'])}** removed from your Impact Player subs.")
             return
 
         if action == "clear":
@@ -1018,7 +1017,7 @@ class SquadCog(commands.Cog, name="Squad"):
                 await ctx.send("❌ You can't change your subs during a match.")
                 return
             economy.clear_impact_subs(ctx.author.id)
-            await ctx.send(f"{emojis.TICK} Your Impact Player subs list is now empty.")
+            await ctx.send("✅ Your Impact Player subs list is now empty.")
             return
 
         await ctx.send(
@@ -1058,7 +1057,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(f"❌ {reason}")
             return
         economy.set_team_name(ctx.author.id, clean)
-        await ctx.send(f"{emojis.TICK} Team name changed to **{esc(clean)}**.")
+        await ctx.send(f"✅ Team name changed to **{esc(clean)}**.")
 
     # -- profile ---------------------------------------------------------
     @commands.command(name="rcprofile")
@@ -1124,7 +1123,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(f"❌ {err}")
             return
         economy.set_favourite(ctx.author.id, card["playername_key"])
-        await ctx.send(f"{emojis.TICK} **{esc(card['playername'])}** is now your favourite player. See it with `rcprofile`.")
+        await ctx.send(f"✅ **{esc(card['playername'])}** is now your favourite player. See it with `rcprofile`.")
 
     async def _profile_embed(self, ctx, target, user):
         """Old text profile, used only if the image can't be drawn."""
@@ -1175,7 +1174,7 @@ class SquadCog(commands.Cog, name="Squad"):
     async def rcunban(self, ctx: commands.Context, member: discord.User):
         """(Owner) Let someone use the bot again."""
         security.unban_user(member.id)
-        await ctx.send(f"{emojis.TICK} Unbanned **{esc(member.display_name)}**.")
+        await ctx.send(f"✅ Unbanned **{esc(member.display_name)}**.")
 
     @commands.command(name="rcgivecoins")
     @security.owner_or_admin_role()
@@ -1188,7 +1187,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send("❌ Amount too large.")
             return
         bal = economy.add_coins(member.id, amount, f"Owner adjustment by {ctx.author.id}")
-        await ctx.send(f"{emojis.TICK} {esc(member.display_name)} now has **{economy.fmt_coins(bal)}**.")
+        await ctx.send(f"✅ {esc(member.display_name)} now has **{economy.fmt_coins(bal)}**.")
 
     @commands.command(name="rcgivecard")
     @security.owner_or_admin_role()
@@ -1202,7 +1201,7 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send("❌ That card's event is disabled, so nobody can get it. Use `/eventenable` first.")
             return
         if economy.give_card(member.id, card["playername_key"]):
-            await ctx.send(f"{emojis.TICK} Gave **{esc(card['playername'])}** to {esc(member.display_name)}.")
+            await ctx.send(f"✅ Gave **{esc(card['playername'])}** to {esc(member.display_name)}.")
         else:
             await ctx.send("❌ They haven't debuted or their squad is full.")
 

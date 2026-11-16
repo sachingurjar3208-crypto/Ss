@@ -9,7 +9,6 @@ Want more than one for the same pack? Use `gold_2`, `gold_fire` ... (one is pick
 Adding a pathname that already exists replaces it.
 """
 from __future__ import annotations
-import emojis
 
 import asyncio
 
@@ -70,7 +69,7 @@ animation_group = app_commands.Group(
 async def _staff_only(interaction: discord.Interaction) -> bool:
     if is_staff(interaction.user):
         return True
-    await interaction.response.send_message(f"{emojis.LOCK} Only the bot owner or an admin can use this.", ephemeral=True)
+    await interaction.response.send_message("🔒 Only the bot owner or an admin can use this.", ephemeral=True)
     return False
 
 
@@ -94,7 +93,7 @@ async def animation_add(interaction: discord.Interaction, url: str, pathname: st
         await interaction.followup.send(f"❌ {e}", ephemeral=True)
         return
     verb = "replaced" if res["replaced"] else "saved"
-    text = (f"{emojis.TICK} Animation **{esc(res['pathname'])}** {verb} for the **{_label(res['pack'])}**.\n"
+    text = (f"✅ Animation **{esc(res['pathname'])}** {verb} for the **{_label(res['pack'])}**.\n"
             f"`rcopen` plays it for {pack_anim.ANIM_SECONDS:g} seconds, then shows the real card.")
     path = res["file"]
     try:
