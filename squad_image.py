@@ -198,6 +198,72 @@ def _backdrop() -> Image.Image:
     return img
 
 
+PREMIUM_BG_FILE = _HERE / "xi_premium_bg.jpg"   # gold night-stadium photo for Premium members
+
+
+@lru_cache(maxsize=1)
+def _backdrop_premium() -> Image.Image | None:
+    """Premium XI backdrop: the gold stadium photo + gold stage lights, header / footer glass,
+    gold corner brackets and a gold glow behind the logo. Cached. None if the photo is missing."""
+    if not PREMIUM_BG_FILE.is_file():
+        return None
+    img = Image.open(PREMIUM_BG_FILE).convert("RGB")
+    if img.size != (W, H):
+        from PIL import ImageOps
+        img = ImageOps.fit(img, (W, H), Image.LANCZOS, centering=(0.5, 0.35))
+    img = img.convert("RGBA")
+
+    # soft darkening in the card area so the cards stay the main thing
+    shade = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(shade).rounded_rectangle((20, TOP - 30, W - 20, H - FOOT - 10), 40, fill=(0, 0, 0, 70))
+    img.alpha_composite(shade.filter(ImageFilter.GaussianBlur(40)))
+
+    # golden "stage" light under every card row
+    fl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fl)
+    y = TOP
+    for n in ROWS:
+        half = (n * CARD_W + (n - 1) * GAP) / 2 + 40
+        fy = y + CARD_H - 2
+        fd.ellipse((W / 2 - half, fy - 28, W / 2 + half, fy + 28), fill=(255, 180, 70, 140))
+        fd.ellipse((W / 2 - half * 0.7, fy - 8, W / 2 + half * 0.7, fy + 8), fill=(255, 236, 190, 220))
+        y += CARD_H + GAP
+    img.alpha_composite(fl.filter(ImageFilter.GaussianBlur(22)))
+
+    # header / footer glass with gold borders
+    bar = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(bar)
+    bd.rounded_rectangle((30, 78, W - 30, 158), 18, fill=(8, 7, 6, 185), outline=GOLD + (140,), width=2)
+    fy = H - FOOT + 8
+    bd.rounded_rectangle((30, fy, W - 30, H - 18), 18, fill=(8, 7, 6, 200), outline=GOLD + (140,), width=2)
+    img.alpha_composite(bar)
+    d = ImageDraw.Draw(img)
+    d.line((48, 158, W - 48, 158), fill=GOLD, width=2)
+    d.line((48, fy, W - 48, fy), fill=GOLD, width=2)
+
+    # gold corner brackets
+    br = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bdc = ImageDraw.Draw(br)
+    ln, o = 70, 12
+    for (x, y0, sx, sy) in ((o, o, 1, 1), (W - o, o, -1, 1), (o, H - o, 1, -1), (W - o, H - o, -1, -1)):
+        bdc.line((x, y0, x + sx * ln, y0), fill=GOLD + (255,), width=4)
+        bdc.line((x, y0, x, y0 + sy * ln), fill=GOLD + (255,), width=4)
+    img.alpha_composite(br.filter(ImageFilter.GaussianBlur(5)))
+    img.alpha_composite(br)
+
+    logo = _logo()
+    if logo is not None:
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(glow).ellipse((W / 2 - 140, -20, W / 2 + 140, 260), fill=(255, 200, 90, 110))
+        img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(32)))
+        img.alpha_composite(logo, (int(W / 2 - logo.width / 2), 6))
+        ring = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(ring).ellipse((W / 2 - logo.width / 2 - 3, 3, W / 2 + logo.width / 2 + 3, 6 + logo.height + 3),
+                                     outline=GOLD + (255,), width=4)
+        img.alpha_composite(ring)
+    return img
+
+
 def _role(card) -> str:
     try:
         import card_db
@@ -219,13 +285,14 @@ def _badge(d, x, y, text, fill, ink):
     d.text((x, y + 1), text, font=_font(26 if len(text) == 1 else 22), fill=ink, anchor="mm")
 
 
-def build_team_image(cards: list, team_name: str, team_ovr: int, captain_key: str | None = None) -> io.BytesIO | None:
+def build_team_image(cards: list, team_name: str, team_ovr: int, captain_key: str | None = None,
+                     premium: bool = False) -> io.BytesIO | None:
     """JPEG collage of up to 11 cards (in batting order). None if no card image could be loaded."""
     imgs = [_load_card(c["image_path"]) for c in cards]
     if not any(imgs):
         return None
 
-    canvas = _backdrop().copy()
+    canvas = ((_backdrop_premium() if premium else None) or _backdrop()).copy()
     d = ImageDraw.Draw(canvas)
 
     # header text

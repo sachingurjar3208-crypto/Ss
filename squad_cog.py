@@ -42,6 +42,17 @@ def _is_premium(member) -> bool:
     return any(r.id == PREMIUM_ROLE_ID for r in getattr(member, "roles", []))
 
 
+def _premium_xi_bg(member) -> bool:
+    """Premium members get the gold XI background (on by default; `rcxibg off` turns it off).
+    Losing the Premium role switches it back to the normal one automatically."""
+    if not _is_premium(member):
+        return False
+    try:
+        return economy.get_pref(member.id, "xi_bg", "premium") != "normal"
+    except Exception:
+        return True
+
+
 def premium_cooldown(seconds: int):
     """Per-command cooldown for normal users. Premium members have NO cooldown.
     Each use of this decorator has its own timer (not shared with other commands)."""
@@ -579,7 +590,8 @@ class SquadCog(commands.Cog, name="Squad"):
         embed.set_footer(text="See your team: rcxi • Get coins: rcdaily • Buy packs: rcpack")
         buf = None
         try:
-            buf = await asyncio.to_thread(build_team_image, xi, user["team_name"], team_ovr)
+            buf = await asyncio.to_thread(build_team_image, xi, user["team_name"], team_ovr,
+                                        None, _premium_xi_bg(ctx.author))
         except Exception as e:
             print(f"[rcstarterpack] collage failed: {e}")
         if buf is not None:
@@ -837,13 +849,29 @@ class SquadCog(commands.Cog, name="Squad"):
         buf = None
         try:
             buf = await asyncio.to_thread(build_team_image, cards, user["team_name"], team_ovr,
-                                        user["captain_key"])
+                                        user["captain_key"], _premium_xi_bg(ctx.author))
         except Exception as e:
             print(f"[rcovr] collage failed: {e}")
         if buf is not None:      # only the XI image, no text above or below
             await ctx.send(file=discord.File(buf, filename=TEAM_IMG_NAME))
         else:   # image failed -> show the normal text XI instead
             await ctx.send(embed=_xi_embed(ctx.author, user))
+
+    @commands.command(name="rcxibg")
+    @commands.cooldown(1, 5, commands.BucketType.user)
+    async def rcxibg(self, ctx: commands.Context, mode: str | None = None):
+        """Premium: turn the gold XI background on or off (`rcxibg on` / `rcxibg off`)."""
+        if not _is_premium(ctx.author):
+            await ctx.send("💎 The gold XI background is a **Premium** perk. Get Premium in `rcstore`.")
+            return
+        m = (mode or "").lower()
+        if m not in ("on", "off"):
+            now = "ON" if _premium_xi_bg(ctx.author) else "OFF"
+            await ctx.send(f"✨ Premium XI background is **{now}**. Use `rcxibg on` or `rcxibg off`.")
+            return
+        await asyncio.to_thread(economy.set_pref, ctx.author.id, "xi_bg", "premium" if m == "on" else "normal")
+        await ctx.send("✨ Gold XI background **ON**. Check it with `rcovr`." if m == "on"
+                       else "Gold XI background **OFF**. Your XI uses the normal background now.")
 
     @commands.command(name="rcautoxi")
     @commands.cooldown(1, 10, commands.BucketType.user)

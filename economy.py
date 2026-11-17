@@ -998,6 +998,29 @@ def _claim_pool(by_ovr: dict[int, list[str]], ovr: int | None) -> list[str]:
     return [k for o in range(lo, hi + 1) for k in by_ovr.get(o, [])]
 
 
+# ── small per-user preferences (e.g. Premium XI background on/off) ─────────
+def _ensure_prefs(conn: sqlite3.Connection) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS user_prefs (user_id TEXT NOT NULL, key TEXT NOT NULL, "
+                 "value TEXT, PRIMARY KEY (user_id, key))")
+
+
+def get_pref(user_id, key: str, default: str | None = None) -> str | None:
+    with _tx() as conn:
+        _ensure_prefs(conn)
+        row = conn.execute("SELECT value FROM user_prefs WHERE user_id = ? AND key = ?", (_uid(user_id), key)).fetchone()
+    return row["value"] if row else default
+
+
+def set_pref(user_id, key: str, value: str | None) -> None:
+    with _tx() as conn:
+        _ensure_prefs(conn)
+        if value is None:
+            conn.execute("DELETE FROM user_prefs WHERE user_id = ? AND key = ?", (_uid(user_id), key))
+        else:
+            conn.execute("INSERT INTO user_prefs (user_id, key, value) VALUES (?, ?, ?) "
+                         "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value", (_uid(user_id), key, value))
+
+
 def claim_card(user_id, cooldown: int, by_ovr: dict[int, list[str]],
                dupe_values: dict[str, int] | None = None) -> dict:
     """rcclaim: one random card, once per `cooldown` seconds, all in one transaction.
