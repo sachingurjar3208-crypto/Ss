@@ -119,6 +119,30 @@ def pick_card(exclude: set[str] | None = None):
     weighted = [(c, w) for c, w in weighted if w > 0]
     if not weighted:
         return None
+
+    # Event boost: first roll whether this spawn is reserved for a boosted event. The card inside
+    # the event is then picked with the same OVR odds, so its 97 stays far rarer than its 86.
+    roll = _rng.random() * 100
+    for key, ev in events.items():
+        share = card_db.event_spawn_boost(ev)
+        if share <= 0:
+            continue
+        if roll < share:
+            ev_cards = [(c, 1.0) for c, _ in weighted
+                        if str(card_db._rget(c, "event_key", "") or "").lower() == key]
+            pick = _pick_by_ovr(ev_cards)
+            if pick is not None:
+                return pick
+            break
+        roll -= share
+
+    return _pick_by_ovr(weighted)
+
+
+def _pick_by_ovr(weighted: list):
+    """[(card, weight)] -> one card: first an OVR band by SPAWN_ODDS, then a card inside it."""
+    if not weighted:
+        return None
     bands, weights = [], []
     for lo, hi, w in SPAWN_ODDS:
         cards = [(c, x) for c, x in weighted if lo <= int(c["ovr"]) <= hi]
@@ -523,12 +547,14 @@ class SpawnCog(commands.Cog):
         rate="Chance next to a normal card of the same OVR, in % (e.g. 33). Default 33",
         hours="How long it runs (0 = until you switch it off). Default 48",
         unob="Also spawn this event's UNOB cards while it runs (only this event). Default off",
+        boost="Extra: this % of ALL spawns is an event card, still picked by OVR odds (e.g. 5). Default 0",
     )
     @app_commands.autocomplete(event=_event_autocomplete)
     @app_commands.check(_owner_check)
     async def a_eventspawn(self, interaction: discord.Interaction, event: str, enabled: bool,
                            rate: app_commands.Range[int, 1, 100] = 33,
-                           hours: app_commands.Range[int, 0, 720] = 48, unob: bool = False):
+                           hours: app_commands.Range[int, 0, 720] = 48, unob: bool = False,
+                           boost: app_commands.Range[float, 0.0, 30.0] = 0.0):
         ev = card_db.get_event(event)
         if ev is None:
             await interaction.response.send_message(f"No event named `{event}`.", ephemeral=True)
@@ -539,15 +565,19 @@ class SpawnCog(commands.Cog):
                 f"**{ev['eventname']}** cards no longer spawn.", ephemeral=True)
             return
         until = time.time() + hours * 3600 if hours else None
-        await asyncio.to_thread(card_db.set_event_spawn, ev["eventname"], rate, until, unob)
+        await asyncio.to_thread(card_db.set_event_spawn, ev["eventname"], rate, until, unob, boost)
         n = sum(1 for c in card_db.list_spawnable_cards()
                 if str(card_db._rget(c, "event_key", "") or "").lower() == ev["event_key"])
         end = f"until <t:{int(until)}:f> (<t:{int(until)}:R>)" if until else "until you switch it off"
         note = "" if not ev.get("disabled") else "\n⚠️ This event is **disabled**, so its cards still can't spawn. Enable it first."
         await interaction.response.send_message(
             f"✨ **{ev['eventname']}** spawns are ON at **{rate}%** of a normal card's chance, {end}.\n"
-            f"{n} card(s) can spawn{' (unob cards included)' if unob else ''}. "
-            f"They show the **NEW EDITION** message.{note}", ephemeral=True)
+            + (f"🚀 Boost: **{boost:g}%** of all spawns (about 1 in {round(100 / boost)}) will be a "
+               f"**{ev['eventname']}** card, picked by OVR odds (high OVR stays rare).\n" if boost else "")
+            + f"{n} card(s) can spawn{' (unob cards included)' if unob else ''}. "
+            + f"They show the **NEW EDITION** message.{note}"
+            + ("" if unob or n else "\n⚠️ 0 cards can spawn. If this event's cards are UNOB, run it again with **unob: True**."),
+            ephemeral=True)
 
     @cricketer.command(name="spawn", description="(Owner) Spawn cricketers in this channel now")
     @app_commands.describe(

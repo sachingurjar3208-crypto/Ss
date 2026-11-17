@@ -438,6 +438,10 @@ def _ensure_events(conn) -> None:
     # 1 = while the window runs, this event's UNOB cards spawn too (only this event's)
     if "spawn_unob" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN spawn_unob INTEGER NOT NULL DEFAULT 0")
+    # boost: while the window runs, this % of ALL wild spawns is one of this event's cards
+    # (the card inside the event is still picked with the normal OVR odds). 0 = no boost.
+    if "spawn_boost" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN spawn_boost REAL NOT NULL DEFAULT 0")
 
 
 def _invalidate_events() -> None:
@@ -525,14 +529,17 @@ def set_event_bg(eventname: str, pathname: str | None) -> bool:
     return cur.rowcount > 0
 
 
-def set_event_spawn(eventname: str, rate: int | None, until: float | None, unob: bool = False) -> bool:
+def set_event_spawn(eventname: str, rate: int | None, until: float | None, unob: bool = False,
+                    boost: float = 0) -> bool:
     """Event spawn window: rate % (0 = off), until = unix time or None, unob = its unob cards spawn
-    too while the window runs. False = no such event."""
+    too while the window runs, boost = % of all wild spawns that become this event's card.
+    False = no such event."""
     key = (eventname or "").strip().lower()
     with _conn() as conn:
         _ensure_events(conn)
-        cur = conn.execute("UPDATE events SET spawn_rate = ?, spawn_until = ?, spawn_unob = ? WHERE event_key = ?",
-                           (rate, until, 1 if unob else 0, key))
+        cur = conn.execute("UPDATE events SET spawn_rate = ?, spawn_until = ?, spawn_unob = ?, spawn_boost = ? "
+                           "WHERE event_key = ?",
+                           (rate, until, 1 if unob else 0, max(0.0, float(boost or 0)), key))
         conn.commit()
     _invalidate_events()
     return cur.rowcount > 0
@@ -544,6 +551,16 @@ def event_spawn_live(ev: dict | None) -> bool:
         return False
     until = ev.get("spawn_until")
     return until is None or float(until) > time.time()
+
+
+def event_spawn_boost(ev: dict | None) -> float:
+    """% of all wild spawns reserved for this event right now (0 when off or the window ended)."""
+    if not event_spawn_live(ev):
+        return 0.0
+    try:
+        return max(0.0, float(ev.get("spawn_boost") or 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def event_spawn_weight(ev: dict | None) -> float:
