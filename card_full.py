@@ -100,7 +100,9 @@ THEMES = {
     "crest":           {"bg": ((18, 70, 70), (3, 14, 16)),  "panel": ((14, 70, 72), (3, 14, 16)),   "accent": (90, 224, 204),  "tag": "CREST"},
     "arena":           {"bg": ((96, 22, 22), (14, 4, 6)),   "panel": ((96, 18, 20), (16, 4, 6)),    "accent": (255, 96, 74),   "tag": "ARENA"},
     "showcase":        {"bg": ((28, 44, 92), (5, 8, 20)),   "panel": ((22, 34, 72), (5, 8, 20)),    "accent": None,            "tag": "SHOWCASE"},
-    "retro":           {"bg": ((96, 24, 140), (14, 4, 30)), "panel": ((58, 14, 92), (12, 3, 26)),   "accent": (255, 92, 214),  "tag": "RETRO STAR"},
+    "retro":           {"bg": ((96, 24, 140), (14, 4, 30)), "panel": ((58, 14, 92), (12, 3, 26)),   "accent": (255, 92, 214),  "tag": "RETRO STAR", "style": "neon"},
+    # Black & Gold: dark card with gold light rays, gold frame and gold numbers (premium look)
+    "gold":            {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "PRESTIGE", "style": "gold"},
 }
 
 # Cards with no theme get a look from their EVENT name first, then their background's name
@@ -358,7 +360,7 @@ def _hexagon(cx, cy, r):
             for k in range(6)]
 
 
-def _draw_player(canvas, card_row, fg):
+def _draw_player(canvas, card_row, fg, style=None):
     try:
         import card_style2 as c2
         fg = c2._trim_foreground(fg.convert("RGBA"))
@@ -412,11 +414,14 @@ def _draw_player(canvas, card_row, fg):
             pos = (int(CARD_CX * S - hx), pos[1])
         pos = (pos[0] + fdx * S, pos[1] + fdy * S)
         _draw_logo_behind(canvas, resized, pos)
-        # soft glow behind the player
-        glow = Image.new("L", canvas.size, 0)
-        glow.paste(resized.getchannel("A"), pos)
-        glow = glow.resize((W // 8, H // 8)).filter(ImageFilter.GaussianBlur(6)).resize((W, H))
-        canvas.paste((255, 255, 255, 255), (0, 0), glow.point(lambda v: int(v * 0.16)))
+        if style:
+            _premium_player_fx(canvas, resized, pos, style)
+        else:
+            # soft glow behind the player
+            glow = Image.new("L", canvas.size, 0)
+            glow.paste(resized.getchannel("A"), pos)
+            glow = glow.resize((W // 8, H // 8)).filter(ImageFilter.GaussianBlur(6)).resize((W, H))
+            canvas.paste((255, 255, 255, 255), (0, 0), glow.point(lambda v: int(v * 0.16)))
         canvas.alpha_composite(resized, pos)
     except Exception as e:
         print(f"[card_full] player skipped ({type(e).__name__}: {e})")
@@ -662,7 +667,7 @@ def _panel_fill(themed):
     return out
 
 
-def _draw_panel(canvas, card_row, role, accent, themed):
+def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     st = _static()
     acc = accent + (255,)
     dim = accent + (150,)
@@ -707,7 +712,11 @@ def _draw_panel(canvas, card_row, role, accent, themed):
     num_f = _font(ci.FONT_DISPLAY_BOLD, 175)
     lab_f = _font(ci.FONT_LABEL, 30)
     for cx, (val, lab) in ((172, left), (865, right)):
-        _shadow_text(canvas, _q(cx, 1300), str(val), num_f, acc, anchor="mm", blur=5, alpha=200)
+        if num_grad:
+            _shadow_text(canvas, _q(cx, 1300), str(val), num_f, (0, 0, 0, 0), anchor="mm", blur=5, alpha=200)
+            _grad_text(canvas, _q(cx, 1300), str(val), num_f, num_grad[0], num_grad[1], anchor="mm")
+        else:
+            _shadow_text(canvas, _q(cx, 1300), str(val), num_f, acc, anchor="mm", blur=5, alpha=200)
         d = ImageDraw.Draw(canvas)
         _spaced(d, _q(cx, 1410), lab, lab_f, (225, 230, 240, 255), 4)
 
@@ -953,6 +962,193 @@ def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
                                 width=5 * S, joint="curve")
 
 
+# ── premium styles: "neon" (Retro Star) and "gold" (Black & Gold) ─────────────────────────
+# Same layout as v2 (brand, tag, name, BATTING / OVR / BOWLING panel), with extras:
+# coloured rim light + aura around the player, gradient numbers, a glowing name,
+# a holographic (neon) or gold double frame, and a soft foil sheen.
+NEON_RIM = ((255, 70, 210), (70, 220, 255))          # left light, right light
+NEON_GRAD = ((255, 120, 225), (120, 225, 255))       # numbers: top -> bottom
+GOLD_RIM = ((255, 214, 120), (255, 214, 120))
+GOLD_GRAD = ((255, 240, 190), (205, 150, 55))
+CINZEL = Path(__file__).with_name("cinzel.ttf")
+_PREMIUM: dict = {}
+
+
+def _grad_text(canvas, xy, text, font, top, bottom, anchor="mm"):
+    """Text filled with a vertical gradient (top colour -> bottom colour)."""
+    mask = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(mask).text(xy, text, font=font, fill=255, anchor=anchor)
+    bb = mask.getbbox()
+    if not bb:
+        return
+    h = bb[3] - bb[1]
+    col = Image.new("RGB", (1, max(1, h)))
+    for y in range(h):
+        t = y / max(1, h - 1)
+        col.putpixel((0, y), tuple(int(top[k] + (bottom[k] - top[k]) * t) for k in range(3)))
+    fill = col.resize((bb[2] - bb[0], h), Image.NEAREST).convert("RGBA")
+    fill.putalpha(mask.crop(bb))
+    canvas.alpha_composite(fill, bb[:2])
+
+
+def _premium_player_fx(canvas, player, pos, style):
+    """Aura behind the player + coloured edge light (pink / cyan for neon, gold for gold)."""
+    a = player.getchannel("A")
+    rim = NEON_RIM if style == "neon" else GOLD_RIM
+    aura_col = rim[0] if style == "neon" else (255, 190, 80)
+    aura_a = 0.75 if style == "neon" else 0.4
+    # aura: blurred silhouette, done small (fast) and scaled up
+    big = Image.new("L", canvas.size, 0)
+    big.paste(a, pos)
+    small = big.resize((W // 8, H // 8)).filter(ImageFilter.GaussianBlur(8))
+    halo = small.resize((W, H)).point(lambda v: int(v * aura_a))
+    canvas.paste(aura_col + (255,), (0, 0), halo)
+    del big, small, halo
+    # rim light, only around the player (cropped region keeps it quick)
+    spread, blur, alpha = (9, 7, 0.85) if style == "neon" else (5, 5, 0.6)
+    pad = (spread + blur * 3) * S
+    x0, y0 = max(0, pos[0] - pad), max(0, pos[1] - pad)
+    x1, y1 = min(W, pos[0] + player.width + pad), min(H, pos[1] + player.height + pad)
+    if x1 <= x0 or y1 <= y0:
+        return
+    for dx, col in ((-spread * S, rim[0]), (spread * S, rim[1])):
+        m = Image.new("L", (x1 - x0, y1 - y0), 0)
+        m.paste(a, (pos[0] - x0 + dx, pos[1] - y0))
+        m = m.filter(ImageFilter.GaussianBlur(blur * S)).point(lambda v: int(v * alpha))
+        region = canvas.crop((x0, y0, x1, y1))
+        region.paste(col + (255,), (0, 0), m)
+        canvas.paste(region, (x0, y0))
+
+
+def _gold_bg() -> Image.Image:
+    """Black card with soft gold spotlight, light rays and gold dust (built once)."""
+    hit = _PREMIUM.get("gold_bg")
+    if hit is not None:
+        return hit
+    w, h = OUT_W // 2, OUT_H // 2
+    img = Image.new("RGB", (w, h))
+    px = img.load()
+    cx, cy = w / 2, 430 / 2
+    for y in range(h):
+        for x in range(w):
+            ang = math.atan2(y - cy, x - cx)
+            dist = math.hypot(x - cx, y - cy)
+            base = 14 - 12 * y / h
+            rays = (0.5 + 0.5 * math.cos(ang * 18)) ** 6 * max(0.0, 1 - dist / 450)
+            spot = max(0.0, 1 - dist / 260) ** 2
+            k = rays * 0.35 + spot * 0.55
+            px[x, y] = (int(min(255, base + 255 * k)), int(min(255, base * 0.9 + 196 * k)),
+                        int(min(255, base * 1.4 + 92 * k)))
+    img = img.resize((W, H), Image.BICUBIC).convert("RGBA")
+    d = ImageDraw.Draw(img)
+    import random
+    rnd = random.Random(7)
+    for _ in range(140):
+        x, y, r = rnd.randint(30, OUT_W - 30), rnd.randint(30, 1100), rnd.uniform(0.8, 2.6)
+        d.ellipse((_q(x - r, y - r), _q(x + r, y + r)), fill=(255, 215, 130, rnd.randint(60, 200)))
+    _PREMIUM["gold_bg"] = img.convert("RGB")
+    return _PREMIUM["gold_bg"]
+
+
+def _sheen_mask() -> Image.Image:
+    hit = _PREMIUM.get("sheen")
+    if hit is None:
+        w, h = OUT_W // 4, OUT_H // 4
+        m = Image.new("L", (w, h), 0)
+        px = m.load()
+        for y in range(h):
+            for x in range(w):
+                t = (x * 4 * 0.8 + y * 4 * 0.6)
+                v = math.exp(-((t - 820) / 120) ** 2) + 0.6 * math.exp(-((t - 1050) / 50) ** 2)
+                px[x, y] = int(min(255, v * 255))
+        hit = _PREMIUM["sheen"] = m.resize((W, H), Image.BICUBIC)
+    return hit
+
+
+def _holo_fill() -> Image.Image:
+    """Rainbow foil gradient for the neon frame (built once)."""
+    hit = _PREMIUM.get("holo")
+    if hit is None:
+        stops = [(0, (255, 80, 200)), (0.25, (120, 220, 255)), (0.5, (190, 120, 255)),
+                 (0.75, (255, 220, 120)), (1, (255, 80, 200))]
+        w, h = OUT_W // 4, OUT_H // 4
+        img = Image.new("RGB", (w, h))
+        px = img.load()
+        a = math.radians(35)
+        tmax = w * math.cos(a) + h * math.sin(a)
+        for y in range(h):
+            for x in range(w):
+                t = (x * math.cos(a) + y * math.sin(a)) / tmax
+                for i in range(len(stops) - 1):
+                    if stops[i][0] <= t <= stops[i + 1][0]:
+                        u = (t - stops[i][0]) / (stops[i + 1][0] - stops[i][0])
+                        c0, c1 = stops[i][1], stops[i + 1][1]
+                        px[x, y] = tuple(int(c0[k] + (c1[k] - c0[k]) * u) for k in range(3))
+                        break
+        hit = _PREMIUM["holo"] = img.resize((W, H), Image.BICUBIC)
+    return hit
+
+
+def _premium_frame(canvas, style):
+    m = Image.new("L", canvas.size, 0)
+    dm = ImageDraw.Draw(m)
+    if style == "neon":
+        o = _v2_outline(18)
+        dm.line(o + [o[0]], fill=255, width=12 * S, joint="curve")
+        fill = _holo_fill()
+    else:
+        for inset, wdt in ((16, 9), (34, 3)):
+            o = _v2_outline(inset)
+            dm.line(o + [o[0]], fill=255, width=wdt * S, joint="curve")
+        fill = Image.new("RGB", canvas.size, (236, 190, 92))
+    glow = m.resize((W // 4, H // 4)).filter(ImageFilter.GaussianBlur(4)).resize((W, H))
+    canvas.paste(fill, (0, 0), glow.point(lambda v: int(v * 0.9)))
+    canvas.paste(fill, (0, 0), m)
+    if style == "neon":
+        o = _v2_outline(26)
+        ImageDraw.Draw(canvas).line(o + [o[0]], fill=(255, 255, 255, 200), width=2 * S, joint="curve")
+
+
+def _premium_name(canvas, card_row, style, accent):
+    name = str(card_row["displayname"] or "").strip().upper()
+    if not name:
+        return
+    d = ImageDraw.Draw(canvas)
+    xy = (W / 2, (PANEL_TOP - 62) * S)
+    if style == "gold" and CINZEL.is_file():
+        f = _fit(d, name, CINZEL, 92, 880)
+        _shadow_text(canvas, xy, name, f, (0, 0, 0, 0), anchor="ms", blur=9, alpha=235)
+        _grad_text(canvas, xy, name, f, GOLD_GRAD[0], GOLD_GRAD[1], anchor="ms")
+        return
+    bold = ci.FONT_NAME if ci.FONT_NAME.is_file() else ci.FONT_DISPLAY_BOLD
+    f = _fit(d, name, bold, 90, 880)
+    lay = Image.new("L", canvas.size, 0)
+    ImageDraw.Draw(lay).text(xy, name, font=f, fill=255, anchor="ms", stroke_width=3 * S)
+    lay = lay.resize((W // 4, H // 4)).filter(ImageFilter.GaussianBlur(4)).resize((W, H))
+    canvas.paste(accent + (255,), (0, 0), lay.point(lambda v: min(255, int(v * 1.6))))
+    _shadow_text(canvas, xy, name, f, WHITE, anchor="ms", blur=5, alpha=160)
+
+
+def _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas):
+    style = th["style"]
+    if style == "gold":
+        wm = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        ImageDraw.Draw(wm).text(_q(OUT_W / 2, 520), str(card_row["ovr"]), font=_font(ci.FONT_DISPLAY_BOLD, 620),
+                                fill=(255, 200, 100, 30), anchor="mm")
+        canvas.alpha_composite(wm)
+        del wm
+    _draw_player(canvas, card_row, fg_image, style=style)
+    canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
+    _premium_name(canvas, card_row, style, accent)
+    if SHOW_BRAND:
+        _v2_brand(canvas)
+    if th["tag"]:
+        _v2_tag(canvas, th["tag"], accent)
+    _draw_panel(canvas, card_row, role, accent, themed, num_grad=NEON_GRAD if style == "neon" else GOLD_GRAD)
+    canvas.paste((255, 255, 255, 255), (0, 0), _sheen_mask().point(lambda v: int(v * 0.12)))
+    _premium_frame(canvas, style)
+
+
 def build(card_row, fg_image, role) -> io.BytesIO:
     st = _static()
     th = _theme(card_row)
@@ -962,6 +1158,19 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     if raw_bg is not None and any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES):
         themed = dict(themed, raw_bg=raw_bg)
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
+    if th.get("style") == "gold" and raw_bg is None:
+        canvas = _gold_bg().convert("RGBA")
+
+    if LAYOUT == "v2" and th.get("style"):
+        _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas)
+        out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        out.paste(canvas, (0, 0), st["mask"])
+        del canvas
+        out = out.resize((OUT_W, OUT_H), Image.LANCZOS)
+        buf = io.BytesIO()
+        out.save(buf, format="PNG")
+        buf.seek(0)
+        return buf
 
     if LAYOUT == "v2":
         _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas)
