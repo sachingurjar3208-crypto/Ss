@@ -170,7 +170,10 @@ def _foreground_file(url: str) -> Path:
 
 async def _download_image(url: str) -> Image.Image:
     """Load the foreground from the permanent local folder if we already have
-    it; otherwise download it once, save it forever, and use that."""
+    it; otherwise download it once, save it forever, and use that.
+    "local:<path>" = a file kept in the bot folder (My Player photos / silhouette)."""
+    if str(url).startswith("local:"):
+        return Image.open(Path(__file__).parent / str(url)[6:]).convert("RGBA")
     local = _foreground_file(url)
     if local.exists():
         try:

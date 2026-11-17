@@ -717,6 +717,14 @@ def _event_disabled(key: str) -> bool:
         return False
 
 
+MYP_MSG = "🔒 That's a **My Player** card. It stays with its owner forever: it can't be sold, traded, bought or given."
+
+
+def is_myplayer_key(key) -> bool:
+    """Private Premium "My Player" card (card_db key myp_<user id>)."""
+    return str(key or "").strip().lower().startswith("myp_")
+
+
 def _not_for_sale(key: str) -> str | None:
     """Reason a card can't be BOUGHT in the shop (event disabled / obtainable = False), else None."""
     try:
@@ -737,7 +745,7 @@ def _grant(conn: sqlite3.Connection, uid: int, key: str, source: str, allow_disa
     """Give one card. Returns "added", "pending" or "blocked" (disabled event: nobody gets it).
     "pending" = the card waits for the player's choice (keep / sell / replace): it is a
     DUPLICATE of a card they already have, or their squad is full. Never auto-sold."""
-    if not allow_disabled and _event_disabled(key):
+    if is_myplayer_key(key) or (not allow_disabled and _event_disabled(key)):
         return "blocked"
     if _holds(conn, uid, key) or _squad_count(conn, uid) >= _limit(conn, uid):
         _pending_add(conn, uid, key, source)
@@ -1273,6 +1281,8 @@ def set_captain(user_id, player_key: str) -> str | None:
 def buy_card(user_id, player_key: str, price: int) -> str | None:
     """Buy one card. Returns None on success or an error message."""
     uid = _uid(user_id)
+    if is_myplayer_key(player_key):
+        return MYP_MSG
     blocked = _not_for_sale(player_key)
     if blocked:
         return blocked
@@ -1296,6 +1306,8 @@ def sell_card(user_id, player_key: str, value: int, replacement_key: str | None)
     the XI, the `replacement_key` (a bench player) takes its batting spot."""
     if AUCTION_LOCK:
         return AUCTION_LOCK_MSG
+    if is_myplayer_key(player_key):
+        return MYP_MSG
     uid = _uid(user_id)
     with _tx() as conn:
         if _own_qty(conn, uid, player_key) <= 0:
@@ -1329,6 +1341,8 @@ def sell_cards(user_id, items: list[tuple[str, int]], bench_order: list[str]) ->
     uid = _uid(user_id)
     if not items:
         return "Nothing to sell.", 0
+    if any(is_myplayer_key(k) for k, _ in items):
+        return MYP_MSG, 0
     want: dict[str, int] = {}
     for k, _ in items:
         want[k] = want.get(k, 0) + 1
@@ -1838,6 +1852,8 @@ def execute_trade(a_id, a_key: str, b_id, b_key: str, fee: int = TRADE_FEE) -> s
     a, b = _uid(a_id), _uid(b_id)
     if a == b:
         return "You can't trade with yourself."
+    if is_myplayer_key(a_key) or is_myplayer_key(b_key):
+        return MYP_MSG
     if _event_disabled(a_key) or _event_disabled(b_key):
         return "A card of a disabled event can't be traded right now."
     with _tx() as conn:
@@ -1883,6 +1899,8 @@ def banned_ids() -> set[int]:
 
 def give_card(user_id, player_key: str) -> bool:
     uid = _uid(user_id)
+    if is_myplayer_key(player_key):
+        return False
     if _event_disabled(player_key):
         return False   # the card's event is disabled: nobody gets it (the cogs explain this to the admin)
     with _tx() as conn:
@@ -2351,3 +2369,56 @@ def undo_apply(user_id, since: float, by: int) -> dict:
                     "vouchers": -vouchers, "trades": len(rows["trades"]), "purse": purse}
     finally:
         _TAG.reset(token)
+
+
+# ── My Player energy drinks (Premium) ────────────────────────────────────
+# Kept in user_prefs ("myp_drinks"). rcdaily +1, rcweekly +20 (Premium only, see economy_cog).
+
+def myp_drinks(user_id) -> int:
+    try:
+        return int(get_pref(user_id, "myp_drinks", "0") or 0)
+    except ValueError:
+        return 0
+
+
+def myp_add_drinks(user_id, n: int) -> int:
+    """Add (or with n < 0 remove) drinks atomically. Never below 0. Returns the new total."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_prefs(conn)
+        row = conn.execute("SELECT value FROM user_prefs WHERE user_id = ? AND key = 'myp_drinks'",
+                           (uid,)).fetchone()
+        try:
+            cur = int(row["value"]) if row else 0
+        except ValueError:
+            cur = 0
+        new = max(0, cur + int(n))
+        conn.execute("INSERT INTO user_prefs (user_id, key, value) VALUES (?, 'myp_drinks', ?) "
+                     "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value", (uid, str(new)))
+    return new
+
+
+def myp_spend_drinks(user_id, n: int) -> bool:
+    """Take `n` drinks if the user has them (all or nothing)."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_prefs(conn)
+        row = conn.execute("SELECT value FROM user_prefs WHERE user_id = ? AND key = 'myp_drinks'",
+                           (uid,)).fetchone()
+        try:
+            cur = int(row["value"]) if row else 0
+        except ValueError:
+            cur = 0
+        if cur < n:
+            return False
+        conn.execute("UPDATE user_prefs SET value = ? WHERE user_id = ? AND key = 'myp_drinks'",
+                     (str(cur - n), uid))
+    return True
+
+
+def myp_grant(user_id, key: str) -> None:
+    """Put the user's own My Player card in their squad (always fits; it may go one over the limit)."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        if _own_qty(conn, uid, key) <= 0:
+            _add_copy(conn, uid, key)

@@ -542,7 +542,12 @@ def resolve_owned(user_id, text: str):
     q = query.lower()
     if q in owned:
         return owned[q], None
-    matches = [c for k, c in owned.items() if q in k]
+    # My Player cards have a hidden key (myp_<id>): match them by their shown name.
+    exact = [c for k, c in owned.items() if k.startswith("myp_") and str(c["playername"]).lower() == q]
+    if exact:
+        return exact[0], None
+    matches = [c for k, c in owned.items()
+               if q in k or (k.startswith("myp_") and q in str(c["playername"]).lower())]
     if len(matches) == 1:
         return matches[0], None
     if not matches:

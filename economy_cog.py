@@ -899,6 +899,12 @@ class EconomyCog(commands.Cog, name="Economy"):
             await card_cache.send_embed(ctx, embed, shown["image_path"])
         else:
             await ctx.send(text)
+        if kind in ("daily", "weekly") and _is_premium(ctx.author):
+            try:
+                import myplayer_cog
+                await myplayer_cog.give_claim_drinks(ctx, kind)
+            except Exception as e:
+                print(f"[myplayer] drinks failed: {type(e).__name__}: {e}")
         if res.get("pending"):
             await send_next_pending(ctx, ctx.author.id)
         if kind == "daily":
@@ -1281,6 +1287,10 @@ class EconomyCog(commands.Cog, name="Economy"):
             await refuse("You already have a confirmation waiting. Finish that first.")
             return
 
+        chosen = [c for c in chosen if not economy.is_myplayer_key(c["playername_key"])]   # My Player never sold
+        if not chosen:
+            await refuse("Nothing to sell there.")
+            return
         items = [(c["playername_key"], sl.sell_value(c)) for c in chosen]
         total = sum(v for _, v in items)
         sold: dict[str, int] = {}

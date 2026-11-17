@@ -116,6 +116,9 @@ _NEW_CARD_COLUMNS = [
     ("full_dx",    "INTEGER NOT NULL DEFAULT 0"),
     ("full_dy",    "INTEGER NOT NULL DEFAULT 0"),
     ("full_scale", "INTEGER NOT NULL DEFAULT 100"),
+    # My Player (Premium custom card): the ONE user who owns it. Such cards are private:
+    # never listed, searched, spawned, sold, traded or given (see myplayer_cog.py).
+    ("myp_owner",  "INTEGER"),
 ]
 
 
@@ -935,8 +938,10 @@ def effective_bowling_type(card) -> str | None:
 
 
 def list_all_cards() -> list[sqlite3.Row]:
+    """Every PUBLIC card. Private My Player cards are left out (only get_card / get_cards see them)."""
     with _conn() as conn:
-        return conn.execute("SELECT * FROM cards ORDER BY ovr DESC, playername").fetchall()
+        return conn.execute("SELECT * FROM cards WHERE myp_owner IS NULL "
+                            "ORDER BY ovr DESC, playername").fetchall()
 
 
 def find_cards(query: str, limit: int = 10) -> list[sqlite3.Row]:
@@ -945,9 +950,11 @@ def find_cards(query: str, limit: int = 10) -> list[sqlite3.Row]:
     if not q:
         return []
     with _conn() as conn:
-        exact = conn.execute("SELECT * FROM cards WHERE playername_key = ?", (q,)).fetchall()
+        exact = conn.execute("SELECT * FROM cards WHERE playername_key = ? AND myp_owner IS NULL",
+                             (q,)).fetchall()
         like = conn.execute(
             "SELECT * FROM cards WHERE playername_key LIKE ? ESCAPE '\\' AND playername_key != ? "
+            "AND myp_owner IS NULL "
             "ORDER BY ovr DESC LIMIT ?",
             ("%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%", q, limit),
         ).fetchall()
@@ -1128,7 +1135,8 @@ def set_card_image_path(playername: str, image_path: str) -> None:
 
 def list_playernames() -> list[str]:
     with _conn() as conn:
-        rows = conn.execute("SELECT playername FROM cards ORDER BY playername").fetchall()
+        rows = conn.execute("SELECT playername FROM cards WHERE myp_owner IS NULL "
+                            "ORDER BY playername").fetchall()
         return [r["playername"] for r in rows]
 
 
@@ -1431,3 +1439,56 @@ def update_country_logo_layout(playername: str, dx: int, dy: int, scale: int) ->
         )
         conn.commit()
     return True
+
+
+# ── My Player (Premium custom card, one per user, private) ──────────────
+
+def myplayer_key(user_id) -> str:
+    return f"myp_{int(user_id)}"
+
+
+def get_myplayer(user_id) -> sqlite3.Row | None:
+    with _conn() as conn:
+        return conn.execute("SELECT * FROM cards WHERE myp_owner = ?", (int(user_id),)).fetchone()
+
+
+def create_myplayer(*, user_id: int, name: str, role: str, bat: int, bowl: int, ovr: int,
+                    country: str, country_emoji: str, batting_hand: str, bowling_type: str,
+                    foreground_link: str, background: str) -> str:
+    key = myplayer_key(user_id)
+    now = time.time()
+    with _conn() as conn:
+        conn.execute(
+            """INSERT INTO cards (
+                playername_key, playername, displayname, foreground_link, background,
+                ovr, bat, bowl, country, country_emoji, offset_x, offset_y, scale_pct,
+                image_path, created_by, created_at, updated_at, role, batting_hand,
+                bowling_type, obtainable, myp_owner, s2_theme
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 100, NULL, ?, ?, ?, ?, ?, ?, 0, ?, 'myplayer')""",
+            (key, name.strip(), name.strip(), foreground_link, background, ovr, bat, bowl,
+             country, country_emoji, int(user_id), now, now, role, batting_hand, bowling_type,
+             int(user_id)),
+        )
+        conn.commit()
+    return key
+
+
+def update_myplayer(user_id, **fields) -> bool:
+    allowed = {"ovr", "bat", "bowl", "foreground_link", "playername", "displayname",
+               "full_dx", "full_dy", "full_scale"}
+    sets = {k: v for k, v in fields.items() if k in allowed}
+    if not sets:
+        return False
+    cols = ", ".join(f"{k} = ?" for k in sets)
+    with _conn() as conn:
+        cur = conn.execute(f"UPDATE cards SET {cols}, updated_at = ? WHERE myp_owner = ?",
+                           (*sets.values(), time.time(), int(user_id)))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def delete_myplayer(user_id) -> bool:
+    with _conn() as conn:
+        cur = conn.execute("DELETE FROM cards WHERE myp_owner = ?", (int(user_id),))
+        conn.commit()
+        return cur.rowcount > 0

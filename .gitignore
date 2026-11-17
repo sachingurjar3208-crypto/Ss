@@ -19,3 +19,7 @@ signatures/
 spawn_cache/
 showcase_art/
 backups/
+
+# My Player photos uploaded on the VPS (the silhouette is in git)
+myplayer_photos/*
+!myplayer_photos/silhouette.png

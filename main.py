@@ -114,6 +114,7 @@ async def load_cogs():
         "spawn_cog",
         "redeem_cog",
         "backup_cog",
+        "myplayer_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:

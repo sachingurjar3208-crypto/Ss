@@ -103,6 +103,8 @@ THEMES = {
     "retro":           {"bg": ((96, 24, 140), (14, 4, 30)), "panel": ((58, 14, 92), (12, 3, 26)),   "accent": (255, 92, 214),  "tag": "RETRO STAR", "style": "neon"},
     # Black & Gold: dark card with gold light rays, gold frame and gold numbers (premium look)
     "gold":            {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "PRESTIGE", "style": "gold"},
+    # Premium "My Player" custom cards: the Black & Gold look with their own tag.
+    "myplayer":        {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "MY PLAYER", "style": "gold"},
 }
 
 # Cards with no theme get a look from their EVENT name first, then their background's name
