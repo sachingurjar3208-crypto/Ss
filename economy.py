@@ -60,7 +60,13 @@ MONTHLY_UNLOCK_AFTER_DEBUT = 30 * DAY   # monthly reward opens 1 month after deb
 # from the odds below (chance out of 100,000), then a random card of that OVR is given.
 REWARD_ODDS_TOTAL = 100_000
 # Daily chance for every rare OVR, out of 100,000. Edit these numbers to change the odds.
+# 80-99 together = 2,000 (2%, about 1 daily in 50).
 DAILY_RARE_ODDS = {
+    99: 1, 98: 2, 97: 3, 96: 4, 95: 5, 94: 7, 93: 9, 92: 11, 91: 13, 90: 15,
+    89: 25, 88: 40, 87: 60, 86: 90, 85: 130, 84: 180, 83: 250, 82: 330, 81: 390, 80: 435,
+}
+# weekly / monthly are built from the older (higher) daily table, so they stay as they were
+_WEEKLY_MONTHLY_BASE = {
     99: 1, 98: 5, 97: 9, 96: 12, 95: 15, 94: 20, 93: 25, 92: 28, 91: 33, 90: 35,
     89: 80, 88: 120, 87: 180, 86: 420, 85: 880, 84: 1600, 83: 2400, 82: 4000, 81: 6000, 80: 12000,
 }
@@ -72,8 +78,8 @@ def _build_odds() -> dict:
     """{kind: [(lo, hi, chance), ...]}. Whatever is left of the 100,000 goes to the
     LOWEST band, so every rare chance stays exactly as written above."""
     daily = [(o, o, c) for o, c in DAILY_RARE_ODDS.items()] + [(75, 79, DAILY_75_79)]
-    weekly = [(o, o, c * WEEKLY_MULT) for o, c in DAILY_RARE_ODDS.items() if o >= 84]
-    monthly = [(o, o, c * MONTHLY_MULT) for o, c in DAILY_RARE_ODDS.items() if o >= 89]
+    weekly = [(o, o, c * WEEKLY_MULT) for o, c in _WEEKLY_MONTHLY_BASE.items() if o >= 84]
+    monthly = [(o, o, c * MONTHLY_MULT) for o, c in _WEEKLY_MONTHLY_BASE.items() if o >= 89]
     out = {}
     for kind, bands, low in (("daily", daily, (50, 74)), ("weekly", weekly, (83, 83)), ("monthly", monthly, (88, 88))):
         rest = REWARD_ODDS_TOTAL - sum(c for _, _, c in bands)
@@ -956,9 +962,10 @@ CLAIM_LOW_RANGE = (60, 75)
 # Chance in % for every higher OVR. Edit these numbers to change the odds.
 # 76-83: the higher the OVR, the lower the chance.  84-88: fixed rare chances.
 # Everything that is NOT listed here (the rest of the 100%) gives a 60-75 card.
+# 80-88 together = 2% (about 1 claim in 50).
 CLAIM_RARITY = {
-    76: 10.0, 77: 7.0, 78: 5.0, 79: 3.5, 80: 2.5, 81: 1.8, 82: 1.2, 83: 0.8,
-    84: 2.0, 85: 1.0, 86: 0.5, 87: 0.3, 88: 0.1,
+    76: 10.0, 77: 7.0, 78: 5.0, 79: 3.5, 80: 0.6, 81: 0.45, 82: 0.35, 83: 0.25,
+    84: 0.15, 85: 0.10, 86: 0.06, 87: 0.03, 88: 0.01,
 }
 
 
