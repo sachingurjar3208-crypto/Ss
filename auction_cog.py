@@ -48,7 +48,7 @@ FIRST_LOT_DELAY = 60        # seconds between the ping and lot 1
 LOT_GAP = 8                 # seconds between lots
 REMIND_EVERY = 12           # after this many bids, the bot repeats the top bid (the lot message scrolls up)
 MIN_ACCOUNT_DAYS = 30       # Discord account age needed to bid (stops alt accounts)
-MIN_MEMBER_DAYS = 3         # days in the server needed to bid
+MIN_MEMBER_DAYS = 0         # days in the server needed to bid (0 = no limit)
 GOLD = discord.Color.from_rgb(240, 198, 104)
 # text commands paused while an auction runs (they would raise coins); economy.AUCTION_LOCK also
 # blocks the same things inside the economy, so buttons / views can't do it either
@@ -405,7 +405,7 @@ class AuctionCog(commands.Cog, name="Auction"):
         if (now - user.created_at).days < MIN_ACCOUNT_DAYS:
             return f"Your Discord account must be at least {MIN_ACCOUNT_DAYS} days old to join."
         joined_at = getattr(user, "joined_at", None)
-        if joined_at and (now - joined_at).days < MIN_MEMBER_DAYS:
+        if MIN_MEMBER_DAYS and joined_at and (now - joined_at).days < MIN_MEMBER_DAYS:
             return f"You must be in this server for {MIN_MEMBER_DAYS} days to join."
         self.joined.add(user.id)
         return (f"You joined the auction ({len(self.joined)} joined). Your purse: **{int(row['purse']):,}** coins.\n"
