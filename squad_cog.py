@@ -693,7 +693,16 @@ class SquadCog(commands.Cog, name="Squad"):
     @commands.command(name="rcview")
     @commands.cooldown(1, 5, commands.BucketType.user)
     async def rcview(self, ctx: commands.Context, *, player: str):
-        """Show a card you own, with YOUR career batting/bowling stats on it."""
+        """Show a card you own, with YOUR career batting/bowling stats on it.
+        `rcview <playstyle>` (e.g. rcview Centurion) explains that playstyle instead."""
+        try:
+            import playstyle_info_cog as psi
+            ps = psi.exact_playstyle(player)
+        except Exception:
+            ps = None
+        if ps:
+            await psi.send_playstyle_info(ctx, ps)
+            return
         query = security.clean_input(player)
         found = await asyncio.to_thread(card_db.find_cards, query, 8)
         if not found:

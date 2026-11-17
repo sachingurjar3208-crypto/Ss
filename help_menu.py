@@ -45,6 +45,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Squad", "rcsquad [@user]", "Show your squad (35 cards, Premium 60). Copies of a card are listed one by one.", "rcsquad"),
         ("Player Card", "rcshow <player>", "Show any player's card and stats.", "rcshow"),
         ("Your Card Stats", "rcview <player>", "A card you own, with your own career batting and bowling stats.", "rcview"),
+        ("Playstyle Info", "rcview <playstyle>", "What a playstyle does and its Silver / Gold / Golden Pink badges (e.g. rcview Centurion).", "rcview"),
         ("All-Time Stats", "rcdata <player>", "Premium only. That card's stats across every owner.", "rcdata"),
         ("Playing XI", "rcxi", "Your playing XI in batting order. Use rcxi @user to see another player's XI."),
         ("XI Image", "rcovr", "Your playing XI as an image with the team OVR."),

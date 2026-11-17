@@ -118,6 +118,36 @@ def _image(name: str | None) -> bytes:
     return _CACHE[key]
 
 
+def exact_playstyle(query: str) -> str | None:
+    """Exact playstyle name for this text (spaces / dashes / case don't matter), else None."""
+    def norm(t):
+        return "".join(ch for ch in str(t).lower() if ch.isalnum())
+    q = norm(query)
+    if not q:
+        return None
+    return next((n for n in pb.ICONS if norm(n) == q), None)
+
+
+async def send_playstyle_info(ctx: commands.Context, name: str) -> None:
+    """Embed: what the playstyle does + its badge in Silver / Gold / Golden Pink."""
+    from card_narratives import NARRATIVES
+    about = NARRATIVES.get(name, "Special playstyle.")
+    embed = discord.Embed(title=f"🏏 {name}", color=discord.Color.gold())
+    embed.add_field(name="What it does", value=about, inline=False)
+    embed.add_field(
+        name="Levels",
+        value=("🥈 **Silver**: half of the boost\n"
+               "🥇 **Gold**: the full boost\n"
+               "🌸 **Golden Pink**: 1.5x the boost"),
+        inline=False,
+    )
+    embed.set_footer(text="Only the boost grows with the level, never the drawback.")
+    data = await asyncio.to_thread(_image, name)
+    fname = f"{name.lower().replace(' ', '_')}.png"
+    embed.set_image(url=f"attachment://{fname}")
+    await ctx.send(embed=embed, file=discord.File(io.BytesIO(data), filename=fname))
+
+
 class PlaystyleInfoCog(commands.Cog, name="PlaystyleInfo"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -135,6 +165,9 @@ class PlaystyleInfoCog(commands.Cog, name="PlaystyleInfo"):
                 else:
                     await ctx.send("❌ No playstyle with that name. Use `rcplaystyles` to see all of them.")
                 return
+        if found is not None:
+            await send_playstyle_info(ctx, found)
+            return
         async with ctx.typing():
             data = await asyncio.to_thread(_image, found)
         fname = "playstyles.png" if found is None else f"{found.lower().replace(' ', '_')}.png"
