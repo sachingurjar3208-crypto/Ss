@@ -41,6 +41,22 @@ NARRATIVES: dict[str, str] = {
     "Blitz": "Explosive starter: +25% fours/sixes and -15% dot balls in the powerplay.",
     "Disruptor": "Partnership breaker: +20% wickets when the batting pair has added 30+ runs.",
     "Maestro": "All-rounder: +8% batting and +8% wickets, all match long.",
+    # older engine playstyles, now available on cards too
+    "Centurion": "Big-innings batter: +10% scoring after reaching 50.",
+    "Finisher": "Closes out innings: +20% scoring in the death overs.",
+    "Opener": "Top-order starter: +15% scoring in the powerplay.",
+    "Power Hitter": "Hits the ball a mile: +25% fours/sixes and extra sixes, but a slightly higher risk of getting out.",
+    "Pinch Hitter": "All-out attack: +25% fours/sixes, but a higher risk of getting out.",
+    "Clinical": "Keeps the board moving: -15% dot balls, +20% singles.",
+    "Clutch": "Delivers under pressure: +30% scoring in tight finishes.",
+    "Match Winner": "Big-moment player: +10% batting and +10% wickets in the last overs.",
+    "Chaser": "Good in a chase: +20% scoring in the 2nd innings.",
+    "Death Bowler": "Bowls the tough overs: +20% wickets and -12% runs in the death overs.",
+    "Powerplay Bowler": "Takes the new ball: +15% wickets in the powerplay.",
+    "Spin Wizard": "Spin master: +40% wickets with spin deliveries.",
+    "Bouncer Specialist": "Short-ball expert: +25% wickets with bouncers.",
+    "Economical": "Hard to score off: -15% runs conceded.",
+    "Wicket Hunter": "Always attacking: +35% wickets all match long.",
 }
 
 NARRATIVE_NAMES: list[str] = list(NARRATIVES)

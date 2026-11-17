@@ -166,6 +166,33 @@ async def narrative_name_autocomplete(interaction: discord.Interaction, current:
     return [app_commands.Choice(name=n, value=n) for n in names[:25]]
 
 
+def _canon_narrative(text: str | None) -> str | None:
+    """Typed playstyle -> its exact name ("none" -> "NONE"); None if it is not a known playstyle."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    if t.lower() in ("none", "none (remove)", "remove"):
+        return "NONE"
+    for n in NARRATIVE_NAMES:
+        if n.lower() == t.lower():
+            return n
+    return None
+
+
+async def narrative_autocomplete(interaction: discord.Interaction, current: str):
+    """Playstyle picker (search box): every playstyle, filtered by what you type."""
+    cur = current.lower()
+    names = [n for n in NARRATIVE_NAMES if cur in n.lower()]
+    return [app_commands.Choice(name=n, value=n) for n in names[:25]]
+
+
+async def narrative_edit_autocomplete(interaction: discord.Interaction, current: str):
+    cur = current.lower()
+    out = [app_commands.Choice(name="None (remove)", value="NONE")] if (not cur or "none".startswith(cur)) else []
+    out += [app_commands.Choice(name=n, value=n) for n in NARRATIVE_NAMES if cur in n.lower()]
+    return out[:25]
+
+
 async def background_autocomplete(interaction: discord.Interaction, current: str):
     current_l = current.lower()
     names = [n for n in list_backgrounds() if current_l in n.lower()]
@@ -572,13 +599,13 @@ class CardMakerCog(commands.Cog):
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
-        narrative1=NARRATIVE_CHOICES, narrative2=NARRATIVE_CHOICES,
         bowlingtype=BOWLTYPE_CHOICES, theme=THEME_CHOICES,
         design=[app_commands.Choice(name="New design (Style 2)", value="style2"),
                 app_commands.Choice(name="Old design (Classic)", value="classic")],
     )
     @app_commands.autocomplete(background=background_autocomplete, countryflag=country_autocomplete,
-                               event=event_autocomplete)
+                               event=event_autocomplete, narrative1=narrative_autocomplete,
+                               narrative2=narrative_autocomplete)
     @is_owner()
     async def cardmaker(
         self,
@@ -617,6 +644,12 @@ class CardMakerCog(commands.Cog):
                 await interaction.followup.send(f"❌ Unknown event `{event}`.\nAvailable: {names}")
                 return
 
+        for typed in (narrative1, narrative2):
+            if typed and _canon_narrative(typed) in (None, "NONE"):
+                await interaction.followup.send(f"❌ Unknown playstyle `{typed}`. Pick one from the list.")
+                return
+        narrative1 = _canon_narrative(narrative1) if narrative1 else None
+        narrative2 = _canon_narrative(narrative2) if narrative2 else None
         if narrative1 and narrative2 and narrative1 == narrative2:
             await interaction.followup.send("❌ narrative1 and narrative2 can't be the same — pick two different playstyles.")
             return
@@ -807,7 +840,6 @@ class CardMakerCog(commands.Cog):
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
-        narrative1=NARRATIVE_CHOICES_EDIT, narrative2=NARRATIVE_CHOICES_EDIT,
         bowlingtype=BOWLTYPE_CHOICES, theme=THEME_CHOICES,
     )
     @app_commands.autocomplete(
@@ -816,6 +848,8 @@ class CardMakerCog(commands.Cog):
         countryflag=country_autocomplete,
         panel=panel_autocomplete,
         event=event_autocomplete,
+        narrative1=narrative_edit_autocomplete,
+        narrative2=narrative_edit_autocomplete,
     )
     @is_owner()
     async def editcard(
@@ -889,6 +923,14 @@ class CardMakerCog(commands.Cog):
             updates["bowling_type"] = bowlingtype
 
         # Playstyle slots: only touch the slot(s) that were given ("NONE" clears one).
+        for typed in (narrative1, narrative2):
+            if typed is not None and _canon_narrative(typed) is None:
+                await interaction.followup.send(f"❌ Unknown playstyle `{typed}`. Pick one from the list (or None).")
+                return
+        if narrative1 is not None:
+            narrative1 = _canon_narrative(narrative1)
+        if narrative2 is not None:
+            narrative2 = _canon_narrative(narrative2)
         slot_updates: dict = {}
         if narrative1 is not None:
             slot_updates["playstyle1"] = None if narrative1 == "NONE" else narrative1
@@ -1735,15 +1777,27 @@ class CardMakerCog(commands.Cog):
         key2="Playstyle for slot 2 (optional)",
         level2="Level of playstyle 2 (optional, default Gold)",
     )
-    @app_commands.choices(key1=NARRATIVE_CHOICES, key2=NARRATIVE_CHOICES,
-                          level1=LEVEL_CHOICES, level2=LEVEL_CHOICES)
-    @app_commands.autocomplete(playername=playername_autocomplete)
+    @app_commands.choices(level1=LEVEL_CHOICES, level2=LEVEL_CHOICES)
+    @app_commands.autocomplete(playername=playername_autocomplete, key1=narrative_autocomplete,
+                               key2=narrative_autocomplete)
     @app_commands.check(lambda i: is_staff(i.user))
     async def playstyle_add(self, interaction: discord.Interaction, playername: str,
-                            key1: app_commands.Choice[str], level1: app_commands.Choice[int],
-                            key2: app_commands.Choice[str] | None = None,
+                            key1: str, level1: app_commands.Choice[int],
+                            key2: str | None = None,
                             level2: app_commands.Choice[int] | None = None):
         await interaction.response.defer()
+        from types import SimpleNamespace
+        picks = []
+        for typed in (key1, key2):
+            if typed is None:
+                picks.append(None)
+                continue
+            canon = _canon_narrative(typed)
+            if canon in (None, "NONE"):
+                await interaction.followup.send(f"❌ Unknown playstyle `{typed}`. Pick one from the list.")
+                return
+            picks.append(SimpleNamespace(value=canon))
+        key1, key2 = picks
         card = get_card(playername)
         if card is None:
             await interaction.followup.send(f"❌ No card named `{playername}`. Pick one from the list.")

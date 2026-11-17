@@ -417,6 +417,173 @@ def _i_maestro(m):
     _crown(m, C, C - 255, 330)
 
 
+# ── older engine playstyles (added to cards later) ───────────────────────
+
+def _i_centurion(m):
+    """A crown over '100'."""
+    d = ImageDraw.Draw(m)
+    _crown(m, C, C - 190, 330)
+    d.text((C, C + 110), "100", font=_font(330), fill=255, anchor="mm")
+
+
+def _i_finisher(m):
+    """Chequered flag on a pole: finishes the job."""
+    d = ImageDraw.Draw(m)
+    d.rounded_rectangle((C - 250, C - 300, C - 210, C + 320), radius=14, fill=255)
+    x0, y0, cw, ch = C - 210, C - 290, 92, 80
+    d.rectangle((x0, y0, x0 + cw * 5, y0 + ch * 4), fill=255)
+    for r in range(4):
+        for c in range(5):
+            if (r + c) % 2:
+                d.rectangle((x0 + c * cw + 8, y0 + r * ch + 8, x0 + (c + 1) * cw - 8, y0 + (r + 1) * ch - 8), fill=0)
+
+
+def _i_opener(m):
+    """Bat with a big '1': first in."""
+    m.paste(_bat(m, C - 120, C + 20, 600, 130, -20))
+    d = ImageDraw.Draw(m)
+    d.text((C + 190, C - 30), "1", font=_font(380), fill=255, anchor="mm")
+
+
+def _i_power_hitter(m):
+    """Ball bursting out of a star blast."""
+    d = ImageDraw.Draw(m)
+    pts = []
+    for i in range(24):
+        r = 330 if i % 2 == 0 else 200
+        a = math.radians(i * 15)
+        pts.append((C + r * math.cos(a), C + r * math.sin(a)))
+    d.polygon(pts, fill=255)
+    d.ellipse((C - 175, C - 175, C + 175, C + 175), fill=0)
+    _ball(m, C, C, 140)
+
+
+def _i_pinch_hitter(m):
+    """A rocket taking off."""
+    d = ImageDraw.Draw(m)
+    body = [(C, C - 330), (C + 95, C - 170), (C + 95, C + 130), (C - 95, C + 130), (C - 95, C - 170)]
+    d.polygon(_rot(body, 35, C, C), fill=255)
+    for sx in (-1, 1):
+        fin = [(C + sx * 95, C + 20), (C + sx * 190, C + 160), (C + sx * 95, C + 130)]
+        d.polygon(_rot(fin, 35, C, C), fill=255)
+    cx, cy = _rot([(C, C - 120)], 35, C, C)[0]
+    d.ellipse((cx - 45, cy - 45, cx + 45, cy + 45), fill=0)
+    fx, fy = _rot([(C, C + 210)], 35, C, C)[0]
+    flame = [(fx, fy + 120), (fx - 60, fy - 40), (fx + 60, fy - 40)]
+    d.polygon(_rot(flame, 35, fx, fy), fill=255)
+
+
+def _i_clinical(m):
+    """Crosshair: precise, no wasted balls."""
+    d = ImageDraw.Draw(m)
+    _ring(d, C, C, 270, 44)
+    _ring(d, C, C, 130, 34)
+    for a, b in (((C, C - 330), (C, C - 170)), ((C, C + 170), (C, C + 330)),
+                 ((C - 330, C), (C - 170, C)), ((C + 170, C), (C + 330, C))):
+        _line(d, a, b, 40)
+    d.ellipse((C - 34, C - 34, C + 34, C + 34), fill=255)
+
+
+def _i_clutch(m):
+    """Stopwatch: delivers when time is running out."""
+    d = ImageDraw.Draw(m)
+    _ring(d, C, C + 40, 270, 48)
+    d.rounded_rectangle((C - 60, C - 320, C + 60, C - 250), radius=16, fill=255)
+    d.rounded_rectangle((C - 22, C - 260, C + 22, C - 220), radius=8, fill=255)
+    d.pieslice((C - 200, C - 160, C + 200, C + 240), -90, -10, fill=255)
+    _line(d, (C, C + 40), (C, C - 140), 30)
+
+
+def _i_match_winner(m):
+    """Trophy cup with two handles."""
+    d = ImageDraw.Draw(m)
+    d.pieslice((C - 200, C - 400, C + 200, C + 40), 0, 180, fill=255)
+    d.rectangle((C - 200, C - 300, C + 200, C - 180), fill=255)
+    for sx in (-1, 1):
+        cx = C + sx * 215
+        d.ellipse((cx - 90, C - 290, cx + 90, C - 90), outline=255, width=36)
+    d.rectangle((C - 200, C - 300, C + 200, C - 180), fill=255)
+    d.pieslice((C - 200, C - 400, C + 200, C + 40), 0, 180, fill=255)
+    d.rectangle((C - 36, C + 30, C + 36, C + 170), fill=255)
+    d.rounded_rectangle((C - 170, C + 170, C + 170, C + 230), radius=16, fill=255)
+    d.rounded_rectangle((C - 220, C + 240, C + 220, C + 310), radius=18, fill=255)
+
+
+def _i_chaser(m):
+    """Double chevron racing forward."""
+    d = ImageDraw.Draw(m)
+    for dx in (-150, 110):
+        pts = [(C + dx - 90, C - 260), (C + dx + 30, C - 260), (C + dx + 200, C),
+               (C + dx + 30, C + 260), (C + dx - 90, C + 260), (C + dx + 80, C)]
+        d.polygon(pts, fill=255)
+
+
+def _i_death_bowler(m):
+    """Skull."""
+    d = ImageDraw.Draw(m)
+    d.ellipse((C - 240, C - 300, C + 240, C + 140), fill=255)
+    d.rounded_rectangle((C - 150, C + 40, C + 150, C + 250), radius=40, fill=255)
+    for sx in (-1, 1):
+        d.ellipse((C + sx * 105 - 75, C - 120, C + sx * 105 + 75, C + 20), fill=0)
+    d.polygon([(C, C + 40), (C - 40, C + 110), (C + 40, C + 110)], fill=0)
+    for k in (-80, 0, 80):
+        d.rectangle((C + k - 12, C + 170, C + k + 12, C + 250), fill=0)
+
+
+def _i_powerplay_bowler(m):
+    """Ball with a lightning bolt: strikes in the powerplay."""
+    _ball(m, C - 70, C + 60, 190)
+    d = ImageDraw.Draw(m)
+    bolt = [(C + 210, C - 330), (C + 60, C - 80), (C + 160, C - 80), (C + 70, C + 150),
+            (C + 300, C - 130), (C + 200, C - 130), (C + 310, C - 330)]
+    d.polygon(bolt, fill=255)
+
+
+def _i_spin_wizard(m):
+    """Wizard hat with a star and a spin swirl."""
+    d = ImageDraw.Draw(m)
+    d.polygon([(C - 40, C - 340), (C + 200, C + 120), (C - 240, C + 120)], fill=255)
+    d.ellipse((C - 320, C + 80, C + 280, C + 200), fill=255)
+    star = []
+    for i in range(10):
+        r = 70 if i % 2 == 0 else 30
+        a = math.radians(-90 + i * 36)
+        star.append((C - 20 + r * math.cos(a), C - 30 + r * math.sin(a)))
+    d.polygon(star, fill=0)
+    _arc_arrow(m, C, C + 140, 330, 20, 160, 30, head=70)
+
+
+def _i_bouncer_specialist(m):
+    """Short ball path bouncing up steeply."""
+    d = ImageDraw.Draw(m)
+    _line(d, (C - 320, C - 120), (C - 40, C + 230), 40)
+    _line(d, (C - 40, C + 230), (C + 210, C - 200), 40)
+    _arrow_head(d, (C + 250, C - 270), -60, 120)
+    d.rounded_rectangle((C - 340, C + 260, C + 340, C + 300), radius=14, fill=255)
+    _ball(m, C - 40, C + 175, 70)
+
+
+def _i_economical(m):
+    """Padlock: runs locked up."""
+    d = ImageDraw.Draw(m)
+    d.arc((C - 170, C - 330, C + 170, C + 10), 180, 360, fill=255, width=60)
+    d.rectangle((C - 170, C - 170, C - 110, C - 40), fill=255)
+    d.rectangle((C + 110, C - 170, C + 170, C - 40), fill=255)
+    d.rounded_rectangle((C - 260, C - 50, C + 260, C + 310), radius=50, fill=255)
+    d.ellipse((C - 50, C + 50, C + 50, C + 150), fill=0)
+    d.polygon([(C - 30, C + 120), (C + 30, C + 120), (C + 45, C + 230), (C - 45, C + 230)], fill=0)
+
+
+def _i_wicket_hunter(m):
+    """Stumps inside a crosshair."""
+    d = ImageDraw.Draw(m)
+    _ring(d, C, C, 320, 40)
+    for a, b in (((C, C - 360), (C, C - 250)), ((C, C + 250), (C, C + 360)),
+                 ((C - 360, C), (C - 250, C)), ((C + 250, C), (C + 360, C))):
+        _line(d, a, b, 36)
+    _stumps(m, C, C + 190, 330, gap=70, w=40)
+
+
 ICONS = {
     "Accumulator": _i_accumulator,
     "Blitz": _i_blitz,
@@ -440,6 +607,21 @@ ICONS = {
     "Mystery": _i_mystery,
     "Spell Finisher": _i_spell_finisher,
     "Mind Games": _i_mind_games,
+    "Centurion": _i_centurion,
+    "Finisher": _i_finisher,
+    "Opener": _i_opener,
+    "Power Hitter": _i_power_hitter,
+    "Pinch Hitter": _i_pinch_hitter,
+    "Clinical": _i_clinical,
+    "Clutch": _i_clutch,
+    "Match Winner": _i_match_winner,
+    "Chaser": _i_chaser,
+    "Death Bowler": _i_death_bowler,
+    "Powerplay Bowler": _i_powerplay_bowler,
+    "Spin Wizard": _i_spin_wizard,
+    "Bouncer Specialist": _i_bouncer_specialist,
+    "Economical": _i_economical,
+    "Wicket Hunter": _i_wicket_hunter,
 }
 
 
