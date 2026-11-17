@@ -43,6 +43,31 @@ FIXES: dict[str, dict] = {
     "Malcolm Marshall":  {"country": "West Indies"},
 }
 
+# Spinners: bowling type (codes as saved by /cardmaker). Wrist spinners (left-arm too) = Leg Spin,
+# left-arm finger spinners = Orthodox. Only cards that differ are changed.
+SPIN = {
+    "Off Spin": [
+        "Muttiah muralitharan", "Harbhajan Singh", "Ravi Ashwin", "Washington Sundar", "Maheesh theekshana",
+        "Mujeeb Ur Rahman", "Moeen Ali", "Roston Chase", "Sikandar Raza", "Dhananjaya de Silva",
+        "Glenn Maxwell", "Glenn Phillips", "Saim Ayub", "Will Jacks", "Matthew Short", "Brian Bennett",
+        "Chris Gayle", "Suresh Raina", "Charith Asalanka",
+    ],
+    "Leg Spin": [
+        "Anil Kumble", "Rashid Khan", "Adam Zampa", "Ravi Bishnoi", "Shadab Khan", "Varun Chakravarthy",
+        "Rehan Ahmed", "Ryan Burl", "Brian Masaba", "Liam Livingstone", "Kuldeep Yadav", "Noor Ahmad",
+        "Sufiyan muqeem",
+    ],
+    "Orthodox": [
+        "Ravindra Jadeja", "Axar patel", "Daniel Vettori", "Dunith wellalage", "Gudakesh Motie",
+        "Harpreet Brar", "Harmeet Singh", "George Dockrell", "Tilly Corteen Coleman", "Vaishnavi Sharma",
+        "Sean Williams", "Sanath Jayasuriya", "Yuvraj Singh", "Jacob Bethell", "Cooper Connolly",
+        "Arafat Minhas",
+    ],
+}
+for btype, names in SPIN.items():
+    for n in names:
+        FIXES.setdefault(n, {})["bowling_type"] = btype
+
 
 def base_name(name: str) -> str:
     return re.sub(r"\s*\([^)]*\)\s*", " ", str(name or "")).strip().lower()
