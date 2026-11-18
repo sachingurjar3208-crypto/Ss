@@ -342,7 +342,7 @@ def get_career_stats(user_id, player_name):
     """ALL-TIME career totals of this user's card (zeros if never played)."""
     try:
         from career_stats import _key_for, get_career_personal
-        key = _key_for(player_name)
+        key = _key_for(player_name, user_id)
         return get_career_personal(user_id, key) if key else {}
     except Exception as e:
         print(f"[stats] career lookup failed: {type(e).__name__}: {e}")

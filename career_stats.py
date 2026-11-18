@@ -134,8 +134,16 @@ def _save_personal_rows(conn: sqlite3.Connection, user_id, rows: dict[str, dict]
         )
 
 
-def _key_for(name: str) -> str | None:
-    """Map an in-match player name to a card key (None if not a card)."""
+def _key_for(name: str, user_id=None) -> str | None:
+    """Map an in-match player name to a card key (None if not a card).
+    `user_id`: the side's owner, so their private My Player card (hidden from search) is found too."""
+    if user_id:
+        try:
+            myp = card_db.get_myplayer(int(user_id))
+            if myp is not None and str(myp["playername"]).strip().lower() == str(name).strip().lower():
+                return myp["playername_key"]
+        except Exception:
+            pass
     card = card_db.get_card(name)
     if card is None:
         found = card_db.find_cards(name, limit=1)
@@ -182,7 +190,7 @@ def save_innings(
         runs = int(s.get("runs", s.get("r", 0)) or 0)
         if balls == 0 and runs == 0 and name not in dismissed:
             continue  # never came in
-        key = _key_for(name)
+        key = _key_for(name, batting_user_id)
         if not key:
             continue
         out = name in dismissed
@@ -206,7 +214,7 @@ def save_innings(
         balls = int(b.get("b", b.get("balls", 0)) or 0)
         if balls == 0:
             continue
-        key = _key_for(name)
+        key = _key_for(name, bowling_user_id)
         if not key:
             continue
         wkts = int(b.get("w", b.get("wickets", 0)) or 0)
