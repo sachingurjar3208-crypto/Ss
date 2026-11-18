@@ -24,6 +24,19 @@ NAMES = tuple(STYLES)                                   # ("halloween", "diwali"
 LABELS = {k: v["label"] for k, v in STYLES.items()}
 MAX_IMG_BYTES = 8 * 1024 * 1024
 
+# Premium members may use EVERY theme. When Premium ends, themes they don't really own lock again
+# (their choice is kept, so it comes back if they renew). summary_theme_cog keeps this up to date
+# from the Premium role (user_id -> True/False); unknown users count as not Premium.
+_PREMIUM: dict[int, bool] = {}
+
+
+def set_premium(user_id, value: bool) -> None:
+    _PREMIUM[int(user_id)] = bool(value)
+
+
+def is_premium(user_id) -> bool:
+    return _PREMIUM.get(int(user_id), False)
+
 
 def norm(pathname) -> str | None:
     """'Halloween' / ' halloween ' -> 'halloween'. Unknown names -> None."""
@@ -148,6 +161,9 @@ def take(user_id, pathname: str) -> bool | None:
 
 
 def owned(user_id) -> list[str]:
+    """Themes the player can use: all of them while Premium, else the ones they really own."""
+    if is_premium(user_id):
+        return list(NAMES)
     with economy._tx() as conn:
         _ensure(conn)
         have = {r["pathname"] for r in conn.execute(
@@ -158,11 +174,15 @@ def owned(user_id) -> list[str]:
 def equipped(user_id) -> str | None:
     with economy._tx() as conn:
         _ensure(conn)
-        row = conn.execute(
-            "SELECT e.pathname FROM summary_theme_equip e JOIN summary_theme_owned o "
-            "ON o.user_id = e.user_id AND o.pathname = e.pathname WHERE e.user_id = ?", (int(user_id),)
-        ).fetchone()
-    return row["pathname"] if row else None
+        if is_premium(user_id):
+            row = conn.execute("SELECT pathname FROM summary_theme_equip WHERE user_id = ?",
+                               (int(user_id),)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT e.pathname FROM summary_theme_equip e JOIN summary_theme_owned o "
+                "ON o.user_id = e.user_id AND o.pathname = e.pathname WHERE e.user_id = ?", (int(user_id),)
+            ).fetchone()
+    return row["pathname"] if row and row["pathname"] in NAMES else None
 
 
 def equip(user_id, pathname: str) -> str:
@@ -173,8 +193,8 @@ def equip(user_id, pathname: str) -> str:
     uid = int(user_id)
     with economy._tx() as conn:
         _ensure(conn)
-        if conn.execute("SELECT 1 FROM summary_theme_owned WHERE user_id = ? AND pathname = ?",
-                        (uid, key)).fetchone() is None:
+        if not is_premium(uid) and conn.execute(
+                "SELECT 1 FROM summary_theme_owned WHERE user_id = ? AND pathname = ?", (uid, key)).fetchone() is None:
             return "not_owned"
         conn.execute("INSERT INTO summary_theme_equip (user_id, pathname) VALUES (?, ?) "
                      "ON CONFLICT(user_id) DO UPDATE SET pathname = excluded.pathname", (uid, key))

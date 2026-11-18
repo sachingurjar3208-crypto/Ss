@@ -10,6 +10,8 @@ Owner only (slash commands, hidden from everybody else, main server only)
     /rcsbgive     user:<@user> pathname:<theme>
                   give a theme to a player (a player can also win one in a Star Pass).
 
+Premium members can use EVERY theme; when Premium ends, themes they don't own lock again.
+
 Players (text commands, only for themes they own)
     rcsb                  theme menu: the theme that is ON, all themes (ON / OWNED / LOCKED), a preview,
                           and buttons  < Use this theme | Turn off >  to browse and switch
@@ -31,6 +33,9 @@ import summary_image
 import summary_theme as st
 from bot_guard import ADMIN_GUILD_ID, OWNER_ID, MaintenanceActive
 from security import esc
+from squad_cog import PREMIUM_ROLE_ID
+
+PREMIUM_RECHECK = 600          # seconds before a member seen in another server is looked up again
 
 THEME_CHOICES = [app_commands.Choice(name=st.label(n), value=n) for n in st.NAMES]
 
@@ -134,7 +139,9 @@ class ThemeMenu(discord.ui.View):
         self.off_btn.disabled = on is None
         embed = discord.Embed(title="SUMMARY THEMES", description=menu_text(self.idx, mine, on, bool(data)),
                               color=THEME_COLORS.get(name, NORMAL_COLOR))
-        embed.set_footer(text=f"{self.idx + 1}/{len(st.NAMES)}  |  Themes come from the Star Pass and owner gifts")
+        tail = "Premium: every theme unlocked" if st.is_premium(self.user_id) else \
+            "Themes come from the Star Pass and owner gifts · Premium unlocks all"
+        embed.set_footer(text=f"{self.idx + 1}/{len(st.NAMES)}  |  {tail}")
         file = None
         if data:
             jpg = await asyncio.to_thread(_preview_jpeg, name, data)
@@ -182,11 +189,54 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+        self._checked: dict[int, float] = {}
+
     async def cog_load(self):
         try:
             await asyncio.to_thread(st.ensure_tables)
         except Exception as e:
             print(f"[summary-theme] could not create tables: {e}")
+
+    # ── Premium = every theme unlocked (kept in summary_theme._PREMIUM) ──────
+    @staticmethod
+    def _has_role(member) -> bool:
+        return any(r.id == PREMIUM_ROLE_ID for r in getattr(member, "roles", []))
+
+    async def sync_premium(self, user) -> None:
+        """Look at the Premium role (main server) of this user and remember it."""
+        uid = user.id
+        g = getattr(user, "guild", None)
+        if g is not None and g.id == ADMIN_GUILD_ID:
+            st.set_premium(uid, self._has_role(user))
+            self._checked[uid] = time.monotonic()
+            return
+        if time.monotonic() - self._checked.get(uid, -1e9) < PREMIUM_RECHECK:
+            return
+        self._checked[uid] = time.monotonic()
+        guild = self.bot.get_guild(ADMIN_GUILD_ID)
+        if guild is None:
+            return
+        m = guild.get_member(uid)
+        if m is None:
+            try:
+                m = await guild.fetch_member(uid)
+            except discord.NotFound:
+                st.set_premium(uid, False)
+                return
+            except discord.HTTPException:
+                return
+        st.set_premium(uid, self._has_role(m))
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if message.author.bot or message.guild is None or not message.content.lower().startswith("rc"):
+            return
+        await self.sync_premium(message.author)
+
+    @commands.Cog.listener()
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        if after.guild.id == ADMIN_GUILD_ID and self._has_role(before) != self._has_role(after):
+            st.set_premium(after.id, self._has_role(after))
 
     # ── Owner: /rcsbset ──────────────────────────────────────────────────────
     @app_commands.command(name="rcsbset", description="Set the image of a summary theme (Halloween, Diwali, Christmas)")
@@ -298,6 +348,7 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
         retry = bucket.update_rate_limit() if bucket else None
         if retry:
             raise commands.CommandOnCooldown(bucket, retry, commands.BucketType.user)
+        await self.sync_premium(ctx.author)
         on = await asyncio.to_thread(st.equipped, ctx.author.id)
         idx = st.NAMES.index(on) if on in st.NAMES else 0           # open on the theme that is ON
         view = ThemeMenu(ctx.author.id, idx)
@@ -308,11 +359,12 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
     @rcsb.command(name="use", aliases=["on", "equip"])
     async def rcsb_use(self, ctx: commands.Context, *, pathname: str):
         """rcsb use halloween"""
+        await self.sync_premium(ctx.author)
         res = await asyncio.to_thread(st.equip, ctx.author.id, pathname)
         if res == "unknown":
             await ctx.send("Unknown theme. Themes: " + ", ".join(st.label(n) for n in st.NAMES) + ".")
         elif res == "not_owned":
-            await ctx.send(f"You don't own the {esc(pathname.strip().title())} theme.")
+            await ctx.send(f"You don't own the {esc(pathname.strip().title())} theme. 💎 Premium members can use every theme.")
         else:
             key = st.norm(pathname)
             extra = "" if await asyncio.to_thread(st.has_image, key) else " (its image isn't set yet, so the normal summary shows for now)"
