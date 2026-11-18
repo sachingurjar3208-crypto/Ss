@@ -43,7 +43,7 @@ SILHOUETTE = "local:myplayer_photos/silhouette.png"
 MAX_OVR = 95
 DAILY_DRINKS = 1
 WEEKLY_DRINKS = 20
-DRINK = "🥤"
+DRINK = "<:energydrink:1572435428928135230>"
 
 # role -> (ovr, bat, bowl) at creation
 START = {"AR": (60, 60, 60), "BAT": (60, 60, 10), "WK": (60, 60, 10), "BOWL": (60, 10, 60)}
