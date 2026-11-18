@@ -1055,12 +1055,22 @@ def _gold_bg() -> Image.Image:
     return _PREMIUM["gold_bg"]
 
 
+SIG_BG_FILE = Path(__file__).with_name("signature_bg.jpg")
+
+
 def _sig_icon_bg() -> Image.Image:
     """Signature Edition backdrop: dark charcoal with a warm gold spotlight behind the player,
     soft light rays, a faint gold cricket ball and gold bokeh (built once)."""
     hit = _PREMIUM.get("sig_icon")
     if hit is not None:
         return hit
+    if SIG_BG_FILE.is_file():          # the designed backdrop (gold ball), cover-fitted to the card
+        src = Image.open(SIG_BG_FILE).convert("RGB")
+        k = max(W / src.width, H / src.height)
+        src = src.resize((int(src.width * k + 0.5), int(src.height * k + 0.5)), Image.LANCZOS)
+        x0, y0 = (src.width - W) // 2, 0
+        _PREMIUM["sig_icon"] = src.crop((x0, y0, x0 + W, y0 + H))
+        return _PREMIUM["sig_icon"]
     import numpy as np
     w, h = OUT_W // 2, OUT_H // 2
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
