@@ -110,6 +110,7 @@ THEME_CHOICES = [
     app_commands.Choice(name="Prestige (black marble, ribbons)", value="prestige"),
     app_commands.Choice(name="Prestige Diwali", value="prestige_diwali"),
     app_commands.Choice(name="Black & Gold (premium)", value="gold"),
+    app_commands.Choice(name="Signature (pink & gold, autograph)", value="signature"),
     app_commands.Choice(name="Artwork (your own full design)", value="art"),
 ]
 THEME_HELP = ("Card theme. Halloween = background used as frame + orange text. "
