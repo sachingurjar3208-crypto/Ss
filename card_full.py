@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import io
 import math
-import re
 import threading
 from pathlib import Path
 
@@ -105,8 +104,6 @@ THEMES = {
     # Black & Gold: dark card with gold light rays, gold frame and gold numbers (premium look)
     "gold":            {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "PRESTIGE", "style": "gold"},
     # Premium "My Player" custom cards: the Black & Gold look with their own tag.
-    # Signature Box cards: black + hot pink, 360 rings, pink-gold foil frame and a gold autograph.
-    "signature":       {"bg": ((70, 10, 52), (6, 2, 8)),    "panel": ((40, 8, 30), (8, 2, 8)),      "accent": (255, 92, 176),  "tag": "SIGNATURE", "style": "signature"},
     "myplayer":        {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "MY PLAYER", "style": "gold"},
 }
 
@@ -975,9 +972,6 @@ NEON_RIM = ((255, 70, 210), (70, 220, 255))          # left light, right light
 NEON_GRAD = ((255, 120, 225), (120, 225, 255))       # numbers: top -> bottom
 GOLD_RIM = ((255, 214, 120), (255, 214, 120))
 GOLD_GRAD = ((255, 240, 190), (205, 150, 55))
-SIG_GRAD = ((255, 236, 246), (255, 96, 178))           # signature numbers: white-pink -> hot pink
-SIG_RIM = ((255, 80, 180), (255, 206, 110))            # pink left light, gold right light
-SIG_FONT = Path(__file__).with_name("signature_font.ttf")
 CINZEL = Path(__file__).with_name("cinzel.ttf")
 _PREMIUM: dict = {}
 
@@ -1002,9 +996,9 @@ def _grad_text(canvas, xy, text, font, top, bottom, anchor="mm"):
 def _premium_player_fx(canvas, player, pos, style):
     """Aura behind the player + coloured edge light (pink / cyan for neon, gold for gold)."""
     a = player.getchannel("A")
-    rim = NEON_RIM if style == "neon" else SIG_RIM if style == "signature" else GOLD_RIM
+    rim = NEON_RIM if style == "neon" else GOLD_RIM
     aura_col = rim[0] if style == "neon" else (255, 190, 80)
-    aura_a = 0.75 if style == "neon" else 0.32 if style == "signature" else 0.4
+    aura_a = 0.75 if style == "neon" else 0.4
     # aura: blurred silhouette, done small (fast) and scaled up
     big = Image.new("L", canvas.size, 0)
     big.paste(a, pos)
@@ -1013,7 +1007,7 @@ def _premium_player_fx(canvas, player, pos, style):
     canvas.paste(aura_col + (255,), (0, 0), halo)
     del big, small, halo
     # rim light, only around the player (cropped region keeps it quick)
-    spread, blur, alpha = (9, 7, 0.85) if style == "neon" else (7, 6, 0.75) if style == "signature" else (5, 5, 0.6)
+    spread, blur, alpha = (9, 7, 0.85) if style == "neon" else (5, 5, 0.6)
     pad = (spread + blur * 3) * S
     x0, y0 = max(0, pos[0] - pad), max(0, pos[1] - pad)
     x1, y1 = min(W, pos[0] + player.width + pad), min(H, pos[1] + player.height + pad)
@@ -1056,96 +1050,6 @@ def _gold_bg() -> Image.Image:
         d.ellipse((_q(x - r, y - r), _q(x + r, y + r)), fill=(255, 215, 130, rnd.randint(60, 200)))
     _PREMIUM["gold_bg"] = img.convert("RGB")
     return _PREMIUM["gold_bg"]
-
-
-def _sig_bg() -> Image.Image:
-    """Signature card: black with a hot-pink spotlight, pink/gold "360" rings behind the player,
-    diagonal light beams, halftone dots and gold dust (built once)."""
-    hit = _PREMIUM.get("sig_bg")
-    if hit is not None:
-        return hit
-    import numpy as np
-    w, h = OUT_W // 2, OUT_H // 2
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    cx, cy = w / 2, 440 / 2
-    dist = np.hypot(xx - cx, yy - cy)
-    ang = np.arctan2(yy - cy, xx - cx)
-    base = (10 - 8 * yy / h)[..., None] * np.array([1.0, 0.5, 0.9])
-    spot = np.clip(1 - dist / 300, 0, 1) ** 2
-    rays = (0.5 + 0.5 * np.cos(ang * 14)) ** 8 * np.clip(1 - dist / 520, 0, 1)
-    pink = np.array([255, 50, 150], np.float32); gold = np.array([255, 196, 96], np.float32)
-    img = base + spot[..., None] * pink * 0.55 + rays[..., None] * pink * 0.22
-    # diagonal beams
-    for off, k in ((0.18, 0.16), (0.52, 0.10), (0.80, 0.07)):
-        d = (xx / w * 0.8 - yy / h * 0.6) - (off - 0.3)
-        img += (np.exp(-(d / 0.035) ** 2) * k)[..., None] * np.array([255, 120, 200])
-    # 360 rings (ellipses) around the player's chest
-    for rr, col, k, wd in ((150, pink, 0.85, 2.2), (190, gold, 0.55, 1.6), (232, pink, 0.40, 1.4), (275, gold, 0.25, 1.2)):
-        e = np.hypot((xx - cx) / 1.0, (yy - cy) / 0.92)
-        ring = np.exp(-((e - rr) / wd) ** 2) * k
-        # break the rings into arcs so they read as motion
-        ring *= (0.35 + 0.65 * (0.5 + 0.5 * np.sin(ang * 3 + rr)))
-        img += ring[..., None] * col
-    # halftone dots in the lower-left and upper-right corners
-    dots = ((np.sin(xx * 0.9) * np.sin(yy * 0.9)) > 0.75) * 1.0
-    corner = np.clip(1 - np.hypot(xx / w, (h * 0.55 - yy) / h - 0.55) * 1.6, 0, 1)
-    img += (dots * corner * 0.10)[..., None] * pink
-    img = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGB").resize((W, H), Image.BICUBIC).convert("RGBA")
-    d = ImageDraw.Draw(img)
-    import random
-    rnd = random.Random(11)
-    for _ in range(160):
-        x, y, r = rnd.randint(30, OUT_W - 30), rnd.randint(30, 1100), rnd.uniform(0.8, 2.8)
-        c = (255, 214, 140) if rnd.random() < 0.55 else (255, 140, 210)
-        d.ellipse((_q(x - r, y - r), _q(x + r, y + r)), fill=c + (rnd.randint(70, 210),))
-    _PREMIUM["sig_bg"] = img.convert("RGB")
-    return _PREMIUM["sig_bg"]
-
-
-def _sig_foil() -> Image.Image:
-    """Pink -> gold -> pink foil for the signature frame (built once)."""
-    hit = _PREMIUM.get("sig_foil")
-    if hit is None:
-        import numpy as np
-        w, h = OUT_W // 4, OUT_H // 4
-        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-        t = (xx / w * 0.7 + yy / h * 0.3)
-        u = 0.5 + 0.5 * np.cos(t * math.pi * 3)
-        pink = np.array([255, 70, 170], np.float32); gold = np.array([255, 214, 120], np.float32)
-        img = pink * u[..., None] + gold * (1 - u[..., None])
-        hit = _PREMIUM["sig_foil"] = Image.fromarray(img.astype(np.uint8), "RGB").resize((W, H), Image.BICUBIC)
-    return hit
-
-
-def _sig_autograph(canvas, card_row):
-    """Gold handwritten autograph of the player across the lower art, slightly tilted."""
-    if not SIG_FONT.is_file():
-        return
-    name = str(card_row["displayname"] or card_row["playername"] or "").strip()
-    name = re.sub(r"\s*\(.*?\)\s*", " ", name).strip().title()
-    if not name:
-        return
-    f = _font(SIG_FONT, 118)
-    lay = Image.new("L", (W, 420 * S), 0)
-    dl = ImageDraw.Draw(lay)
-    tw = dl.textlength(name, font=f)
-    if tw > W * 0.70:
-        f = _font(SIG_FONT, int(118 * W * 0.70 / tw))
-    dl.text((W / 2, 210 * S), name, font=f, fill=255, anchor="mm")
-    # underline flourish
-    tw = dl.textlength(name, font=f)
-    x0, x1 = W / 2 - tw * 0.42, W / 2 + tw * 0.50
-    pts = [(x0 + (x1 - x0) * i / 40, 300 * S + math.sin(i / 40 * math.pi) * -18 * S + i * 0.6 * S) for i in range(41)]
-    dl.line(pts, fill=255, width=5 * S, joint="curve")
-    lay = lay.rotate(6, resample=Image.BICUBIC, center=(W / 2, 210 * S))
-    full = Image.new("L", canvas.size, 0)
-    full.paste(lay, (int(W * 0.08), (PANEL_TOP - 470) * S))
-    glow = full.resize((W // 4, H // 4)).filter(ImageFilter.GaussianBlur(5)).resize((W, H))
-    canvas.paste((255, 90, 180, 255), (0, 0), glow.point(lambda v: min(255, int(v * 1.3))))
-    gold = Image.new("RGB", canvas.size, (255, 214, 120))
-    shade = Image.linear_gradient("L").resize(canvas.size)
-    gold = Image.composite(Image.new("RGB", canvas.size, (255, 244, 200)), gold, shade.point(lambda v: 255 - v))
-    canvas.paste(gold, (0, 0), full.point(lambda v: int(v * 0.95)))
 
 
 def _sheen_mask() -> Image.Image:
@@ -1194,11 +1098,6 @@ def _premium_frame(canvas, style):
         o = _v2_outline(18)
         dm.line(o + [o[0]], fill=255, width=12 * S, joint="curve")
         fill = _holo_fill()
-    elif style == "signature":
-        for inset, wdt in ((14, 11), (34, 3)):
-            o = _v2_outline(inset)
-            dm.line(o + [o[0]], fill=255, width=wdt * S, joint="curve")
-        fill = _sig_foil()
     else:
         for inset, wdt in ((16, 9), (34, 3)):
             o = _v2_outline(inset)
@@ -1234,23 +1133,20 @@ def _premium_name(canvas, card_row, style, accent):
 
 def _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas):
     style = th["style"]
-    if style in ("gold", "signature"):
+    if style == "gold":
         wm = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         ImageDraw.Draw(wm).text(_q(OUT_W / 2, 520), str(card_row["ovr"]), font=_font(ci.FONT_DISPLAY_BOLD, 620),
-                                fill=(255, 200, 100, 30) if style == "gold" else (255, 110, 190, 34), anchor="mm")
+                                fill=(255, 200, 100, 30), anchor="mm")
         canvas.alpha_composite(wm)
         del wm
     _draw_player(canvas, card_row, fg_image, style=style)
-    canvas.paste((4, 6, 14, 255) if style != "signature" else (8, 2, 8, 255), (0, 0), st["fade"])
-    if style == "signature":
-        _sig_autograph(canvas, card_row)
+    canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
     _premium_name(canvas, card_row, style, accent)
     if SHOW_BRAND:
         _v2_brand(canvas)
     if th["tag"]:
         _v2_tag(canvas, th["tag"], accent)
-    _draw_panel(canvas, card_row, role, accent, themed,
-                num_grad=NEON_GRAD if style == "neon" else SIG_GRAD if style == "signature" else GOLD_GRAD)
+    _draw_panel(canvas, card_row, role, accent, themed, num_grad=NEON_GRAD if style == "neon" else GOLD_GRAD)
     canvas.paste((255, 255, 255, 255), (0, 0), _sheen_mask().point(lambda v: int(v * 0.12)))
     _premium_frame(canvas, style)
 
@@ -1266,8 +1162,6 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
     if th.get("style") == "gold" and raw_bg is None:
         canvas = _gold_bg().convert("RGBA")
-    elif th.get("style") == "signature" and raw_bg is None:
-        canvas = _sig_bg().convert("RGBA")
 
     if LAYOUT == "v2" and th.get("style"):
         _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas)
