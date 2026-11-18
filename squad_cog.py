@@ -717,6 +717,10 @@ class SquadCog(commands.Cog, name="Squad"):
             return
         query = security.clean_input(player)
         found = await asyncio.to_thread(card_db.find_cards, query, 8)
+        # Your own My Player card is private (find_cards skips it): match it by its name here.
+        myp = await asyncio.to_thread(card_db.get_myplayer, ctx.author.id)
+        if myp is not None and query.strip().lower() in str(myp["playername"]).lower():
+            found = [myp] + list(found)
         if not found:
             await ctx.send(f"❌ No player found matching `{sl.discord_safe(query)}`.")
             return
