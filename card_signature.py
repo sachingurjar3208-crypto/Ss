@@ -36,7 +36,7 @@ INK = (16, 14, 22)
 NAVY = (34, 26, 70)
 GOLD = (196, 150, 58)
 BORDER_GOLD = (234, 205, 120)
-FADE_TOP, FADE_FULL = 600, 870           # player fades into the paper between these y values
+FADE_TOP, FADE_FULL = 600, 870           # player fades into deep purple from about these y values
 SIG_BOX = (170, 800, 870, 1115)          # where the signature is fitted (x1, y1, x2, y2)
 ROLE_WORDS = {"BAT": "BATTER", "BOWL": "BOWLER", "AR": "ALL-ROUNDER", "WK": "KEEPER"}
 EDITION_TEXT = "S I G N A T U R E   E D I T I O N"
@@ -139,43 +139,149 @@ def _name_instead(card: Image.Image, name: str) -> None:
     d.text(((x1 + x2) / 2, (y1 + y2) / 2), name, font=f, fill=INK, anchor="mm")
 
 
+GOLD_TOP, GOLD_BOT = (255, 238, 170), (214, 150, 40)
+PURPLE_DEEP = (16, 6, 40)
+
+
+def _gold_fill(size) -> Image.Image:
+    """Vertical bright-to-deep gold gradient."""
+    g = Image.linear_gradient("L").resize(size)
+    top = Image.new("RGB", size, GOLD_TOP)
+    bot = Image.new("RGB", size, GOLD_BOT)
+    return Image.composite(bot, top, g)
+
+
+def _gold_text(card, xy, text, font, anchor="mm"):
+    m = Image.new("L", card.size, 0)
+    ImageDraw.Draw(m).text(xy, text, font=font, fill=255, anchor=anchor)
+    bb = m.getbbox()
+    if not bb:
+        return
+    sh = m.filter(ImageFilter.GaussianBlur(4))
+    card.paste((0, 0, 0, 255), (2, 3), sh.point(lambda v: int(v * 0.6)))
+    card.paste(_gold_fill((bb[2] - bb[0], bb[3] - bb[1])), bb[:2], m.crop(bb))
+
+
+def _gold_bar(card, x1, x2, y, h, fade_left: bool):
+    """A thick gold bar that fades out toward the card edge."""
+    w = int(x2 - x1)
+    bar = _gold_fill((w, h)).convert("RGBA")
+    ramp = Image.linear_gradient("L").rotate(90, expand=True).resize((w, h))   # 255 left -> 0 right
+    if fade_left:
+        ramp = ramp.transpose(Image.FLIP_LEFT_RIGHT)
+    a = ramp.point(lambda v: int(min(255, 60 + v * 0.9)))
+    bar.putalpha(a)
+    card.alpha_composite(bar, (int(x1), int(y - h / 2)))
+
+
+def _laurel_sprig(card, x, y, flip=False, size=46):
+    """Small gold laurel branch (5 leaf pairs along a curved stem)."""
+    import math
+    lay = Image.new("L", (size * 3, size * 3), 0)
+    cx, cy = size * 1.5, size * 2.6
+    R = size * 1.6
+    stem = [(cx + R * math.cos(math.radians(a)), cy + R * math.sin(math.radians(a))) for a in range(200, 296, 4)]
+    ImageDraw.Draw(lay).line(stem, fill=255, width=3)
+    leaf = Image.new("L", (26, 11), 0)
+    ImageDraw.Draw(leaf).ellipse((0, 0, 25, 10), fill=255)
+    for i in range(6):
+        a = math.radians(205 + i * 17)
+        px, py = cx + R * math.cos(a), cy + R * math.sin(a)
+        tang = a + math.pi / 2
+        for side in (-1, 1):
+            ang = tang + side * 0.75 + math.pi
+            lx, ly = px + math.cos(ang) * 12, py + math.sin(ang) * 12
+            lf = leaf.rotate(-math.degrees(ang), expand=True, resample=Image.BICUBIC)
+            lay.paste(255, (int(lx - lf.width / 2), int(ly - lf.height / 2)), lf)
+    if flip:
+        lay = lay.transpose(Image.FLIP_LEFT_RIGHT)
+    gold = _gold_fill(lay.size).convert("RGBA")
+    gold.putalpha(lay)
+    card.alpha_composite(gold, (int(x - lay.width / 2), int(y - lay.height / 2)))
+
+
+def _gold_signature(card: Image.Image, sig: Image.Image) -> None:
+    """Paste the signature as glowing gold ink."""
+    x1, y1, x2, y2 = SIG_BOX
+    bw, bh = x2 - x1, y2 - y1
+    scale = min(bw / sig.width, bh / sig.height)
+    a = sig.getchannel("A")
+    if scale < 0.75:
+        a = a.filter(ImageFilter.MaxFilter(3 if scale > 0.4 else 5))
+    a = a.resize((max(1, int(sig.width * scale)), max(1, int(sig.height * scale))), Image.LANCZOS)
+    pos = (x1 + (bw - a.width) // 2, y1 + (bh - a.height) // 2)
+    full = Image.new("L", card.size, 0)
+    full.paste(a, pos)
+    glow = full.filter(ImageFilter.GaussianBlur(10))
+    card.paste((255, 170, 60, 255), (0, 0), glow.point(lambda v: min(255, int(v * 1.1))))
+    card.paste((60, 30, 0, 255), (2, 3), full.filter(ImageFilter.GaussianBlur(2)).point(lambda v: int(v * 0.6)))
+    card.paste(_gold_fill(card.size), (0, 0), full)
+    hi = full.filter(ImageFilter.MinFilter(3))
+    card.paste((255, 250, 225, 255), (-1, -1), hi.point(lambda v: int(v * 0.35)))
+
+
 def apply_signature_look(base: Image.Image, card_row, role: str) -> Image.Image:
-    """base = the finished normal Style 2 card (RGBA, 1037 x 1517) drawn WITHOUT a name."""
+    """base = the finished normal card (RGBA, 1037 x 1517) drawn WITHOUT a name, on the purple
+    Signature backdrop. Adds: player fading into deep purple, the GOLD signature, NAME | ROLE with
+    gold bars, the 6 stats in gold, and "SIGNATURE EDITION" between two laurel sprigs."""
     base = base.convert("RGBA")
     if base.size != (W, H):
         base = base.resize((W, H), Image.LANCZOS)
     alpha = base.getchannel("A")
     card = base.copy()
 
-    # 1) player fades into ivory paper
+    # 1) the player fades into deep purple (the backdrop's light swirls still show through)
     fade = Image.new("L", (W, H), 0)
     fd = ImageDraw.Draw(fade)
-    for y in range(FADE_TOP, H):
-        v = 255 if y >= FADE_FULL else int(255 * ((y - FADE_TOP) / (FADE_FULL - FADE_TOP)) ** 1.6)
+    for y in range(FADE_TOP + 120, H):
+        v = int(150 * min(1.0, ((y - FADE_TOP - 120) / 330)) ** 1.4)
         fd.line((0, y, W, y), fill=v)
-    card = Image.composite(Image.new("RGBA", (W, H), IVORY + (255,)), card, fade)
-    tex = Image.new("L", (W, H), 0)
-    td = ImageDraw.Draw(tex)
-    for y in range(FADE_FULL, H, 7):
-        td.line((0, y, W, y), fill=10)
-    card = Image.composite(Image.new("RGBA", (W, H), (210, 200, 180, 255)), card, tex)
+    card = Image.composite(Image.new("RGBA", (W, H), PURPLE_DEEP + (255,)), card, fade)
+    # the normal stats panel of the base card is covered with the backdrop again
+    try:
+        import card_full
+        back = card_full._sig_icon_bg().resize((W, H), Image.LANCZOS).convert("RGBA")
+        back = Image.blend(back, Image.new("RGBA", (W, H), PURPLE_DEEP + (255,)), 0.25)
+    except Exception:
+        back = Image.new("RGBA", (W, H), PURPLE_DEEP + (255,))
+    cover = Image.new("L", (W, H), 0)
+    cd = ImageDraw.Draw(cover)
+    for y in range(985, H):
+        cd.line((0, y, W, y), fill=min(255, int(255 * ((y - 985) / 130) ** 1.3)))
+    card = Image.composite(back, card, cover)
 
-    # 2) the signature (or the name, big, when there is no signature file)
+    # 2) the signature in gold (or the name, big, when there is no signature file)
     playername = str(ci._col(card_row, "playername", "") or ci._col(card_row, "displayname", ""))
     display = str(ci._col(card_row, "displayname", playername) or playername).upper()
     sig = _load_signature(playername)
     if sig is not None:
-        _paste_signature(card, sig)
+        _gold_signature(card, sig)
     else:
-        _name_instead(card, display)
+        d = ImageDraw.Draw(card)
+        x1, y1, x2, y2 = SIG_BOX
+        f = _fit(d, display, ci.FONT_NAME if Path(ci.FONT_NAME).exists() else ci.FONT_DISPLAY_BOLD, 120, x2 - x1)
+        _gold_text(card, ((x1 + x2) / 2, (y1 + y2) / 2), display, f)
 
-    # 3) NAME | ROLE, stats, edition line
+    # glowing light line under the signature
+    line = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(line).line((200, 1122, 837, 1122), fill=255, width=3)
+    card.paste((255, 196, 90, 255), (0, 0), line.filter(ImageFilter.GaussianBlur(7)).point(lambda v: min(255, v * 2)))
+    card.paste((255, 236, 190, 255), (0, 0), line.point(lambda v: int(v * 0.7)))
+
+    # 3) NAME | ROLE between two gold bars
     d = ImageDraw.Draw(card)
     role_word = ROLE_WORDS.get(role, role)
-    f_row = _fit(d, display, ci.FONT_LABEL, 38, 330)
-    d.text((W / 2 - 40, 1160), display, font=f_row, fill=NAVY, anchor="rm")
-    d.line((W / 2, 1138, W / 2, 1182), fill=GOLD, width=4)
-    d.text((W / 2 + 40, 1160), role_word, font=_font(ci.FONT_LABEL, 38), fill=NAVY, anchor="lm")
+    f_row = _fit(d, display, ci.FONT_LABEL, 38, 300)
+    f_role = _font(ci.FONT_LABEL, 38)
+    left_w = d.textlength(display, font=f_row)
+    right_w = d.textlength(role_word, font=f_role)
+    _gold_bar(card, 52, W / 2 - 40 - left_w - 14, 1160, 16, fade_left=True)
+    _gold_bar(card, W / 2 + 40 + right_w + 14, W - 52, 1160, 16, fade_left=False)
+    d.text((W / 2 - 40, 1160), display, font=f_row, fill=(255, 255, 255), anchor="rm")
+    d.line((W / 2, 1138, W / 2, 1182), fill=GOLD_BOT, width=4)
+    d.text((W / 2 + 40, 1160), role_word, font=f_role, fill=(255, 255, 255), anchor="lm")
+
+    # 4) stats: gold numbers, white labels
     try:
         rows = card_stat_rows(card_row)[:6]
     except Exception:
@@ -184,17 +290,18 @@ def apply_signature_look(base: Image.Image, card_row, role: str) -> Image.Image:
     cols = [250, 518, 786]
     for i, (label, value) in enumerate(rows):
         x, y = cols[i % 3], 1222 + (i // 3) * 72
-        d.text((x - 6, y), str(value), font=f_num, fill=INK, anchor="rm")
-        d.text((x + 6, y), str(label), font=f_lab, fill=NAVY, anchor="lm")
-    d.line((360, 1340, 677, 1340), fill=GOLD, width=3)
-    d.text((W / 2, 1388), EDITION_TEXT, font=_font(ci.FONT_LABEL, 30), fill=GOLD, anchor="mm")
+        _gold_text(card, (x - 6, y), str(value), f_num, anchor="rm")
+        d.text((x + 6, y), str(label), font=f_lab, fill=(255, 255, 255), anchor="lm")
 
-    # 4) the gold border again (the paper covered its lower part)
-    inner = alpha.filter(ImageFilter.MinFilter(25))
-    ring = Image.composite(Image.new("L", (W, H), 255), Image.new("L", (W, H), 0),
-                           Image.eval(inner, lambda v: 255 - v))
-    ring = Image.composite(ring, Image.new("L", (W, H), 0), alpha)
-    card = Image.composite(Image.new("RGBA", (W, H), BORDER_GOLD + (255,)), card, ring)
+    # 5) edition line with laurels
+    line = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(line).line((340, 1340, 697, 1340), fill=255, width=2)
+    card.paste((255, 200, 100, 255), (0, 0), line.filter(ImageFilter.GaussianBlur(4)).point(lambda v: min(255, v * 2)))
+    card.paste((255, 226, 150, 255), (0, 0), line)
+    _gold_text(card, (W / 2, 1390), EDITION_TEXT, _font(ci.FONT_LABEL, 32))
+    _laurel_sprig(card, 268, 1392, flip=True)
+    _laurel_sprig(card, W - 268, 1392)
+
     card.putalpha(alpha)
     return card
 

@@ -950,7 +950,8 @@ def _v2_tag(canvas, text, accent):
 
 
 def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
-    _v2_diagonals(canvas, accent)
+    if not th.get("style_bg"):              # the Signature backdrop has its own light lines
+        _v2_diagonals(canvas, accent)
     _draw_player(canvas, card_row, fg_image)
     canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
     _v2_name(canvas, card_row)
