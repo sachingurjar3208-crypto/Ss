@@ -302,7 +302,19 @@ def apply_signature_look(base: Image.Image, card_row, role: str) -> Image.Image:
     _laurel_sprig(card, 268, 1392, flip=True)
     _laurel_sprig(card, W - 268, 1392)
 
-    card.putalpha(alpha)
+    # the two cut corners (top-right, bottom-left) are filled with the purple backdrop
+    # instead of being see-through (they looked white in Discord / the gallery)
+    full = back.copy()
+    full.alpha_composite(card if card.mode == "RGBA" else card.convert("RGBA"))
+    card = Image.composite(card, full, alpha)
+    try:
+        import card_full
+        r = card_full.RADIUS
+    except Exception:
+        r = 34
+    m = Image.new("L", (W * 2, H * 2), 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, W * 2 - 1, H * 2 - 1), radius=r * 2, fill=255)
+    card.putalpha(m.resize((W, H), Image.LANCZOS))
     return card
 
 
