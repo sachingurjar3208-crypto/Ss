@@ -104,6 +104,9 @@ THEMES = {
     # Black & Gold: dark card with gold light rays, gold frame and gold numbers (premium look)
     "gold":            {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "PRESTIGE", "style": "gold"},
     # Premium "My Player" custom cards: the Black & Gold look with their own tag.
+    # Signature Edition top half (card_signature draws the ivory paper below): charcoal + gold
+    # spotlight, light rays, a soft gold ball and bokeh, gold diagonal lines.
+    "sig_base":        {"bg": ((70, 58, 38), (10, 9, 8)),   "panel": ((40, 34, 24), (10, 9, 8)),    "accent": (232, 192, 104), "tag": None, "style_bg": "sig_icon"},
     "myplayer":        {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "MY PLAYER", "style": "gold"},
 }
 
@@ -1052,6 +1055,49 @@ def _gold_bg() -> Image.Image:
     return _PREMIUM["gold_bg"]
 
 
+def _sig_icon_bg() -> Image.Image:
+    """Signature Edition backdrop: dark charcoal with a warm gold spotlight behind the player,
+    soft light rays, a faint gold cricket ball and gold bokeh (built once)."""
+    hit = _PREMIUM.get("sig_icon")
+    if hit is not None:
+        return hit
+    import numpy as np
+    w, h = OUT_W // 2, OUT_H // 2
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    cx, cy = w * 0.5, h * 0.27
+    d = np.hypot(xx - cx, yy - cy)
+    ang = np.arctan2(yy - cy, xx - cx)
+    img = (np.array([30, 27, 30], np.float32) * (1 - yy / h * 0.6)[..., None])
+    img += (np.clip(1 - d / (w * 0.80), 0, 1) ** 2)[..., None] * np.array([170, 132, 66])
+    rays = (0.5 + 0.5 * np.cos(ang * 16)) ** 10 * np.clip(1 - d / (w * 0.95), 0, 1)
+    img += rays[..., None] * np.array([120, 98, 56]) * 0.55
+    # faint gold ball with a seam, behind the head
+    br = w * 0.30
+    bd = np.hypot(xx - cx, yy - cy) / br
+    inside = bd < 1
+    z = np.sqrt(np.clip(1 - bd ** 2, 0, 1))
+    shade = np.clip(0.25 + 0.75 * (z * 0.7 + (-(xx - cx) / br) * 0.25 + (-(yy - cy) / br) * 0.35), 0, 1.1)
+    seam = np.exp(-((((xx - cx) * 0.5 + (yy - cy) * 0.87) / br) / 0.03) ** 2)
+    spec = np.exp(-(((xx - (cx - br * 0.35)) ** 2 + (yy - (cy - br * 0.40)) ** 2) / (br * 0.22) ** 2))
+    stitch = seam * (0.5 + 0.5 * np.cos(np.arctan2(yy - cy, xx - cx) * 70)) ** 4
+    ball = (np.array([225, 168, 70]) * shade[..., None] ** 1.4) * (1 - 0.5 * seam[..., None])
+    ball += stitch[..., None] * np.array([255, 236, 190]) * 0.6 + spec[..., None] * np.array([255, 245, 215]) * 0.55
+    a = (np.clip((1 - bd) * br / 2, 0, 1) * inside * 0.62)[..., None]
+    img = img * (1 - a) + ball * a
+    out = Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGB").resize((W, H), Image.BICUBIC)
+    lay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    dl = ImageDraw.Draw(lay)
+    import random
+    rnd = random.Random(5)
+    for _ in range(46):
+        x, y, r = rnd.uniform(20, OUT_W - 20), rnd.uniform(20, 820), rnd.uniform(4, 16)
+        dl.ellipse((_q(x - r, y - r), _q(x + r, y + r)), fill=(255, 226, 160, rnd.randint(16, 50)))
+    out = out.convert("RGBA")
+    out.alpha_composite(lay.filter(ImageFilter.GaussianBlur(2 * S)))
+    _PREMIUM["sig_icon"] = out.convert("RGB")
+    return _PREMIUM["sig_icon"]
+
+
 def _sheen_mask() -> Image.Image:
     hit = _PREMIUM.get("sheen")
     if hit is None:
@@ -1162,6 +1208,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
     if th.get("style") == "gold" and raw_bg is None:
         canvas = _gold_bg().convert("RGBA")
+    elif th.get("style_bg") == "sig_icon" and raw_bg is None:
+        canvas = _sig_icon_bg().convert("RGBA")
 
     if LAYOUT == "v2" and th.get("style"):
         _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas)

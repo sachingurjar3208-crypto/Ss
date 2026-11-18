@@ -200,7 +200,7 @@ def apply_signature_look(base: Image.Image, card_row, role: str) -> Image.Image:
 
 
 class _NoName:
-    """Wraps a card row so the normal renderer draws it without the name and without a theme."""
+    """Wraps a card row so the normal renderer draws it without the name, on the Signature backdrop."""
 
     def __init__(self, row):
         self._row = row
@@ -209,7 +209,7 @@ class _NoName:
         if key == "displayname":
             return " "
         if key == "s2_theme":
-            return None
+            return "sig_base"      # charcoal + gold backdrop (card_full.THEMES["sig_base"])
         return self._row[key]
 
     def keys(self):
