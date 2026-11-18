@@ -6,12 +6,11 @@
 * Start: All-Rounder 60 (bat 60 / bowl 60), Batter or Wicketkeeper 60 (bat 60 / bowl 10),
   Bowler 60 (bat 10 / bowl 60).
 * Upgrades cost Energy Drinks: rcdaily +1, rcweekly +20 (Premium only).
-    60-68  5 drinks per +1 OVR   (10 per +2, very easy)
-    68-75 10 per +1              (20 per +2)
-    75-80 15 per +1              (30 per +2)
-    80-88 20 per +1              (40 per +2)
-    88-95 25 per +1              (50 per +2, rare)   95 is the max.
-  One month of Premium = ~30 + 4x20 = 110 drinks = 60 -> 75 exactly (8x5 + 7x10).
+    60-68    5 drinks per +1 OVR   (very easy:  40 in total)
+    68-75   20 per +1              (normal:     140)
+    75-80   60 per +1              (hard:       300)
+    80-88  220 per +1              (very hard: 1,760)
+    88-95  820 per +1              (legendary: 5,740)   95 is the max. 60 -> 95 = 7,980 drinks.
 * Premium runs out: the card stays and still plays, it just can't be upgraded.
 * The photo: members only REQUEST one (rcmyp photo + image). Only the bot owner approves it or sets
   a photo (/myplayer ...). Until then the card shows a gold silhouette.
@@ -49,8 +48,8 @@ DRINK = "<:energydrink:1572435428928135230>"
 START = {"AR": (60, 60, 60), "BAT": (60, 60, 10), "WK": (60, 60, 10), "BOWL": (60, 10, 60)}
 ROLE_NAME = {"AR": "All-Rounder", "BAT": "Batter", "WK": "Wicketkeeper", "BOWL": "Bowler"}
 # (from OVR, to OVR, drinks per +1 OVR)
-TIERS = [(60, 68, 5), (68, 75, 10), (75, 80, 15), (80, 88, 20), (88, 95, 25)]
-TIER_NAME = {5: "Very easy", 10: "Normal", 15: "Hard", 20: "Very hard", 25: "Rare"}
+TIERS = [(60, 68, 5), (68, 75, 20), (75, 80, 60), (80, 88, 220), (88, 95, 820)]   # 60 -> 95 = 7,980 drinks
+TIER_NAME = {5: "Very easy", 20: "Normal", 60: "Hard", 220: "Very hard", 820: "Legendary"}
 NAME_RE = re.compile(r"^[A-Za-z][A-Za-z .'\-]{1,19}$")
 
 
