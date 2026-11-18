@@ -2149,6 +2149,16 @@ def rcp_buy(user_id, cost: int, item: str, give: str, qty: int = 1) -> dict:
             conn.execute("INSERT INTO packs (user_id, pack_type, qty) VALUES (?, ?, ?) "
                          "ON CONFLICT(user_id, pack_type) DO UPDATE SET qty = qty + excluded.qty",
                          (uid, give[5:], int(qty)))
+        elif give == "drinks":   # My Player Energy Drinks (user_prefs "myp_drinks")
+            _ensure_prefs(conn)
+            row = conn.execute("SELECT value FROM user_prefs WHERE user_id = ? AND key = 'myp_drinks'",
+                               (uid,)).fetchone()
+            try:
+                cur = int(row["value"]) if row else 0
+            except ValueError:
+                cur = 0
+            conn.execute("INSERT INTO user_prefs (user_id, key, value) VALUES (?, 'myp_drinks', ?) "
+                         "ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value", (uid, str(cur + int(qty))))
         return {"ok": True, "balance": new}
 
 

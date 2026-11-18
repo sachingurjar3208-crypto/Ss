@@ -58,7 +58,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
     ]),
     "economy": ("Economy", "Buy, sell, trade and leaderboard", [
         ("Coins", "rcbal", "See your coins, vouchers and RCP."),
-        ("RCP Store", "rcstore", "Buy Premium, Star Pass, vouchers and Legendary packs with RCP. Buy with rcstore buy <item>."),
+        ("RCP Store", "rcstore", "Buy Premium, Star Pass, vouchers, Legendary packs and Energy Drinks with RCP. Buy with rcstore buy <item>."),
         ("Undo a Sell", "rcundo", "Take back your last sell within 5 minutes. The coins it paid are taken back."),
         ("Buy a Player", "rcbuy <player>", "Buy a player card with coins.", "rcbuy"),
         ("Sell a Player", "rcsell <player>", "Sell one of your players. You get 60% of the buy price.", "rcsell"),

@@ -2,7 +2,7 @@
 
 Players
     rcstore                      the store: your RCP and what RCP buys
-    rcstore buy <item>           spend RCP: premium | starpass | vouchers | legendary
+    rcstore buy <item>           spend RCP: premium | starpass | vouchers | legendary | drinks
     rcbal                        (economy_cog) also shows RCP
 
 RCP is the SAME wallet as the Signature Box RC Points (sigbox.py). Staff adds or removes it with
@@ -44,9 +44,13 @@ ITEMS = {
                   "info": "One full 10-draft pull in rcdraft"},
     "legendary": {"name": "Legendary Pack", "cost": 1_300, "give": "pack:legendary",
                   "info": "One 90 to 95 OVR card, open it with rcopen"},
+    "drinks":    {"name": "100 Energy Drinks", "cost": 1_000, "give": "drinks", "qty": 100,
+                  "info": "Premium only: upgrade your My Player with rcmyp upgrade"},
 }
+DRINK_EMOJI = "<:energydrink:1572435428928135230>"
 ALIASES = {"prem": "premium", "membership": "premium", "pass": "starpass", "star": "starpass",
-           "voucher": "vouchers", "10vouchers": "vouchers", "legend": "legendary", "pack": "legendary"}
+           "voucher": "vouchers", "10vouchers": "vouchers", "legend": "legendary", "pack": "legendary",
+           "drink": "drinks", "energy": "drinks", "energydrinks": "drinks", "100drinks": "drinks"}
 
 RCP_COLOR = discord.Color.from_rgb(30, 170, 110)
 
@@ -68,7 +72,8 @@ async def premium_bonus(member) -> int:
 
 def _item_emoji(key: str) -> str:
     return {"premium": emojis.PREMIUM, "starpass": emojis.STAR_PASS,
-            "vouchers": emojis.VOUCHER, "legendary": emojis.LEGENDARY_PACK}.get(key, emojis.RCP)
+            "vouchers": emojis.VOUCHER, "legendary": emojis.LEGENDARY_PACK,
+            "drinks": DRINK_EMOJI}.get(key, emojis.RCP)
 
 
 def _store_embed(balance: int, bonus: int = 0) -> discord.Embed:
@@ -146,7 +151,10 @@ class RCPCog(commands.Cog, name="RCP"):
         key = ALIASES.get(key, key)
         it = ITEMS.get(key)
         if it is None:
-            await ctx.send("❌ Pick one: `premium`, `starpass`, `vouchers` or `legendary`. Example: `rcstore buy vouchers`")
+            await ctx.send("❌ Pick one: `premium`, `starpass`, `vouchers`, `legendary` or `drinks`. Example: `rcstore buy vouchers`")
+            return
+        if it["give"] == "drinks" and not _is_premium(ctx.author):
+            await ctx.send(f"❌ Energy Drinks are for **Premium** members (they upgrade your My Player).")
             return
         if ctx.guild is None or ctx.guild.id != ADMIN_GUILD_ID:
             if it["give"].startswith("role:"):
