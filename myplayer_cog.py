@@ -103,7 +103,49 @@ async def render(user_id) -> str | None:
     out.write_bytes(buf.getvalue())
     card_db.set_card_image_path(card["playername_key"], str(out))
     await card_cache.warm(str(out))
+    # Animated version, built once here and only re-sent afterwards.
+    try:
+        import myplayer_anim
+        gif = await asyncio.to_thread(myplayer_anim.build_gif, card, fg, role)
+        gif_path(card).write_bytes(gif)
+    except Exception as e:
+        print(f"[myplayer] gif failed for {user_id}: {type(e).__name__}: {e}")
     return str(out)
+
+
+def gif_path(card) -> Path:
+    return card_db.GENERATED_DIR / f"{card['playername_key']}.gif"
+
+
+_gif_urls: dict[str, tuple[float, str, float]] = {}   # gif path -> (mtime, Discord CDN url, trust until)
+
+
+async def send_card(dest, embed: discord.Embed, card, png_path: str | None = None) -> discord.Message:
+    """Send the embed with the animated card (GIF). Re-uses Discord's copy while it is valid, so a
+    view costs no CPU and no upload. Falls back to the still PNG."""
+    gp = gif_path(card)
+    if not gp.exists():
+        return await card_cache.send_embed(dest, embed, png_path or card["image_path"])
+    key, mtime = str(gp), gp.stat().st_mtime
+    hit = _gif_urls.get(key)
+    if hit and hit[0] == mtime and hit[2] > time.time():
+        embed.set_image(url=hit[1])
+        return await dest.send(embed=embed)
+    embed.set_image(url="attachment://myplayer.gif")
+    msg = await dest.send(embed=embed, file=discord.File(gp, filename="myplayer.gif"))
+    try:
+        url = msg.embeds[0].image.url if msg.embeds and msg.embeds[0].image else None
+        url = url or (msg.attachments[0].url if msg.attachments else None)
+        if url:
+            from urllib.parse import parse_qs, urlparse
+            until = time.time() + 6 * 3600
+            ex = parse_qs(urlparse(url).query).get("ex")
+            if ex:
+                until = min(until, int(ex[0], 16) - 1800)
+            _gif_urls[key] = (mtime, url, until)
+    except Exception:
+        pass
+    return msg
 
 
 async def give_claim_drinks(ctx: commands.Context, kind: str) -> None:
@@ -217,7 +259,7 @@ class CreateView(discord.ui.View):
             await interaction.message.delete()
         except discord.HTTPException:
             pass
-        await card_cache.send_embed(interaction.channel, embed, path)
+        await send_card(interaction.channel, embed, card, path)
 
 
 class MyPlayerCog(commands.Cog, name="My Player"):
@@ -240,13 +282,13 @@ class MyPlayerCog(commands.Cog, name="My Player"):
                 await ctx.send(f"✨ Create your own card: `rcmyp create <name>`\n{DRINK} You have "
                                f"**{economy.myp_drinks(ctx.author.id)}** Energy Drinks.")
             return
-        if not card["image_path"] or not Path(card["image_path"]).exists():
-            await render(ctx.author.id)
+        if not card["image_path"] or not Path(card["image_path"]).exists() or not gif_path(card).exists():
+            await render(ctx.author.id)          # first time (or old card): build it once
             card = card_db.get_myplayer(ctx.author.id)
         embed = discord.Embed(title=f"⭐ {card['playername']} · My Player",
                               description=_progress_text(card, economy.myp_drinks(ctx.author.id), premium),
                               color=discord.Color.gold())
-        await card_cache.send_embed(ctx, embed, card["image_path"])
+        await send_card(ctx, embed, card)
 
     @rcmyplayer.command(name="create")
     async def mp_create(self, ctx: commands.Context, *, name: str = ""):
@@ -310,7 +352,7 @@ class MyPlayerCog(commands.Cog, name="My Player"):
             description=f"Used **{cost}** {DRINK}\n\n" + _progress_text(card, economy.myp_drinks(uid), True),
             color=discord.Color.gold(),
         )
-        await card_cache.send_embed(ctx, embed, path)
+        await send_card(ctx, embed, card, path)
 
     @rcmyplayer.command(name="photo")
     async def mp_photo(self, ctx: commands.Context):
@@ -461,6 +503,7 @@ class MyPlayerCog(commands.Cog, name="My Player"):
         card_db.delete_myplayer(user.id)
         if card["image_path"]:
             Path(card["image_path"]).unlink(missing_ok=True)
+        gif_path(card).unlink(missing_ok=True)
         await interaction.response.send_message(f"🗑️ Deleted {card['playername']}.", ephemeral=True)
 
 
