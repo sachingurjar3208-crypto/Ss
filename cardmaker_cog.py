@@ -70,29 +70,20 @@ import aiohttp
 # Owner / admin role / server id now live in bot_guard.py (one place for the whole bot).
 # Members with the admin role can use every command in this file
 # (/cardmaker, /editcard, /bgadder, /foregroundfix ...), same as the owner.
-from bot_guard import ADMIN_ROLE_IDS as ALLOWED_ROLE_IDS, MaintenanceActive, OWNER_ID, admin_only, is_staff, ADMIN_GUILD_ID, card_maker_or_staff
+from bot_guard import ADMIN_ROLE_IDS as ALLOWED_ROLE_IDS, MaintenanceActive, OWNER_ID, admin_only, is_staff, ADMIN_GUILD_ID, card_maker_or_staff, is_card_maker
 MAX_STAT = 150
 MIN_SCALE_PCT = 10
 MAX_SCALE_PCT = 400
 
 
 def is_owner():
-    """Admin-only command: hidden from normal members, exists only in the main server,
-    and only the owner / admin role can run it (see bot_guard.admin_only)."""
-    return admin_only()
+    """Card command: hidden from normal members, exists only in the main server; the owner, the
+    admin role and the card-maker role can run it (see bot_guard.card_maker_or_staff)."""
+    return card_maker_or_staff()
 
 
-def _maker_blocked(interaction: discord.Interaction, card) -> str | None:
-    """Card-maker role (not staff): may only touch cards THEY created that are not live yet."""
-    if is_staff(interaction.user):
-        return None
-    if card is None:
-        return None
-    if int(card["created_by"] or 0) != interaction.user.id:
-        return "❌ You can only change cards that you made."
-    if is_obtainable(card):
-        return "❌ This card is already live. Ask staff to change it."
-    return None
+def _can_make_cards(user) -> bool:
+    return is_staff(user) or is_card_maker(user)
 
 
 ROLE_CHOICES = [app_commands.Choice(name=label, value=code) for code, label in ROLES.items()]
@@ -568,7 +559,7 @@ class CardMakerCog(commands.Cog):
         newname="The new player name, e.g. Virat Kohli Season 1",
     )
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @app_commands.check(lambda i: is_staff(i.user))
+    @app_commands.check(lambda i: _can_make_cards(i.user))
     async def rename_card(self, interaction: discord.Interaction, playername: str, newname: str):
         await interaction.response.defer()
         import card_rename
@@ -620,7 +611,7 @@ class CardMakerCog(commands.Cog):
     @app_commands.autocomplete(background=background_autocomplete, countryflag=country_autocomplete,
                                event=event_autocomplete, narrative1=narrative_autocomplete,
                                narrative2=narrative_autocomplete)
-    @card_maker_or_staff()
+    @is_owner()
     async def cardmaker(
         self,
         interaction: discord.Interaction,
@@ -678,12 +669,6 @@ class CardMakerCog(commands.Cog):
         if playername.strip().lower().startswith("myp_"):
             await interaction.followup.send("❌ That name is reserved. Pick another player name.")
             return
-        maker_only = not is_staff(interaction.user)
-        if maker_only:
-            # card makers can't put anything live: their cards stay out of packs, spawns, the shop
-            # and rewards until staff turns them on with /editcard obtainable:True
-            obtainable = False
-
         country = resolve_country(countryflag)
         if country is None:
             await interaction.followup.send(
@@ -726,11 +711,6 @@ class CardMakerCog(commands.Cog):
         try:
             await _regenerate_and_send(interaction, playername, "✅ Card created")
             await interaction.followup.send(_event_note(event_row, obtainable))
-            if maker_only:
-                await interaction.followup.send(
-                    "🔒 Card makers' cards stay hidden (not in packs, spawns or the shop). "
-                    "Staff will check it and switch it on.")
-                print(f"[cardmaker] card maker {interaction.user.id} created '{playername}'")
             note = _missing_logo_note([narrative1, narrative2])
             if note:
                 await interaction.followup.send(note.strip())
@@ -1203,7 +1183,7 @@ class CardMakerCog(commands.Cog):
     @app_commands.describe(eventname="Which event to rename (pick from the list)",
                            newname="The new name for this event")
     @app_commands.autocomplete(eventname=event_autocomplete)
-    @app_commands.check(lambda i: is_staff(i.user))
+    @app_commands.check(lambda i: _can_make_cards(i.user))
     async def rename_event_cmd(self, interaction: discord.Interaction, eventname: str, newname: str):
         await interaction.response.defer()
         status, ev = rename_event(eventname, newname)
@@ -1542,7 +1522,7 @@ class CardMakerCog(commands.Cog):
         ribbon="Ribbon text (empty = END OF AN ERA)",
     )
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @admin_only()
+    @is_owner()
     async def eoae(self, interaction: discord.Interaction, playername: str,
                    start: app_commands.Range[int, 1900, 2100] | None = None,
                    end: app_commands.Range[int, 1900, 2100] | None = None,
@@ -1633,7 +1613,7 @@ class CardMakerCog(commands.Cog):
         make_signature_card="Also switch this card to the Signature Edition theme now",
     )
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @card_maker_or_staff()
+    @is_owner()
     async def signatureadd(self, interaction: discord.Interaction, playername: str,
                            image: discord.Attachment, make_signature_card: bool = True):
         await interaction.response.defer()
@@ -1641,10 +1621,6 @@ class CardMakerCog(commands.Cog):
         card = get_card(playername)
         if card is None:
             await interaction.followup.send(f"❌ No card named `{playername}`. Pick one from the list.")
-            return
-        blocked = _maker_blocked(interaction, card)
-        if blocked:
-            await interaction.followup.send(blocked)
             return
         if image.size > 8 * 1024 * 1024:
             await interaction.followup.send("❌ That file is too big (max 8 MB).")
@@ -1745,7 +1721,7 @@ class CardMakerCog(commands.Cog):
         foregroundsizesmall="Percent to make the cutout smaller, e.g. 10 = -10% size",
     )
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @card_maker_or_staff()
+    @is_owner()
     async def foregroundfix(
         self,
         interaction: discord.Interaction,
@@ -1764,10 +1740,6 @@ class CardMakerCog(commands.Cog):
             names = list_playernames()
             hint = ", ".join(names) if names else "(no cards yet)"
             await interaction.followup.send(f"❌ No card found for **{playername}**.\nExisting cards: {hint}")
-            return
-        blocked = _maker_blocked(interaction, card)
-        if blocked:
-            await interaction.followup.send(blocked)
             return
 
         import card_style2
@@ -1816,7 +1788,7 @@ class CardMakerCog(commands.Cog):
     @app_commands.choices(level1=LEVEL_CHOICES, level2=LEVEL_CHOICES)
     @app_commands.autocomplete(playername=playername_autocomplete, key1=narrative_autocomplete,
                                key2=narrative_autocomplete)
-    @app_commands.check(lambda i: is_staff(i.user))
+    @app_commands.check(lambda i: _can_make_cards(i.user))
     async def playstyle_add(self, interaction: discord.Interaction, playername: str,
                             key1: str, level1: app_commands.Choice[int],
                             key2: str | None = None,
@@ -1864,7 +1836,7 @@ class CardMakerCog(commands.Cog):
         app_commands.Choice(name="Both", value="both"),
     ])
     @app_commands.autocomplete(playername=playername_autocomplete)
-    @app_commands.check(lambda i: is_staff(i.user))
+    @app_commands.check(lambda i: _can_make_cards(i.user))
     async def playstyle_remove(self, interaction: discord.Interaction, playername: str,
                                slot: app_commands.Choice[str]):
         await interaction.response.defer()
