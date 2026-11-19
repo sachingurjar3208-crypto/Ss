@@ -2432,3 +2432,81 @@ def myp_grant(user_id, key: str) -> None:
     with _tx() as conn:
         if _own_qty(conn, uid, key) <= 0:
             _add_copy(conn, uid, key)
+
+
+# ── Star Pass bought with RCP (one row per user per season; the role ends with the season) ──
+
+def _ensure_pass_buys(conn) -> None:
+    conn.execute("CREATE TABLE IF NOT EXISTS rcp_pass_buy (user_id INTEGER NOT NULL, season_id INTEGER NOT NULL, "
+                 "role_id INTEGER NOT NULL, cost INTEGER NOT NULL, ends_at REAL NOT NULL, ts REAL NOT NULL, "
+                 "removed INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, season_id))")
+
+
+def rcp_buy_pass(user_id, cost: int, season_id: int, role_id: int, ends_at: float, item: str) -> dict:
+    """Charge RCP for one Star Pass season and record it, in ONE transaction. The same season can
+    never be bought twice (primary key), even with two clicks at the same moment.
+    Returns {"ok": True, "balance": n} or {"ok": False, "reason": "debut"|"funds"|"owned", "balance": n}."""
+    uid, cost = _uid(user_id), int(cost)
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        _ensure_pass_buys(conn)
+        if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
+            return {"ok": False, "reason": "debut", "balance": 0}
+        row = conn.execute("SELECT amount FROM rcp_wallet WHERE user_id = ?", (uid,)).fetchone()
+        have = int(row["amount"]) if row else 0
+        if conn.execute("SELECT 1 FROM rcp_pass_buy WHERE user_id = ? AND season_id = ?",
+                        (uid, int(season_id))).fetchone():
+            return {"ok": False, "reason": "owned", "balance": have}
+        if have < cost:
+            return {"ok": False, "reason": "funds", "balance": have}
+        new = _rcp_change(conn, uid, -cost, f"buy {item}")
+        conn.execute("INSERT INTO rcp_pass_buy (user_id, season_id, role_id, cost, ends_at, ts) VALUES (?, ?, ?, ?, ?, ?)",
+                     (uid, int(season_id), int(role_id), cost, float(ends_at), time.time()))
+        return {"ok": True, "balance": new}
+
+
+def rcp_pass_undo(user_id, season_id: int, cost: int, item: str) -> int:
+    """The role could not be given: give the RCP back and forget the purchase."""
+    uid = _uid(user_id)
+    with _tx() as conn:
+        _ensure_rcp_tables(conn)
+        _ensure_pass_buys(conn)
+        conn.execute("DELETE FROM rcp_pass_buy WHERE user_id = ? AND season_id = ?", (uid, int(season_id)))
+        return _rcp_change(conn, uid, int(cost), f"refund {item}")
+
+
+def rcp_pass_bought(user_id, season_id: int) -> bool:
+    with _tx() as conn:
+        _ensure_pass_buys(conn)
+        return conn.execute("SELECT 1 FROM rcp_pass_buy WHERE user_id = ? AND season_id = ?",
+                            (_uid(user_id), int(season_id))).fetchone() is not None
+
+
+def rcp_pass_ended() -> list[tuple[int, int, int]]:
+    """[(user_id, season_id, role_id)] of bought passes whose season is over (time up or ended by staff)
+    and whose role was not taken back yet."""
+    with _tx() as conn:
+        _ensure_pass_buys(conn)
+        rows = conn.execute(
+            "SELECT b.user_id, b.season_id, b.role_id FROM rcp_pass_buy b "
+            "LEFT JOIN starpass_season s ON s.id = b.season_id "
+            "WHERE b.removed = 0 AND (b.ends_at <= ? OR s.id IS NULL OR s.active = 0 OR s.end_ts <= ?)",
+            (time.time(), time.time())).fetchall()
+    return [(int(r["user_id"]), int(r["season_id"]), int(r["role_id"])) for r in rows]
+
+
+def rcp_pass_mark_removed(user_id, season_id: int) -> None:
+    with _tx() as conn:
+        _ensure_pass_buys(conn)
+        conn.execute("UPDATE rcp_pass_buy SET removed = 1 WHERE user_id = ? AND season_id = ?",
+                     (_uid(user_id), int(season_id)))
+
+
+def rcp_pass_role_still_active(user_id, role_id: int) -> bool:
+    """True if the user bought another season that uses the same role and is still running."""
+    with _tx() as conn:
+        _ensure_pass_buys(conn)
+        return conn.execute(
+            "SELECT 1 FROM rcp_pass_buy b JOIN starpass_season s ON s.id = b.season_id "
+            "WHERE b.user_id = ? AND b.role_id = ? AND b.removed = 0 AND b.ends_at > ? AND s.active = 1 AND s.end_ts > ?",
+            (_uid(user_id), int(role_id), time.time(), time.time())).fetchone() is not None

@@ -3,6 +3,8 @@
 Players
     rcstore                      the store: your RCP and what RCP buys
     rcstore buy <item>           spend RCP: premium | starpass | vouchers | legendary | drinks
+                                 starpass: when several passes run, a menu lets the player pick one;
+                                 the role is taken back automatically when that pass ends
     rcbal                        (economy_cog) also shows RCP
 
 RCP is the SAME wallet as the Signature Box RC Points (sigbox.py). Staff adds or removes it with
@@ -38,7 +40,7 @@ from squad_cog import PREMIUM_ROLE_ID, _is_premium, _need_debut
 ITEMS = {
     "premium":   {"name": "Premium Membership (30 days)", "cost": 5_000, "give": "role:premium",
                   "info": "Claim every 35 min, weekly reward, no cooldowns, rcautoplay and rcdata, plus 500 RCP every month"},
-    "starpass":  {"name": "Star Pass (this season)", "cost": 4_500, "give": "role:starpass",
+    "starpass":  {"name": "Star Pass", "cost": 4_500, "give": "role:starpass",
                   "info": "Premium reward row and 1,000 bonus Star Pass credits"},
     "vouchers":  {"name": "10 Draft Vouchers", "cost": 1_500, "give": "vouchers", "qty": 10,
                   "info": "One full 10-draft pull in rcdraft"},
@@ -96,9 +98,10 @@ def _store_embed(balance: int, bonus: int = 0) -> discord.Embed:
 
 
 class _BuyView(OwnedView):
-    def __init__(self, cog: "RCPCog", member: discord.Member, key: str):
+    def __init__(self, cog: "RCPCog", member: discord.Member, key: str, season_id: int | None = None):
         super().__init__(member.id, timeout=60)
         self.cog, self.member, self.key, self.used = cog, member, key, False
+        self.season_id = season_id
         try:
             self.confirm.emoji = discord.PartialEmoji.from_str(emojis.CART)
         except Exception:
@@ -112,7 +115,7 @@ class _BuyView(OwnedView):
         self.used = True
         self.stop()
         await interaction.response.defer()
-        text = await self.cog.do_buy(self.member, self.key)
+        text = await self.cog.do_buy(self.member, self.key, self.season_id)
         await interaction.edit_original_response(content=text, embed=None, view=None)
 
     @ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
@@ -120,6 +123,46 @@ class _BuyView(OwnedView):
         self.used = True
         self.stop()
         await interaction.response.edit_message(content="Cancelled.", embed=None, view=None)
+
+
+def _pass_name(season: dict) -> str:
+    return str(season.get("name") or "Star Pass")
+
+
+class _PassPickView(OwnedView):
+    """More than one pass is running: the buyer picks one from a menu, then confirms."""
+
+    def __init__(self, cog: "RCPCog", member: discord.Member, seasons: list[dict]):
+        super().__init__(member.id, timeout=60)
+        self.cog, self.member = cog, member
+        self.ids = {str(s["id"]) for s in seasons}
+        sel = ui.Select(placeholder="Choose a pass", min_values=1, max_values=1, options=[
+            discord.SelectOption(label=_pass_name(s)[:100], value=str(s["id"]),
+                                 description=f"Ends in {s['days_left']} day(s) · {ITEMS['starpass']['cost']:,} RCP"[:100])
+            for s in seasons[:25]
+        ])
+        sel.callback = self._picked
+        self.add_item(sel)
+
+    async def _picked(self, interaction: discord.Interaction):
+        value = interaction.data.get("values", [None])[0]
+        if value not in self.ids:                      # only the ids we offered
+            await interaction.response.send_message("That pass is not on this menu.", ephemeral=True)
+            return
+        season = await asyncio.to_thread(self.cog.find_season, int(value))
+        if season is None:
+            await interaction.response.edit_message(content="❌ That pass has just ended. Your RCP is safe.", view=None)
+            return
+        self.stop()
+        it = ITEMS["starpass"]
+        bal = await asyncio.to_thread(economy.get_rcp, self.member.id)
+        view = _BuyView(self.cog, self.member, "starpass", season["id"])
+        await interaction.response.edit_message(
+            content=(f"{_item_emoji('starpass')} Buy **{esc(_pass_name(season))}** for **{fmt_rcp(it['cost'])}**?\n"
+                     f"The role stays until this pass ends: <t:{int(season['end_ts'])}:f>.\n"
+                     f"You have **{fmt_rcp(bal)}**, after this **{fmt_rcp(bal - it['cost'])}**."),
+            view=view)
+        view.message = interaction.message
 
 
 class RCPCog(commands.Cog, name="RCP"):
@@ -160,11 +203,33 @@ class RCPCog(commands.Cog, name="RCP"):
             if it["give"].startswith("role:"):
                 await ctx.send("❌ Buy Premium and Star Pass in the main Rush Cricket server (the role lives there).")
                 return
-        if it["give"] == "role:starpass" and not await asyncio.to_thread(starpass.get_active_season):
-            await ctx.send("❌ No Star Pass season is running right now. Your RCP is safe, try again when a season starts.")
-            return
-        if it["give"] == "role:starpass" and self._has_starpass(ctx.author):
-            await ctx.send("✅ You already have this season's Star Pass.")
+        if it["give"] == "role:starpass":
+            seasons = await asyncio.to_thread(starpass.list_active_seasons)
+            if not seasons:
+                await ctx.send("❌ No Star Pass is running right now. Your RCP is safe, try again when a pass starts.")
+                return
+            free = [s for s in seasons if not self._has_role(ctx.author, s["premium_role"])
+                    and not await asyncio.to_thread(economy.rcp_pass_bought, ctx.author.id, s["id"])]
+            if not free:
+                await ctx.send("✅ You already have every Star Pass that is running.")
+                return
+            bal = await asyncio.to_thread(economy.get_rcp, ctx.author.id)
+            if bal < it["cost"]:
+                await ctx.send(f"❌ A Star Pass costs **{fmt_rcp(it['cost'])}**. You have **{fmt_rcp(bal)}**. "
+                               f"Open a ticket to buy RCP.")
+                return
+            if len(free) == 1:
+                s = free[0]
+                view = _BuyView(self, ctx.author, key, s["id"])
+                view.message = await ctx.send(
+                    f"{_item_emoji(key)} Buy **{esc(_pass_name(s))}** for **{fmt_rcp(it['cost'])}**?\n"
+                    f"The role stays until this pass ends: <t:{int(s['end_ts'])}:f>.\n"
+                    f"You have **{fmt_rcp(bal)}**, after this **{fmt_rcp(bal - it['cost'])}**.", view=view)
+                return
+            view = _PassPickView(self, ctx.author, free)
+            view.message = await ctx.send(
+                f"{_item_emoji(key)} **{len(free)} Star Passes** are running. Pick the one you want "
+                f"(**{fmt_rcp(it['cost'])}** each):", view=view)
             return
         bal = await asyncio.to_thread(economy.get_rcp, ctx.author.id)
         if bal < it["cost"]:
@@ -189,13 +254,60 @@ class RCPCog(commands.Cog, name="RCP"):
         rid = self._starpass_role_id()
         return any(r.id == rid for r in getattr(member, "roles", []))
 
-    async def do_buy(self, member: discord.Member, key: str) -> str:
+    @staticmethod
+    def _has_role(member, role_id) -> bool:
+        return any(r.id == int(role_id) for r in getattr(member, "roles", []))
+
+    @staticmethod
+    def find_season(season_id: int) -> dict | None:
+        """A pass that is STILL running, read fresh from the database (never trust the menu)."""
+        for s in starpass.list_active_seasons():
+            if s["id"] == int(season_id):
+                return s
+        return None
+
+    async def _buy_pass(self, member: discord.Member, season_id: int | None) -> str:
+        it = ITEMS["starpass"]
+        if season_id is None:
+            return "❌ Pick a pass first: `rcstore buy starpass`."
+        season = await asyncio.to_thread(self.find_season, season_id)
+        if season is None:
+            return "❌ That pass has ended. Your RCP is safe."
+        guild = self.bot.get_guild(ADMIN_GUILD_ID)
+        role = guild.get_role(int(season["premium_role"])) if guild else None
+        gm = guild.get_member(member.id) if guild else None
+        if role is None or gm is None:
+            return "❌ Couldn't find the pass role in the main server. Nothing was charged, please open a ticket."
+        if role in gm.roles:
+            return f"✅ You already have **{esc(_pass_name(season))}**."
+        name = f"Star Pass: {_pass_name(season)} (#{season['id']})"
+        res = await asyncio.to_thread(economy.rcp_buy_pass, member.id, it["cost"], season["id"],
+                                      role.id, season["end_ts"], name)
+        if not res["ok"]:
+            if res["reason"] == "funds":
+                return f"❌ Not enough RCP. You have **{fmt_rcp(res['balance'])}**."
+            if res["reason"] == "owned":
+                return f"✅ You already bought **{esc(_pass_name(season))}**."
+            return "❌ You need to debut first."
+        try:
+            await gm.add_roles(role, reason=f"RCP store: {name}")
+        except Exception as e:
+            print(f"[rcp] pass role give failed for {member.id}: {type(e).__name__}: {e}")
+            await asyncio.to_thread(economy.rcp_pass_undo, member.id, season["id"], it["cost"], name)
+            return "❌ Couldn't give the role, so your RCP was refunded. Please open a ticket."
+        print(f"[rcp] {member.id} bought {name} for {it['cost']} RCP")
+        return (f"{_item_emoji('starpass')} **{esc(_pass_name(season))}** is yours until <t:{int(season['end_ts'])}:f>.\n"
+                f"RCP left: **{fmt_rcp(res['balance'])}**")
+
+    async def do_buy(self, member: discord.Member, key: str, season_id: int | None = None) -> str:
         it = ITEMS[key]
         if member.id in self._buying:
             return "❌ Another purchase is still running."
         self._buying.add(member.id)
         try:
             give = it["give"]
+            if give == "role:starpass":
+                return await self._buy_pass(member, season_id)
             res = await asyncio.to_thread(economy.rcp_buy, member.id, it["cost"], it["name"],
                                           "none" if give.startswith("role:") else give, it.get("qty", 1))
             if not res["ok"]:
@@ -248,6 +360,10 @@ class RCPCog(commands.Cog, name="RCP"):
     # -- Premium bought with RCP ends after 30 days ----------------------------
     @tasks.loop(minutes=30)
     async def expire_loop(self):
+        try:
+            await self._expire_passes()
+        except Exception as e:
+            print(f"[rcp] pass expiry failed: {type(e).__name__}: {e}")
         ids = await asyncio.to_thread(economy.rcp_premium_expired)
         if not ids:
             return
@@ -262,6 +378,32 @@ class RCPCog(commands.Cog, name="RCP"):
                 await m.send("Your Premium has ended. Renew it any time with `rcstore buy premium`.")
             except discord.HTTPException as e:
                 print(f"[rcp] premium end failed for {uid}: {e}")
+
+    async def _expire_passes(self):
+        """Star Passes bought with RCP: take the role back once that pass has ended."""
+        ended = await asyncio.to_thread(economy.rcp_pass_ended)
+        if not ended:
+            return
+        guild = self.bot.get_guild(ADMIN_GUILD_ID)
+        for uid, season_id, role_id in ended:
+            if await asyncio.to_thread(economy.rcp_pass_role_still_active, uid, role_id):
+                await asyncio.to_thread(economy.rcp_pass_mark_removed, uid, season_id)   # another pass needs it
+                continue
+            role = guild.get_role(role_id) if guild else None
+            m = guild.get_member(uid) if guild else None
+            if guild is None:
+                return
+            if m is not None and role is not None and role in m.roles:
+                try:
+                    await m.remove_roles(role, reason="RCP Star Pass ended")
+                except discord.HTTPException as e:
+                    print(f"[rcp] pass end failed for {uid}: {e}")
+                    continue
+                try:
+                    await m.send("Your Star Pass has ended. Get the next one with `rcstore buy starpass`.")
+                except discord.HTTPException:
+                    pass
+            await asyncio.to_thread(economy.rcp_pass_mark_removed, uid, season_id)
 
     @expire_loop.before_loop
     async def _wait_ready(self):
