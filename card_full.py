@@ -650,6 +650,22 @@ PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = fl
 PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
 
 
+def _is_full(card_row) -> bool:
+    """Cards of an event with its own background use the full rectangle (no cut corners)."""
+    return bool((_event(card_row) or {}).get("bg")) and _card_bg(card_row) is not None
+
+
+def _full_panel() -> Image.Image:
+    hit = _PREMIUM.get("full_panel")
+    if hit is None:
+        hit = Image.new("L", (W, H), 0)
+        d = ImageDraw.Draw(hit)
+        d.rounded_rectangle((_q(30, PANEL_TOP), _q(OUT_W - 30, OUT_H - 30)), radius=22 * S, fill=255)
+        d.rectangle((_q(30, PANEL_TOP), _q(OUT_W - 30, PANEL_TOP + 30)), fill=255)
+        _PREMIUM["full_panel"] = hit
+    return hit
+
+
 def _full_mask() -> Image.Image:
     """Rounded rectangle mask, no cut corners (built once)."""
     hit = _PREMIUM.get("full_mask")
@@ -710,6 +726,8 @@ def _panel_fill(themed):
 
 def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     st = _static()
+    if _is_full(card_row):
+        st = dict(st, panel=_full_panel())
     acc = accent + (255,)
     dim = accent + (150,)
 
@@ -1004,8 +1022,12 @@ def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
         if th["tag"]:
             _v2_tag(canvas, th["tag"], accent)
         _draw_panel(canvas, card_row, role, accent, themed)
-    ImageDraw.Draw(canvas).line(_v2_outline(20) + [_v2_outline(20)[0]], fill=(246, 248, 252, 255),
-                                width=5 * S, joint="curve")
+    if _is_full(card_row):
+        ImageDraw.Draw(canvas).rounded_rectangle((_q(20, 20), _q(OUT_W - 20, OUT_H - 20)), radius=26 * S,
+                                                 outline=(246, 248, 252, 255), width=5 * S)
+    else:
+        ImageDraw.Draw(canvas).line(_v2_outline(20) + [_v2_outline(20)[0]], fill=(246, 248, 252, 255),
+                                    width=5 * S, joint="curve")
 
 
 # ── premium styles: "neon" (Retro Star) and "gold" (Black & Gold) ─────────────────────────
@@ -1279,8 +1301,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
         out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         # cards of an event with its own background: full rectangle (no see-through cut corners,
         # they looked white in Discord); the background fills the corners
-        full = raw_bg is not None and (_event(card_row) or {}).get("bg")
-        out.paste(canvas, (0, 0), _full_mask() if full else st["mask"])
+        out.paste(canvas, (0, 0), _full_mask() if _is_full(card_row) else st["mask"])
         del canvas
         out = out.resize((OUT_W, OUT_H), Image.LANCZOS)
         buf = io.BytesIO()
