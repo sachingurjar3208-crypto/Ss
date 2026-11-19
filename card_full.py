@@ -676,18 +676,6 @@ def _full_mask() -> Image.Image:
     return hit
 
 
-def _ice_crystal(d, base_x, base_y, h, w, lean, light):
-    """One ice crystal prism (output px), drawn on a 2x canvas with draw `d`."""
-    tip = (base_x + lean, base_y - h)
-    left, right = (base_x - w / 2, base_y), (base_x + w / 2, base_y)
-    sl, sr = (base_x - w / 2 + lean * 0.75, base_y - h * 0.78), (base_x + w / 2 + lean * 0.75, base_y - h * 0.78)
-    mid = (base_x + lean * 0.75, base_y - h * 0.78)
-    d.polygon([_q(*left), _q(*sl), _q(*tip), _q(*mid), _q(base_x, base_y)], fill=(120, 200, 255, 210))
-    d.polygon([_q(base_x, base_y), _q(*mid), _q(*tip), _q(*sr), _q(*right)], fill=(70, 150, 235, 210))
-    d.line([_q(*left), _q(*sl), _q(*tip), _q(*sr), _q(*right)], fill=(225, 245, 255, 255), width=2 * S)
-    d.line([_q(base_x, base_y), _q(*mid), _q(*tip)], fill=(255, 255, 255, int(200 * light)), width=2 * S)
-
-
 def _snowflake(d, cx, cy, r, col):
     for k in range(6):
         a = math.radians(90 + k * 60)
@@ -715,7 +703,7 @@ def _frost_branch(d, x, y, ang, length, depth, rnd, alpha):
 
 def _glass_panel(canvas, st, accent, raw_bg=None):
     """Frosted ice-glass stats panel: the background shows through (blurred, darkened), frost in the
-    top corners, a glowing icy border, ice crystals in the bottom corners and a snowflake."""
+    top corners, a glowing icy border and a snowflake."""
     import random
     m = st["panel"]
     box = m.getbbox()
@@ -757,17 +745,7 @@ def _glass_panel(canvas, st, accent, raw_bg=None):
     canvas.paste((80, 190, 255, 255), (0, 0), glow.point(lambda v: min(255, v * 3)))
     canvas.paste((210, 240, 255, 255), (0, 0), edge)
 
-    # ice crystals in the bottom corners + snowflake at the bottom centre
-    ice = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-    idr = ImageDraw.Draw(ice)
-    by = y1 - 8
-    for bx, h, w, lean in ((x0 + 34, 92, 30, -6), (x0 + 62, 62, 24, 8), (x0 + 16, 50, 20, -10), (x0 + 86, 38, 18, 10)):
-        _ice_crystal(idr, bx, by, h, w, lean, 1.0)
-    for bx, h, w, lean in ((x1 - 34, 92, 30, 6), (x1 - 62, 62, 24, -8), (x1 - 16, 50, 20, 10), (x1 - 86, 38, 18, -10)):
-        _ice_crystal(idr, bx, by, h, w, lean, 1.0)
-    cglow = ice.getchannel("A").filter(ImageFilter.GaussianBlur(10 * S))
-    canvas.paste((90, 200, 255, 255), (0, 0), cglow.point(lambda v: int(v * 0.6)))
-    canvas.alpha_composite(ice)
+    # snowflake at the bottom centre
     sf = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     sfd = ImageDraw.Draw(sf)
     cx, cy = OUT_W / 2, y1 - 30
