@@ -650,6 +650,16 @@ PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = fl
 PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
 
 
+def _full_mask() -> Image.Image:
+    """Rounded rectangle mask, no cut corners (built once)."""
+    hit = _PREMIUM.get("full_mask")
+    if hit is None:
+        hit = Image.new("L", (W, H), 0)
+        ImageDraw.Draw(hit).rounded_rectangle((0, 0, W - 1, H - 1), radius=RADIUS * S, fill=255)
+        _PREMIUM["full_mask"] = hit
+    return hit
+
+
 def _glass_panel(canvas, st, accent, raw_bg=None):
     """Frosted glass panel: the event background behind it stays visible (blurred and darkened),
     with a soft light edge, so the numbers stay easy to read."""
@@ -1267,7 +1277,10 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     if LAYOUT == "v2":
         _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas)
         out = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        out.paste(canvas, (0, 0), st["mask"])
+        # cards of an event with its own background: full rectangle (no see-through cut corners,
+        # they looked white in Discord); the background fills the corners
+        full = raw_bg is not None and (_event(card_row) or {}).get("bg")
+        out.paste(canvas, (0, 0), _full_mask() if full else st["mask"])
         del canvas
         out = out.resize((OUT_W, OUT_H), Image.LANCZOS)
         buf = io.BytesIO()
