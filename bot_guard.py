@@ -26,6 +26,34 @@ ADMIN_GUILD_ID = 1556644438917382150          # your server
 ADMIN_ROLE_IDS = {1556644558929010769}        # the admin role
 
 
+# Card makers: can ONLY create new cards and fix their own new cards (see card_maker_or_staff).
+CARD_MAKER_ROLE_IDS = {1572894173483376780}
+
+
+def is_card_maker(user) -> bool:
+    """Member of the main server holding the card-maker role (not staff)."""
+    guild = getattr(user, "guild", None)
+    if guild is None or guild.id != ADMIN_GUILD_ID:
+        return False
+    return any(r.id in CARD_MAKER_ROLE_IDS for r in (getattr(user, "roles", None) or []))
+
+
+def card_maker_or_staff():
+    """Like admin_only, but the card-maker role may run it too. Each command still limits what a
+    card maker can do (only their own cards, never live in packs/spawns)."""
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return is_staff(interaction.user) or is_card_maker(interaction.user)
+
+    def decorator(func):
+        func = app_commands.check(predicate)(func)
+        func = app_commands.default_permissions()(func)
+        func = app_commands.guild_only()(func)
+        func = app_commands.guilds(ADMIN_GUILD_ID)(func)
+        return func
+
+    return decorator
+
+
 def is_staff(user) -> bool:
     """Owner, or a member holding the admin role."""
     if getattr(user, "id", None) == OWNER_ID:
