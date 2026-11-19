@@ -676,9 +676,47 @@ def _full_mask() -> Image.Image:
     return hit
 
 
+def _ice_crystal(d, base_x, base_y, h, w, lean, light):
+    """One ice crystal prism (output px), drawn on a 2x canvas with draw `d`."""
+    tip = (base_x + lean, base_y - h)
+    left, right = (base_x - w / 2, base_y), (base_x + w / 2, base_y)
+    sl, sr = (base_x - w / 2 + lean * 0.75, base_y - h * 0.78), (base_x + w / 2 + lean * 0.75, base_y - h * 0.78)
+    mid = (base_x + lean * 0.75, base_y - h * 0.78)
+    d.polygon([_q(*left), _q(*sl), _q(*tip), _q(*mid), _q(base_x, base_y)], fill=(120, 200, 255, 210))
+    d.polygon([_q(base_x, base_y), _q(*mid), _q(*tip), _q(*sr), _q(*right)], fill=(70, 150, 235, 210))
+    d.line([_q(*left), _q(*sl), _q(*tip), _q(*sr), _q(*right)], fill=(225, 245, 255, 255), width=2 * S)
+    d.line([_q(base_x, base_y), _q(*mid), _q(*tip)], fill=(255, 255, 255, int(200 * light)), width=2 * S)
+
+
+def _snowflake(d, cx, cy, r, col):
+    for k in range(6):
+        a = math.radians(90 + k * 60)
+        ex, ey = cx + math.cos(a) * r, cy - math.sin(a) * r
+        d.line([_q(cx, cy), _q(ex, ey)], fill=col, width=3 * S)
+        for f in (0.45, 0.72):
+            bx, by = cx + math.cos(a) * r * f, cy - math.sin(a) * r * f
+            for side in (-1, 1):
+                b = a + side * math.radians(42)
+                d.line([_q(bx, by), _q(bx + math.cos(b) * r * 0.32, by - math.sin(b) * r * 0.32)], fill=col, width=2 * S)
+    d.ellipse((_q(cx - 3, cy - 3), _q(cx + 3, cy + 3)), fill=col)
+
+
+def _frost_branch(d, x, y, ang, length, depth, rnd, alpha):
+    if depth == 0 or length < 6:
+        return
+    ex, ey = x + math.cos(ang) * length, y + math.sin(ang) * length
+    d.line([_q(x, y), _q(ex, ey)], fill=(230, 244, 255, alpha), width=max(1, depth) * S // 2 + 1)
+    for t in (0.35, 0.6, 0.85):
+        bx, by = x + (ex - x) * t, y + (ey - y) * t
+        for side in (-1, 1):
+            _frost_branch(d, bx, by, ang + side * math.radians(55 + rnd.uniform(-10, 10)),
+                          length * 0.38, depth - 1, rnd, int(alpha * 0.85))
+
+
 def _glass_panel(canvas, st, accent, raw_bg=None):
-    """Frosted glass panel: the event background behind it stays visible (blurred and darkened),
-    with a soft light edge, so the numbers stay easy to read."""
+    """Frosted ice-glass stats panel: the background shows through (blurred, darkened), frost in the
+    top corners, a glowing icy border, ice crystals in the bottom corners and a snowflake."""
+    import random
     m = st["panel"]
     box = m.getbbox()
     if not box:
@@ -686,20 +724,59 @@ def _glass_panel(canvas, st, accent, raw_bg=None):
     src = raw_bg if raw_bg is not None else canvas
     if src.size != canvas.size:
         src = src.resize(canvas.size, Image.LANCZOS)
-    region = src.crop(box).convert("RGB")                     # the clean background, no dark fade
+    region = src.crop(box).convert("RGB")
     small = region.resize((max(1, region.width // 3), max(1, region.height // 3)), Image.BILINEAR)
     blur = small.filter(ImageFilter.GaussianBlur(1.5)).resize(region.size, Image.BICUBIC)
-    dark = Image.blend(blur, Image.new("RGB", region.size, (6, 12, 30)), 0.30)
+    dark = Image.blend(blur, Image.new("RGB", region.size, (8, 20, 48)), 0.45)
     glass = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     glass.paste(dark, box[:2])
     canvas.paste(glass, (0, 0), m)
-    # faint frosty top light inside the glass
+    top = box[1]
+    # soft icy light from the top of the glass
     shine = Image.new("L", canvas.size, 0)
     sd = ImageDraw.Draw(shine)
-    top = box[1]
-    for k in range(0, int(120 * S)):
-        sd.line((0, top + k, W, top + k), fill=int(26 * (1 - k / (120 * S))))
-    canvas.paste((220, 236, 255, 255), (0, 0), ImageChops.multiply(shine, m))
+    for k in range(0, int(150 * S)):
+        sd.line((0, top + k, W, top + k), fill=int(40 * (1 - k / (150 * S)) ** 1.5))
+    canvas.paste((150, 210, 255, 255), (0, 0), ImageChops.multiply(shine, m))
+
+    deco = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    dd = ImageDraw.Draw(deco)
+    rnd = random.Random(7)
+    x0, y0 = box[0] / S, box[1] / S
+    x1, y1 = box[2] / S, box[3] / S
+    # frost creeping in from the two top corners
+    for k in range(3):
+        _frost_branch(dd, x0 + 6, y0 + 8, math.radians(18 + k * 26), 64 + rnd.uniform(0, 20), 3, rnd, 85)
+        _frost_branch(dd, x1 - 6, y0 + 8, math.radians(162 - k * 26), 64 + rnd.uniform(0, 20), 3, rnd, 85)
+    deco = deco.filter(ImageFilter.GaussianBlur(0.6 * S))
+    canvas.alpha_composite(deco)
+
+    # glowing icy border around the glass
+    edge = ImageChops.subtract(m, m.filter(ImageFilter.MinFilter(5)))
+    glow = edge.filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.GaussianBlur(9 * S))
+    canvas.paste((80, 190, 255, 255), (0, 0), glow.point(lambda v: min(255, v * 3)))
+    canvas.paste((210, 240, 255, 255), (0, 0), edge)
+
+    # ice crystals in the bottom corners + snowflake at the bottom centre
+    ice = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    idr = ImageDraw.Draw(ice)
+    by = y1 - 8
+    for bx, h, w, lean in ((x0 + 34, 92, 30, -6), (x0 + 62, 62, 24, 8), (x0 + 16, 50, 20, -10), (x0 + 86, 38, 18, 10)):
+        _ice_crystal(idr, bx, by, h, w, lean, 1.0)
+    for bx, h, w, lean in ((x1 - 34, 92, 30, 6), (x1 - 62, 62, 24, -8), (x1 - 16, 50, 20, 10), (x1 - 86, 38, 18, -10)):
+        _ice_crystal(idr, bx, by, h, w, lean, 1.0)
+    cglow = ice.getchannel("A").filter(ImageFilter.GaussianBlur(10 * S))
+    canvas.paste((90, 200, 255, 255), (0, 0), cglow.point(lambda v: int(v * 0.6)))
+    canvas.alpha_composite(ice)
+    sf = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    sfd = ImageDraw.Draw(sf)
+    cx, cy = OUT_W / 2, y1 - 30
+    _snowflake(sfd, cx, cy, 22, (235, 248, 255, 255))
+    for side in (-1, 1):
+        sfd.line([_q(cx + side * 34, cy), _q(cx + side * 230, cy)], fill=(170, 225, 255, 200), width=2 * S)
+        sfd.line([_q(cx + side * 230, cy), _q(cx + side * 250, cy - 10)], fill=(170, 225, 255, 200), width=2 * S)
+    canvas.paste((120, 210, 255, 255), (0, 0), sf.getchannel("A").filter(ImageFilter.GaussianBlur(6 * S)))
+    canvas.alpha_composite(sf)
 
 
 def _panel_fill(themed):
