@@ -2379,7 +2379,7 @@ class CardMakerCog(commands.Cog):
     @app_commands.command(name="removecard", description="Delete a player card from the database")
     @app_commands.describe(cardname="Which card to remove")
     @app_commands.autocomplete(cardname=playername_autocomplete)
-    @is_owner()
+    @admin_only()      # deleting a card: owner / admin role only (not the card-maker role)
     async def removecard(self, interaction: discord.Interaction, cardname: str):
         await interaction.response.defer()
 
