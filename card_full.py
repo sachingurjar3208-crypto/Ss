@@ -107,6 +107,8 @@ THEMES = {
     # Signature Edition top half (card_signature draws the ivory paper below): charcoal + gold
     # spotlight, light rays, a soft gold ball and bokeh, gold diagonal lines.
     "sig_base":        {"bg": ((70, 58, 38), (10, 9, 8)),   "panel": ((40, 34, 24), (10, 9, 8)),    "accent": (232, 192, 104), "tag": None, "style_bg": "sig_icon"},
+    # Winter Wonder: snowy frozen-lake backdrop (winter_bg.jpg), ice-glass stats panel, full rectangle.
+    "winter":          {"bg": ((40, 70, 130), (6, 10, 28)), "panel": ((20, 40, 80), (6, 10, 28)),   "accent": (130, 210, 255), "tag": "WINTER WONDER"},
     "myplayer":        {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "MY PLAYER", "style": "gold"},
 }
 
@@ -263,14 +265,40 @@ def _themed(th: dict) -> dict:
         return hit
 
 
+WINTER_BG_FILE = Path(__file__).with_name("winter_bg.jpg")
+
+
+def _is_winter(card_row) -> bool:
+    return str(ci._col(card_row, "s2_theme", "") or "").strip().lower() == "winter"
+
+
+def _winter_bg() -> Image.Image | None:
+    hit = _PREMIUM.get("winter_bg")
+    if hit is None and WINTER_BG_FILE.is_file():
+        src = Image.open(WINTER_BG_FILE).convert("RGB")
+        k = max(W / src.width, H / src.height)
+        src = src.resize((int(src.width * k + .5), int(src.height * k + .5)), Image.LANCZOS)
+        x0 = (src.width - W) // 2
+        hit = _PREMIUM["winter_bg"] = src.crop((x0, 0, x0 + W, H))
+    return hit
+
+
 def _card_bg(card_row) -> Image.Image | None:
-    """Event background (/eventbg) first, then the card's own Style 2 background."""
+    """Event background (/eventbg) first, then the Winter theme backdrop, then the card's own background."""
     ev = _event(card_row)
-    for name in ((ev or {}).get("bg"), ci._col(card_row, "s2_bg")):
-        if name:
-            img = _bg_image(name)
-            if img is not None:
-                return img
+    if (ev or {}).get("bg"):
+        img = _bg_image(ev["bg"])
+        if img is not None:
+            return img
+    if _is_winter(card_row):
+        img = _winter_bg()
+        if img is not None:
+            return img
+    name = ci._col(card_row, "s2_bg")
+    if name:
+        img = _bg_image(name)
+        if img is not None:
+            return img
     return None
 
 
@@ -652,7 +680,7 @@ PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the re
 
 def _is_full(card_row) -> bool:
     """Cards of an event with its own background use the full rectangle (no cut corners)."""
-    return bool((_event(card_row) or {}).get("bg")) and _card_bg(card_row) is not None
+    return (bool((_event(card_row) or {}).get("bg")) or _is_winter(card_row)) and _card_bg(card_row) is not None
 
 
 def _full_panel() -> Image.Image:
@@ -788,7 +816,7 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
 
     # panel body: the card's own background shows through, tinted in the theme colour
     ev = _event(card_row) or {}
-    if ev.get("panel_glass") and themed.get("raw_bg") is not None:
+    if (ev.get("panel_glass") or _is_winter(card_row)) and themed.get("raw_bg") is not None:
         _glass_panel(canvas, st, accent, themed["raw_bg"])
     else:
         canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
@@ -1332,7 +1360,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     accent = th["accent"] or _accent(card_row["ovr"])
     raw_bg = _card_bg(card_row)
     if raw_bg is not None and (any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES)
-                               or (_event(card_row) or {}).get("panel_glass")):
+                               or (_event(card_row) or {}).get("panel_glass") or _is_winter(card_row)):
         themed = dict(themed, raw_bg=raw_bg)
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
     if th.get("style") == "gold" and raw_bg is None:

@@ -115,6 +115,7 @@ THEME_CHOICES = [
     app_commands.Choice(name="Prestige (black marble, ribbons)", value="prestige"),
     app_commands.Choice(name="Prestige Diwali", value="prestige_diwali"),
     app_commands.Choice(name="Black & Gold (premium)", value="gold"),
+    app_commands.Choice(name="Winter Wonder (snow, ice panel)", value="winter"),
     app_commands.Choice(name="Artwork (your own full design)", value="art"),
 ]
 THEME_HELP = ("Card theme. Halloween = background used as frame + orange text. "
@@ -133,7 +134,7 @@ def _apply_theme(playername: str, theme, frame_bg: str | None = None) -> None:
             set_style2_options(playername, theme="halloween", bg=frame_bg)
         else:
             set_style2_options(playername, theme="halloween")
-    elif theme.value in ("eoae", "arena", "art", "crest", "rangoli", "prestige", "prestige_diwali", "gold"):
+    elif theme.value in ("eoae", "arena", "art", "crest", "rangoli", "prestige", "prestige_diwali", "gold", "winter"):
         # END OF AN ERA (years / jersey / ribbon via /eoae) or ARENA (rectangle design)
         set_card_style(playername, "style2")
         set_style2_options(playername, theme=theme.value)
