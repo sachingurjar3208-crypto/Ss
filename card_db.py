@@ -445,6 +445,9 @@ def _ensure_events(conn) -> None:
     # (the card inside the event is still picked with the normal OVR odds). 0 = no boost.
     if "spawn_boost" not in cols:
         conn.execute("ALTER TABLE events ADD COLUMN spawn_boost REAL NOT NULL DEFAULT 0")
+    # 1 = the stats panel of this event's cards is see-through glass (the event background shows)
+    if "panel_glass" not in cols:
+        conn.execute("ALTER TABLE events ADD COLUMN panel_glass INTEGER NOT NULL DEFAULT 0")
 
 
 def _invalidate_events() -> None:
@@ -520,13 +523,16 @@ def get_event(eventname: str) -> dict | None:
     return _events_map().get((eventname or "").strip().lower())
 
 
-def set_event_bg(eventname: str, pathname: str | None) -> bool:
-    """Give an event a background (backgrounds.pathname), or None to remove it. False = no such event."""
+def set_event_bg(eventname: str, pathname: str | None, panel_glass: bool | None = None) -> bool:
+    """Give an event a background (backgrounds.pathname), or None to remove it. False = no such event.
+    panel_glass: True = the stats panel shows the background through frosted glass (None = unchanged)."""
     key = (eventname or "").strip().lower()
     with _conn() as conn:
         _ensure_events(conn)
         cur = conn.execute("UPDATE events SET bg = ? WHERE event_key = ?",
                            ((pathname.strip() if pathname else None), key))
+        if panel_glass is not None:
+            conn.execute("UPDATE events SET panel_glass = ? WHERE event_key = ?", (1 if panel_glass else 0, key))
         conn.commit()
     _invalidate_events()
     return cur.rowcount > 0

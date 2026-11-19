@@ -650,6 +650,32 @@ PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = fl
 PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
 
 
+def _glass_panel(canvas, st, accent, raw_bg=None):
+    """Frosted glass panel: the event background behind it stays visible (blurred and darkened),
+    with a soft light edge, so the numbers stay easy to read."""
+    m = st["panel"]
+    box = m.getbbox()
+    if not box:
+        return
+    src = raw_bg if raw_bg is not None else canvas
+    if src.size != canvas.size:
+        src = src.resize(canvas.size, Image.LANCZOS)
+    region = src.crop(box).convert("RGB")                     # the clean background, no dark fade
+    small = region.resize((max(1, region.width // 3), max(1, region.height // 3)), Image.BILINEAR)
+    blur = small.filter(ImageFilter.GaussianBlur(1.5)).resize(region.size, Image.BICUBIC)
+    dark = Image.blend(blur, Image.new("RGB", region.size, (6, 12, 30)), 0.30)
+    glass = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    glass.paste(dark, box[:2])
+    canvas.paste(glass, (0, 0), m)
+    # faint frosty top light inside the glass
+    shine = Image.new("L", canvas.size, 0)
+    sd = ImageDraw.Draw(shine)
+    top = box[1]
+    for k in range(0, int(120 * S)):
+        sd.line((0, top + k, W, top + k), fill=int(26 * (1 - k / (120 * S))))
+    canvas.paste((220, 236, 255, 255), (0, 0), ImageChops.multiply(shine, m))
+
+
 def _panel_fill(themed):
     """Theme gradient, or the card background mirrored into the panel and tinted in the theme colour."""
     grad = themed["panel_fill"]
@@ -678,7 +704,11 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     dim = accent + (150,)
 
     # panel body: the card's own background shows through, tinted in the theme colour
-    canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
+    ev = _event(card_row) or {}
+    if ev.get("panel_glass") and themed.get("raw_bg") is not None:
+        _glass_panel(canvas, st, accent, themed["raw_bg"])
+    else:
+        canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
 
     fx = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     fd = ImageDraw.Draw(fx)
@@ -1214,7 +1244,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     themed = _themed(th)
     accent = th["accent"] or _accent(card_row["ovr"])
     raw_bg = _card_bg(card_row)
-    if raw_bg is not None and any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES):
+    if raw_bg is not None and (any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES)
+                               or (_event(card_row) or {}).get("panel_glass")):
         themed = dict(themed, raw_bg=raw_bg)
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
     if th.get("style") == "gold" and raw_bg is None:

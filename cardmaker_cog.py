@@ -1073,10 +1073,12 @@ class CardMakerCog(commands.Cog):
     @app_commands.command(name="eventbg",
                           description="Give an event a background: every card of the event uses it (Full Size)")
     @app_commands.describe(eventname="Which event",
-                           background="Background from /bgadder, or none to remove the event's background")
+                           background="Background from /bgadder, or none to remove the event's background",
+                           panel_bg="Show the background behind the stats panel too (frosted glass). Empty = keep as it is")
     @app_commands.autocomplete(eventname=event_autocomplete, background=background_autocomplete)
     @is_owner()
-    async def eventbg(self, interaction: discord.Interaction, eventname: str, background: str):
+    async def eventbg(self, interaction: discord.Interaction, eventname: str, background: str,
+                      panel_bg: bool | None = None):
         await interaction.response.defer()
         ev = get_event(eventname)
         if ev is None:
@@ -1089,7 +1091,7 @@ class CardMakerCog(commands.Cog):
                 await interaction.followup.send(f"❌ Unknown background `{background}`. Add it with `/bgadder` first.")
                 return
             bg_name = bg["pathname"]
-        set_event_bg(ev["eventname"], bg_name)
+        set_event_bg(ev["eventname"], bg_name, panel_bg)
         names = cards_in_event(ev["event_key"])
         what = f"background **{bg_name}**" if bg_name else "no background (theme colours)"
         await interaction.followup.send(
