@@ -110,6 +110,33 @@ def _cracks(origin, n, seed, length):
     return out
 
 
+PLAYER_ICE = 0.10        # a little of the icy grade so the player still sits in the scene
+PLAYER_SAT = 1.25        # colour saturation on the player (1 = photo as it is)
+PLAYER_CONTRAST = 1.08
+PLAYER_WARM = 0.22       # warm red / orange overlay on the player (0 = off)
+
+
+def _player_look(player):
+    """Normal saturation + warm red tone on the player (like football edits), slight ice grade."""
+    from PIL import ImageEnhance
+    x = _grade(player, PLAYER_ICE)
+    x = ImageEnhance.Color(x).enhance(PLAYER_SAT)
+    x = ImageEnhance.Contrast(x).enhance(PLAYER_CONTRAST)
+    if PLAYER_WARM > 0:
+        # overlay blend with a warm colour: shadows get a red tint, highlights stay bright
+        r, g, b = x.split()
+        out = []
+        for ch, t in zip((r, g, b), (1.0, 0.45, 0.25)):
+            lut = []
+            for v in range(256):
+                a = v / 255
+                ov = 2 * a * t if a < 0.5 else 1 - 2 * (1 - a) * (1 - t)
+                lut.append(int(max(0, min(1, a * (1 - PLAYER_WARM) + ov * PLAYER_WARM)) * 255))
+            out.append(ch.point(lut))
+        x = Image.merge("RGB", out)
+    return x
+
+
 def _glow_text(base, xy, text, fnt, fill, glow, blur, anchor="mm", alpha=255):
     layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
     ImageDraw.Draw(layer).text(xy, text, font=fnt, fill=glow + (alpha,), anchor=anchor)
@@ -265,7 +292,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
                 fd.line([(0, y), (player.width, y)], fill=int(255 * (1 - t) ** 1.4))
             af = ImageChops.multiply(a, fade)
 
-            graded = _grade(player, 0.45).convert("RGBA")
+            graded = _player_look(player).convert("RGBA")
             graded.putalpha(af)
             edge = ImageChops.subtract(a, a.filter(ImageFilter.MinFilter(15))).filter(ImageFilter.GaussianBlur(5))
             rim = Image.new("RGBA", player.size, ICE_HI + (0,))
