@@ -300,9 +300,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
             halo = Image.new("RGBA", player.size, ICE + (0,))
             halo.putalpha(af.filter(ImageFilter.GaussianBlur(28)).point(lambda v: v // 2))
 
-            _paste(comp, halo, pos)
+            # no glow on the player edges (owner: keep the cutout border clean)
             _paste(comp, graded, pos)
-            _paste(comp, rim, pos)
         except Exception as e:
             print(f"[card_winter] player skipped ({type(e).__name__}: {e})")
 
