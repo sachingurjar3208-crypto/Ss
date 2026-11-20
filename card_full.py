@@ -1353,7 +1353,16 @@ def _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas):
     _premium_frame(canvas, style)
 
 
+USE_WINTER_V2 = True     # Winter Wonder cards use card_winter.py (frosted panel design); False = old look
+
+
 def build(card_row, fg_image, role) -> io.BytesIO:
+    if USE_WINTER_V2 and _is_winter(card_row):
+        try:
+            import card_winter
+            return card_winter.build(card_row, fg_image, role)
+        except Exception as e:
+            print(f"[card_full] winter v2 failed, using old look ({type(e).__name__}: {e})")
     st = _static()
     th = _theme(card_row)
     themed = _themed(th)
