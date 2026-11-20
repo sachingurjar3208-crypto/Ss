@@ -317,8 +317,10 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     for c in (x0 + (x1 - x0) / 3, x0 + (x1 - x0) * 2 / 3):
         d.line([(c, y0 + 190), (c, y0 + 320)], fill=ICE + (110,), width=2)
 
-    _glow_text(comp, (cx, 70), "WINTER  WONDER", _font("cinzel.ttf", 40),
-               fill=(235, 248, 255, 255), glow=ICE, blur=8)
+    _glow_text(comp, (W - 56, 92), "WINTER  WONDER", _font("cinzel.ttf", 34),
+               fill=(235, 248, 255, 255), glow=ICE, blur=8, anchor="rm")
+
+    _brand_and_badge(comp, card_row)
 
     comp.alpha_composite(st["snow"])
     comp.alpha_composite(st["noise"])
@@ -328,6 +330,39 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     comp.convert("RGB").save(buf, format="PNG")
     buf.seek(0)
     return buf
+
+
+def _brand_and_badge(comp, card_row):
+    """Rush Cricket logo + RUSH / CRICKET top-left (like normal cards), playstyle badge under it."""
+    import card_full as cf
+    x, y, size = 50, 44, 96
+    try:
+        lg = cf._brand_logo()
+        if lg is not None:
+            halo = Image.new("RGBA", comp.size, (0, 0, 0, 0))
+            ImageDraw.Draw(halo).ellipse((x - 8, y - 8, x + size + 8, y + size + 8), fill=ICE + (150,))
+            comp.alpha_composite(halo.filter(ImageFilter.GaussianBlur(10)))
+            del halo
+            ImageDraw.Draw(comp).ellipse((x - 4, y - 4, x + size + 4, y + size + 4),
+                                         outline=ICE_HI + (255,), width=3)
+            comp.alpha_composite(lg.resize((size, size), Image.LANCZOS), (x, y))
+        d = ImageDraw.Draw(comp)
+        tx = x + size + 16
+        d.text((tx, y + 36), "RUSH", font=_font(ci.FONT_DISPLAY_BOLD, 40), fill=(240, 250, 255, 255), anchor="lm")
+        d.text((tx, y + 72), "CRICKET", font=_font(ci.FONT_LABEL, 26), fill=(185, 220, 245, 255), anchor="lm")
+    except Exception as e:
+        print(f"[card_winter] brand skipped ({type(e).__name__}: {e})")
+    try:
+        badge = ci._load_playstyle_badge(card_row, 1)
+        if badge is not None:
+            cxy = (x + size // 2, y + size + 80)
+            glow = Image.new("RGBA", comp.size, (0, 0, 0, 0))
+            ImageDraw.Draw(glow).ellipse((cxy[0] - 52, cxy[1] - 52, cxy[0] + 52, cxy[1] + 52), fill=ICE + (110,))
+            comp.alpha_composite(glow.filter(ImageFilter.GaussianBlur(16)))
+            del glow
+            ci._draw_logo(comp, badge, cxy, 0, 0, 100, box=104)
+    except Exception as e:
+        print(f"[card_winter] badge skipped ({type(e).__name__}: {e})")
 
 
 def _paste(base, layer, pos):
