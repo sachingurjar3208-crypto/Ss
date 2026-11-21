@@ -206,7 +206,10 @@ def _art_bg(rnd):
 
 def _build_static() -> dict:
     rnd = random.Random(7)
-    if USE_PHOTO_BG:
+    art = ROOT / "winter_art_bg.jpg"
+    if art.is_file():                                       # owner's AI background: used as it is
+        bg = _cover(Image.open(art), W, H).convert("RGBA")
+    elif USE_PHOTO_BG:
         from PIL import ImageEnhance
         src = ROOT / "winter_bg.jpg"
         bg = _cover(Image.open(src), W, H) if src.is_file() else Image.new("RGB", (W, H), (20, 40, 80))
@@ -217,17 +220,17 @@ def _build_static() -> dict:
         bg.alpha_composite(Image.new("RGBA", (W, H), NAVY + (35,)))
     else:
         bg = _art_bg(rnd)
-    bg.alpha_composite(_radial((W, H), BURST, 620, ICE, 1.8))
-    bg.alpha_composite(_radial((W, H), BURST, 260, ICE_HI, 2.2))
+    if not art.is_file():               # extra glow / streaks / cracks only for the old backgrounds
+        bg.alpha_composite(_radial((W, H), BURST, 620, ICE, 1.8))
+        bg.alpha_composite(_radial((W, H), BURST, 260, ICE_HI, 2.2))
 
-    streaks = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(streaks)
-    for _ in range(26):
-        a, ln = rnd.uniform(0, 2 * math.pi), rnd.uniform(500, 1100)
-        sd.line([BURST, (BURST[0] + math.cos(a) * ln, BURST[1] + math.sin(a) * ln)],
-                fill=ICE_HI + (rnd.randint(25, 70),), width=rnd.randint(2, 6))
-    bg.alpha_composite(streaks.filter(ImageFilter.GaussianBlur(4)))
-    if USE_PHOTO_BG:
+        streaks = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        sd = ImageDraw.Draw(streaks)
+        for _ in range(26):
+            a, ln = rnd.uniform(0, 2 * math.pi), rnd.uniform(500, 1100)
+            sd.line([BURST, (BURST[0] + math.cos(a) * ln, BURST[1] + math.sin(a) * ln)],
+                    fill=ICE_HI + (rnd.randint(25, 70),), width=rnd.randint(2, 6))
+        bg.alpha_composite(streaks.filter(ImageFilter.GaussianBlur(4)))
         bg.alpha_composite(_cracks(BURST, 7, 3, (200, 480)))
 
     # frost mist rising from the bottom
@@ -420,12 +423,13 @@ def build(card_row, fg_image, role) -> io.BytesIO:
 
     _brand_and_badge(comp, card_row)
 
-    snow = st["snow"]
-    if player_mask is not None:                  # no snow dots on the player's face / body
+    snow = None if (ROOT / "winter_art_bg.jpg").is_file() else st["snow"]   # AI background has its own snow
+    if snow is not None and player_mask is not None:                  # no snow dots on the player's face / body
         keep = ImageChops.invert(player_mask.filter(ImageFilter.MaxFilter(9)))
         snow = snow.copy()
         snow.putalpha(ImageChops.multiply(snow.getchannel("A"), keep))
-    comp.alpha_composite(snow)
+    if snow is not None:
+        comp.alpha_composite(snow)
     comp.alpha_composite(st["noise"])
     ImageDraw.Draw(comp).rectangle((20, 20, W - 21, H - 21), outline=(235, 248, 255, 200), width=2)
 
