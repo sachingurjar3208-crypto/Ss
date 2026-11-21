@@ -41,7 +41,7 @@ from security import OwnedView, esc
 from squad_cog import _in_match, _is_premium, _need_debut
 
 EMBED_COLOR = 0xF4C452
-THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78}
+THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78, "winter": 0x8CDCFF}
 THEME_CHOICES = [app_commands.Choice(name=n.capitalize(), value=n) for n in starpass.THEMES]
 
 

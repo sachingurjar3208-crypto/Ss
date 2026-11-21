@@ -51,6 +51,11 @@ THEMES = {
     "christmas": dict(bg_top=(22, 8, 12), bg_bot=(10, 28, 22), glow1=(220, 50, 60), glow2=(60, 190, 110),
                       gold=(240, 200, 92), teal=(80, 205, 120), prem_line=(150, 120, 50), free_line=(48, 112, 78),
                       prem_bg=(46, 36, 20), free_bg=(16, 44, 34), pill_bg=(70, 52, 18), star_hi=(255, 236, 170)),
+    "winter": dict(bg_top=(6, 20, 60), bg_bot=(14, 60, 120), glow1=(130, 220, 255), glow2=(150, 120, 255),
+                   gold=(255, 214, 120), teal=(140, 225, 255), prem_line=(170, 140, 70), free_line=(80, 150, 200),
+                   prem_bg=(40, 40, 60), free_bg=(14, 46, 86), pill_bg=(60, 52, 40), star_hi=(255, 236, 170),
+                   bg_file="starpass_winter_bg.jpg", glass=True,
+                   cell_prem=(40, 34, 58), cell_free=(12, 40, 84)),
 }
 
 K = 4                                      # icons are drawn 4x and scaled down (smooth edges)
@@ -397,6 +402,17 @@ def _time_left(season: dict) -> tuple[str, str]:
     return str(hours), "HOUR" if hours == 1 else "HOURS"
 
 
+def _glass(img: Image.Image, box, radius: int, tint) -> Image.Image:
+    """Frosted glass panel: blur what is behind the box and lay a see-through tint on it."""
+    x0, y0, x1, y1 = [int(v) for v in box]
+    region = img.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(10))
+    region = Image.alpha_composite(region.convert("RGBA"), Image.new("RGBA", region.size, tint))
+    m = Image.new("L", region.size, 0)
+    ImageDraw.Draw(m).rounded_rectangle((0, 0, region.width - 1, region.height - 1), radius=radius, fill=255)
+    img.paste(region, (x0, y0), m)
+    return img
+
+
 def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
     import card_db
 
@@ -427,8 +443,15 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
         t = y / (H - 1)
         d.line([(0, y), (W, y)], fill=tuple(int(BG_TOP[i] + (BG_BOT[i] - BG_TOP[i]) * t) for i in range(3)))
     bg = _custom_background(season.get("pass_key", starpass.DEFAULT_PASS))
+    dim = 115
+    if bg is None and th.get("bg_file"):        # theme with its own built-in picture (winter)
+        try:
+            bg = ImageOps.fit(Image.open(Path(__file__).parent / th["bg_file"]), (W, H), method=Image.LANCZOS).convert("RGBA")
+            dim = 70
+        except Exception as e:
+            print(f"[starpass] theme picture missing: {type(e).__name__}: {e}")
     if bg is not None:                          # own background: darken it so text and cards stay readable
-        img = Image.alpha_composite(bg, Image.new("RGBA", (W, H), (6, 8, 18, 115)))
+        img = Image.alpha_composite(bg, Image.new("RGBA", (W, H), (6, 8, 18, dim)))
     else:
         glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         gd = ImageDraw.Draw(glow)
@@ -440,7 +463,11 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
     # header (a little see-through on a custom background)
     if bg is not None:
         hl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ImageDraw.Draw(hl).rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, fill=CARD + (215,))
+        if th.get("glass"):
+            img = _glass(img, (PAD, 26, W - PAD, 216), 22, (10, 26, 60, 165))
+            ImageDraw.Draw(hl).rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, outline=th["teal"] + (160,), width=2)
+        else:
+            ImageDraw.Draw(hl).rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, fill=CARD + (215,))
         img = Image.alpha_composite(img, hl)
         d = ImageDraw.Draw(img)
         d.rounded_rectangle((PAD, 26, W - PAD, 216), radius=22, outline=LINE, width=2)
@@ -496,7 +523,7 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
         st = entry[row]["state"]
         prem_row = row == starpass.PREMIUM
         base_line = th["prem_line"] if prem_row else th["free_line"]
-        base_fill = (34, 30, 38) if prem_row else (22, 34, 52)
+        base_fill = th.get("cell_prem", (34, 30, 38)) if prem_row else th.get("cell_free", (22, 34, 52))
         accent = GOLD if prem_row else TEAL
         ready = st == "ready"
         if ready:
@@ -504,9 +531,19 @@ def build_starpass_image(board: dict, page: int = 0) -> io.BytesIO:
             ImageDraw.Draw(g).rounded_rectangle((x - 2, y - 2, x + cw + 2, y + PH + 2), radius=20, fill=accent + (150,))
             img = Image.alpha_composite(img, g.filter(ImageFilter.GaussianBlur(14)))
             d = ImageDraw.Draw(img)
-        d.rounded_rectangle((x, y, x + cw, y + PH), radius=18, fill=base_fill,
-                            outline=accent if ready else base_line, width=3 if ready else 2)
-        d.rounded_rectangle((x + 3, y + 3, x + cw - 3, y + 46), radius=15, fill=tuple(min(255, v + 10) for v in base_fill))
+        if th.get("glass"):
+            img = _glass(img, (x, y, x + cw, y + PH), 18, base_fill + (170,))
+            d = ImageDraw.Draw(img)
+            d.rounded_rectangle((x, y, x + cw, y + PH), radius=18, outline=accent if ready else base_line,
+                                width=3 if ready else 2)
+            hb = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ImageDraw.Draw(hb).rounded_rectangle((x + 3, y + 3, x + cw - 3, y + 46), radius=15, fill=(255, 255, 255, 18))
+            img = Image.alpha_composite(img, hb)
+            d = ImageDraw.Draw(img)
+        else:
+            d.rounded_rectangle((x, y, x + cw, y + PH), radius=18, fill=base_fill,
+                                outline=accent if ready else base_line, width=3 if ready else 2)
+            d.rounded_rectangle((x + 3, y + 3, x + cw - 3, y + 46), radius=15, fill=tuple(min(255, v + 10) for v in base_fill))
 
         isz = min(170, cw - 18)
         card = cards.get((rw.player_key or "").lower()) if rw.kind == "player" else None

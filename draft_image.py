@@ -63,6 +63,12 @@ THEMES = {
                     guar=(3, 34, 26), gold=(255, 196, 70), dot=(80, 150, 120),
                     btn=(232, 248, 240), btn_off=(120, 160, 145), btn_text=(6, 50, 36), btn_ticket=(10, 140, 90),
                     style="gold"),
+    "winter": dict(pool={"A": (255, 214, 120), "B": (140, 220, 255), "C": (180, 200, 255)},
+                   top=(6, 22, 64), bot=(16, 70, 140), glow=(130, 220, 255),
+                   title=(240, 250, 255), dim=(170, 205, 235), pill=(8, 34, 80), pill_line=(150, 225, 255),
+                   ticket=(150, 225, 255), hole=(6, 28, 70), card=(12, 44, 96), q=(150, 220, 255),
+                   guar=(6, 26, 64), gold=(255, 214, 120), dot=(110, 160, 220),
+                   bg_file="draft_winter_bg.jpg"),
 }
 
 # Theme of the NORMAL draft when it has a custom background (/draftbg). "default" = the blue look.
@@ -104,6 +110,15 @@ def _gradient_bg(theme: str) -> Image.Image:
     if hit is not None:
         return hit
     th = THEMES.get(theme, THEMES["default"])
+    if th.get("bg_file"):                      # theme with its own built-in picture (winter)
+        try:
+            img = ImageOps.fit(Image.open(_HERE / th["bg_file"]).convert("RGB"), (W, H), method=Image.LANCZOS)
+            if len(_bg_cache) >= 12:
+                _bg_cache.pop(next(iter(_bg_cache)))
+            _bg_cache[key] = img
+            return img
+        except Exception as e:
+            print(f"[draft] theme picture missing: {type(e).__name__}: {e}")
     img = Image.new("RGB", (W, H))
     d = ImageDraw.Draw(img)
     for y in range(H):

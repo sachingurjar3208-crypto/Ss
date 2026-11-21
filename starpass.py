@@ -57,7 +57,7 @@ DAY = 86_400
 
 # ── Several passes at once ───────────────────────────────────────────────────
 DEFAULT_PASS = "star"                # the normal Star Pass (all old seasons are "star")
-THEMES = ("default", "halloween", "diwali", "christmas")   # looks, see starpass_image.THEMES
+THEMES = ("default", "halloween", "diwali", "christmas", "winter")   # looks, see starpass_image.THEMES
 MAX_BG_BYTES = 8 * 1024 * 1024       # biggest background upload
 
 
