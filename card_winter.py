@@ -34,6 +34,8 @@ PLAYER_BOTTOM = 1290
 PLAYER_HEAD_Y = 300                      # top of the head (overlaps the big OVR)
 PLAYER_MAX_W = 1000
 
+SHOW_BIG_OVR = False
+
 _LOCK = threading.Lock()
 _STATIC: dict = {}
 
@@ -268,15 +270,16 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     ovr = str(int(card_row["ovr"] or 0))
     bat, bowl = int(card_row["bat"] or 0), int(card_row["bowl"] or 0)
 
-    # big glowing OVR outline behind the player
-    big = _font(ci.FONT_DISPLAY_BOLD, 470)
-    gl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(gl).text((W // 2, 330), ovr, font=big, fill=(0, 0, 0, 0), anchor="mm",
-                            stroke_width=10, stroke_fill=ICE + (255,))
-    comp.alpha_composite(gl.filter(ImageFilter.GaussianBlur(18)))
-    del gl
-    ImageDraw.Draw(comp).text((W // 2, 330), ovr, font=big, fill=(90, 180, 245, 70), anchor="mm",
-                              stroke_width=5, stroke_fill=ICE_HI + (235,))
+    # big OVR behind the player: off (owner asked to remove it; OVR is shown in the panel)
+    if SHOW_BIG_OVR:
+        big = _font(ci.FONT_DISPLAY_BOLD, 470)
+        gl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(gl).text((W // 2, 330), ovr, font=big, fill=(0, 0, 0, 0), anchor="mm",
+                                stroke_width=10, stroke_fill=ICE + (255,))
+        comp.alpha_composite(gl.filter(ImageFilter.GaussianBlur(18)))
+        del gl
+        ImageDraw.Draw(comp).text((W // 2, 330), ovr, font=big, fill=(90, 180, 245, 70), anchor="mm",
+                                  stroke_width=5, stroke_fill=ICE_HI + (235,))
 
     # player: colour grade + rim light + halo + bottom fade into the mist
     if fg_image is not None:
