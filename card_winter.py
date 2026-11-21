@@ -148,8 +148,12 @@ def _build_static() -> dict:
     rnd = random.Random(7)
     src = ROOT / "winter_bg.jpg"
     bg = _cover(Image.open(src), W, H) if src.is_file() else Image.new("RGB", (W, H), (20, 40, 80))
-    bg = _grade(bg, 0.35).convert("RGBA")
-    bg.alpha_composite(Image.new("RGBA", (W, H), NAVY + (90,)))
+    from PIL import ImageEnhance
+    bg = _grade(bg, 0.10)                                   # keep the photo's own colours (aurora, lake)
+    bg = ImageEnhance.Color(bg).enhance(1.35)
+    bg = ImageEnhance.Contrast(bg).enhance(1.15)
+    bg = ImageEnhance.Brightness(bg).enhance(1.08).convert("RGBA")
+    bg.alpha_composite(Image.new("RGBA", (W, H), NAVY + (35,)))
     bg.alpha_composite(_radial((W, H), BURST, 620, ICE, 1.8))
     bg.alpha_composite(_radial((W, H), BURST, 260, ICE_HI, 2.2))
 
@@ -168,13 +172,13 @@ def _build_static() -> dict:
     for _ in range(140):
         x, y = rnd.uniform(-10, W / 8 + 10), rnd.uniform(H / 8 * 0.62, H / 8 + 10)
         rr = rnd.uniform(6, 18)
-        md.ellipse((x - rr, y - rr * 0.6, x + rr, y + rr * 0.6), fill=rnd.randint(60, 140))
+        md.ellipse((x - rr, y - rr * 0.6, x + rr, y + rr * 0.6), fill=rnd.randint(40, 100))
     mist_l = Image.new("RGBA", (W, H), (200, 230, 255, 0))
     mist_l.putalpha(mist.filter(ImageFilter.GaussianBlur(5)).resize((W, H), Image.BICUBIC))
 
     vig = _radial((W, H), (W // 2, H // 2), 1000, (0, 0, 0), 1.0).getchannel("A")
     vig_l = Image.new("RGBA", (W, H), (2, 6, 18, 0))
-    vig_l.putalpha(vig.point(lambda v: int((255 - v) * 0.55)))
+    vig_l.putalpha(vig.point(lambda v: int((255 - v) * 0.45)))
 
     x0, y0, x1, y1 = PANEL
     pw, ph = x1 - x0, y1 - y0
@@ -271,7 +275,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
                             stroke_width=10, stroke_fill=ICE + (255,))
     comp.alpha_composite(gl.filter(ImageFilter.GaussianBlur(18)))
     del gl
-    ImageDraw.Draw(comp).text((W // 2, 330), ovr, font=big, fill=(150, 210, 245, 45), anchor="mm",
+    ImageDraw.Draw(comp).text((W // 2, 330), ovr, font=big, fill=(90, 180, 245, 70), anchor="mm",
                               stroke_width=5, stroke_fill=ICE_HI + (235,))
 
     # player: colour grade + rim light + halo + bottom fade into the mist
@@ -311,7 +315,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     # frosted glass panel: blur what is behind it
     x0, y0, x1, y1 = PANEL
     region = comp.crop(PANEL).filter(ImageFilter.GaussianBlur(18))
-    region.alpha_composite(Image.new("RGBA", region.size, (120, 170, 220, 70)))
+    region.alpha_composite(Image.new("RGBA", region.size, (20, 60, 120, 95)))
     region.alpha_composite(st["shine"])
     comp.paste(region, (x0, y0), st["pmask"])
     comp.alpha_composite(st["pcracks"])
