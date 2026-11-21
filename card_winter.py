@@ -146,16 +146,77 @@ def _glow_text(base, xy, text, fnt, fill, glow, blur, anchor="mm", alpha=255):
     ImageDraw.Draw(base).text(xy, text, font=fnt, fill=fill, anchor=anchor)
 
 
+USE_PHOTO_BG = True      # True = winter_bg.jpg photo, False = plain design-art background (_art_bg)
+
+
+def _art_bg(rnd):
+    """Plain icy design background: deep blue gradient, soft glow, faint ice shards and snowflake line art."""
+    top, bot = (6, 20, 60), (14, 70, 140)
+    g = Image.new("RGB", (1, H))
+    for y in range(H):
+        t = y / (H - 1)
+        g.putpixel((0, y), tuple(int(top[i] * (1 - t) + bot[i] * t) for i in range(3)))
+    bg = g.resize((W, H)).convert("RGBA")
+
+    # big translucent ice shards (diagonal facets)
+    sh = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(sh)
+    for _ in range(16):
+        x = rnd.uniform(-200, W + 200)
+        y = rnd.uniform(-100, H * 0.8)
+        L = rnd.uniform(300, 750)
+        w = rnd.uniform(40, 140)
+        a = rnd.uniform(-1.2, -0.6)
+        dx, dy = math.cos(a) * L, math.sin(a) * L
+        nx, ny = -math.sin(a) * w, math.cos(a) * w
+        sd.polygon([(x, y), (x + nx, y + ny), (x + dx + nx * 0.2, y + dy + ny * 0.2), (x + dx, y + dy)],
+                   fill=(150, 215, 255, rnd.randint(14, 34)), outline=(210, 240, 255, rnd.randint(30, 70)))
+    bg.alpha_composite(sh.filter(ImageFilter.GaussianBlur(1.2)))
+
+    # faint snowflake line art scattered
+    fl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(fl)
+    for _ in range(9):
+        cx, cy = rnd.uniform(0, W), rnd.uniform(0, H * 0.75)
+        R = rnd.uniform(40, 120)
+        al = rnd.randint(40, 90)
+        for k in range(6):
+            an = k * math.pi / 3
+            ex, ey = cx + math.cos(an) * R, cy + math.sin(an) * R
+            fd.line([(cx, cy), (ex, ey)], fill=(220, 245, 255, al), width=2)
+            for f in (0.45, 0.7):
+                bx, by = cx + math.cos(an) * R * f, cy + math.sin(an) * R * f
+                for sgn in (-1, 1):
+                    b = an + sgn * math.pi / 4
+                    fd.line([(bx, by), (bx + math.cos(b) * R * 0.25, by + math.sin(b) * R * 0.25)],
+                            fill=(220, 245, 255, al), width=2)
+    bg.alpha_composite(fl)
+
+    # thin diagonal light lines
+    ln = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ld = ImageDraw.Draw(ln)
+    for _ in range(6):
+        off = rnd.uniform(-500, W + 200)
+        ld.line([(off, H + 40), (off + 800, -40)], fill=(190, 235, 255, rnd.randint(40, 90)), width=rnd.choice([2, 3]))
+    glow = ln.filter(ImageFilter.GaussianBlur(6))
+    bg.alpha_composite(glow)
+    bg.alpha_composite(ln)
+    return bg
+
+
 def _build_static() -> dict:
     rnd = random.Random(7)
-    src = ROOT / "winter_bg.jpg"
-    bg = _cover(Image.open(src), W, H) if src.is_file() else Image.new("RGB", (W, H), (20, 40, 80))
-    from PIL import ImageEnhance
-    bg = _grade(bg, 0.10)                                   # keep the photo's own colours (aurora, lake)
-    bg = ImageEnhance.Color(bg).enhance(1.35)
-    bg = ImageEnhance.Contrast(bg).enhance(1.15)
-    bg = ImageEnhance.Brightness(bg).enhance(1.08).convert("RGBA")
-    bg.alpha_composite(Image.new("RGBA", (W, H), NAVY + (35,)))
+    if USE_PHOTO_BG:
+        from PIL import ImageEnhance
+        src = ROOT / "winter_bg.jpg"
+        bg = _cover(Image.open(src), W, H) if src.is_file() else Image.new("RGB", (W, H), (20, 40, 80))
+        bg = _grade(bg, 0.10)
+        bg = ImageEnhance.Color(bg).enhance(1.35)
+        bg = ImageEnhance.Contrast(bg).enhance(1.15)
+        bg = ImageEnhance.Brightness(bg).enhance(1.08).convert("RGBA")
+        bg.alpha_composite(Image.new("RGBA", (W, H), NAVY + (35,)))
+    else:
+        bg = _art_bg(rnd)
     bg.alpha_composite(_radial((W, H), BURST, 620, ICE, 1.8))
     bg.alpha_composite(_radial((W, H), BURST, 260, ICE_HI, 2.2))
 
@@ -166,7 +227,8 @@ def _build_static() -> dict:
         sd.line([BURST, (BURST[0] + math.cos(a) * ln, BURST[1] + math.sin(a) * ln)],
                 fill=ICE_HI + (rnd.randint(25, 70),), width=rnd.randint(2, 6))
     bg.alpha_composite(streaks.filter(ImageFilter.GaussianBlur(4)))
-    bg.alpha_composite(_cracks(BURST, 7, 3, (200, 480)))
+    if USE_PHOTO_BG:
+        bg.alpha_composite(_cracks(BURST, 7, 3, (200, 480)))
 
     # frost mist rising from the bottom
     mist = Image.new("L", (W // 8, H // 8), 0)
@@ -281,6 +343,7 @@ def build(card_row, fg_image, role) -> io.BytesIO:
         ImageDraw.Draw(comp).text((W // 2, 330), ovr, font=big, fill=(90, 180, 245, 70), anchor="mm",
                                   stroke_width=5, stroke_fill=ICE_HI + (235,))
 
+    player_mask = None
     # player: colour grade + rim light + halo + bottom fade into the mist
     if fg_image is not None:
         try:
@@ -298,6 +361,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
                 t = min(1.0, (y - f0) / max(1, f1 - f0))
                 fd.line([(0, y), (player.width, y)], fill=int(255 * (1 - t) ** 1.4))
             af = ImageChops.multiply(a, fade)
+            player_mask = Image.new("L", (W, H), 0)
+            player_mask.paste(a.crop((max(0, -pos[0]), max(0, -pos[1]), a.width, a.height)), (max(0, pos[0]), max(0, pos[1])))
 
             graded = _player_look(player).convert("RGBA")
             graded.putalpha(af)
@@ -355,7 +420,12 @@ def build(card_row, fg_image, role) -> io.BytesIO:
 
     _brand_and_badge(comp, card_row)
 
-    comp.alpha_composite(st["snow"])
+    snow = st["snow"]
+    if player_mask is not None:                  # no snow dots on the player's face / body
+        keep = ImageChops.invert(player_mask.filter(ImageFilter.MaxFilter(9)))
+        snow = snow.copy()
+        snow.putalpha(ImageChops.multiply(snow.getchannel("A"), keep))
+    comp.alpha_composite(snow)
     comp.alpha_composite(st["noise"])
     ImageDraw.Draw(comp).rectangle((20, 20, W - 21, H - 21), outline=(235, 248, 255, 200), width=2)
 
