@@ -1,4 +1,6 @@
-"""Text help menu for `rchelp` (replaces the old help image).
+"""Text help menu for `rchelp` and `/help` (replaces the old help image).
+
+    Navigation: a topic dropdown AND buttons (Previous / All Commands / Next).
 
     rchelp  ->  first page lists EVERY command, grouped by topic.
                 A "Select a help topic" menu under it opens one topic
@@ -181,7 +183,7 @@ def overview_embed(user_name: str) -> discord.Embed:
     embed = discord.Embed(
         title="Help",
         description="Every command is listed below, grouped by topic.\n"
-                    "Use the menu under this message to see how each command works.",
+                    "Use the menu or the buttons under this message to see how each command works.",
         color=discord.Color.teal(),
     )
     for key in ORDER:
@@ -197,7 +199,7 @@ def topic_embed(key: str, user_name: str) -> discord.Embed:
     blocks = [f"**{row[0]}** `{row[1]}`\n> {row[2]}" for row in _rows(key)]
     embed = discord.Embed(title=f"Help: {title}", description=_fit("\n\n".join(blocks), 4000),
                           color=discord.Color.teal())
-    embed.set_footer(text=f"Requested by: {user_name}  |  Pick another topic below, or All Commands to go back")
+    embed.set_footer(text=f"Requested by: {user_name}  |  Use the menu or buttons below")
     return embed
 
 
@@ -224,15 +226,51 @@ class HelpSelect(ui.Select):
         await interaction.response.edit_message(embed=build_embed(key, view.user_name), view=view)
 
 
+PAGES = [OVERVIEW_KEY] + ORDER
+
+
+class HelpNavButton(ui.Button):
+    """Previous / All Commands / Next."""
+
+    def __init__(self, action: str, current: str):
+        idx = PAGES.index(current) if current in PAGES else 0
+        if action == "prev":
+            super().__init__(label="Previous", emoji="◀️", style=discord.ButtonStyle.secondary,
+                             row=1, disabled=idx == 0)
+        elif action == "home":
+            super().__init__(label="All Commands", style=discord.ButtonStyle.primary,
+                             row=1, disabled=current == OVERVIEW_KEY)
+        else:
+            super().__init__(label="Next", emoji="▶️", style=discord.ButtonStyle.secondary,
+                             row=1, disabled=idx == len(PAGES) - 1)
+        self.action = action
+        self.current = current
+
+    async def callback(self, interaction: discord.Interaction):
+        idx = PAGES.index(self.current) if self.current in PAGES else 0
+        if self.action == "prev":
+            idx = max(0, idx - 1)
+        elif self.action == "next":
+            idx = min(len(PAGES) - 1, idx + 1)
+        else:
+            idx = 0
+        key = PAGES[idx]
+        view: HelpView = self.view            # type: ignore[assignment]
+        view.rebuild(key)
+        await interaction.response.edit_message(embed=build_embed(key, view.user_name), view=view)
+
+
 class HelpView(OwnedView):
     def __init__(self, user_id: int, user_name: str):
         super().__init__(user_id, timeout=MENU_TIMEOUT)
         self.user_name = user_name
-        self.add_item(HelpSelect())
+        self.rebuild(OVERVIEW_KEY)
 
     def rebuild(self, current: str) -> None:
         self.clear_items()
-        self.add_item(HelpSelect(current))
+        self.add_item(HelpSelect(current))                 # row 0: topic dropdown
+        for action in ("prev", "home", "next"):            # row 1: buttons
+            self.add_item(HelpNavButton(action, current))
 
 
 async def send_help(ctx) -> None:
@@ -240,3 +278,14 @@ async def send_help(ctx) -> None:
     name = ctx.author.display_name
     view = HelpView(ctx.author.id, name)
     view.message = await ctx.send(embed=overview_embed(name), view=view)
+
+
+async def send_help_slash(interaction: discord.Interaction) -> None:
+    """Called by the /help slash command."""
+    name = interaction.user.display_name
+    view = HelpView(interaction.user.id, name)
+    await interaction.response.send_message(embed=overview_embed(name), view=view)
+    try:
+        view.message = await interaction.original_response()
+    except discord.HTTPException:
+        pass
