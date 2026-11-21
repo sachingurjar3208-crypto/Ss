@@ -115,6 +115,7 @@ async def load_cogs():
         "redeem_cog",
         "backup_cog",
         "myplayer_cog",
+        "help_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:
