@@ -550,7 +550,7 @@ class CardMakerCog(commands.Cog):
     #                    /rename event eventname:<event> newname:<new name>
     rename = app_commands.Group(
         name="rename", description="Rename a card or an event",
-        guild_only=True, default_permissions=discord.Permissions(),
+        guild_only=True, default_permissions=discord.Permissions(use_external_apps=True),
     )
     app_commands.guilds(ADMIN_GUILD_ID)(rename)      # only exists in your server (like admin_only)
 
@@ -1809,7 +1809,7 @@ class CardMakerCog(commands.Cog):
     # are gone: every playstyle now has its own built-in badge in 3 levels (playstyle_badges.py).
     playstyle = app_commands.Group(
         name="playstyle", description="Put playstyles (with a level) on a player card",
-        guild_only=True, default_permissions=discord.Permissions(),
+        guild_only=True, default_permissions=discord.Permissions(use_external_apps=True),
     )
     app_commands.guilds(ADMIN_GUILD_ID)(playstyle)   # only exists in your server (set on the GROUP, not the subcommands)
 

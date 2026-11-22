@@ -46,12 +46,15 @@ def card_maker_or_staff():
 
     def decorator(func):
         func = app_commands.check(predicate)(func)
-        func = app_commands.default_permissions()(func)
+        # visible to members with "Use External Apps" (give it only to the card-maker role), the check
+        # above still blocks anyone who is not staff / card maker
+        func = app_commands.default_permissions(use_external_apps=True)(func)
         func = app_commands.guild_only()(func)
         func = app_commands.guilds(ADMIN_GUILD_ID)(func)
         return func
 
     return decorator
+
 
 
 def is_staff(user) -> bool:
