@@ -194,9 +194,7 @@ PACKS = {
              "range": (60, 150), "event": "end of an era", "shop": False,
              # fixed chance per card (part of the card name -> weight). Cards of the event not listed
              # here share nothing; if none of these is found, any card of the event is given.
-             "name_weights": {"dhoni": 20, "maxwell": 80},
-             # pity: the highest-OVR card of the event is guaranteed by this pack number
-             "pity": 3},
+             "name_weights": {"dhoni": 100}},        # only MS Dhoni (EOAE)
 }
 
 
@@ -231,7 +229,11 @@ def pack_available(pack_type: str) -> bool:
         return False
     if not spec.get("event"):
         return True
-    return bool(_pack_cards(spec))
+    cards = _pack_cards(spec)
+    named = spec.get("name_weights")
+    if named:
+        return any(part in str(c["playername_key"]).lower() for c in cards for part in named)
+    return bool(cards)
 
 
 def roll_pack(pack_type: str, force_best: bool = False) -> list:
@@ -255,7 +257,7 @@ def roll_pack(pack_type: str, force_best: bool = False) -> list:
                 wts.append(w)
         if pool:
             return [_rng.choices(pool, weights=wts, k=1)[0]]
-        return [_rng.choice(cards)]
+        return []                                   # listed card missing: pack stays unopened
     lo, hi = spec["range"]
     weights = spec.get("weights")
     if weights:

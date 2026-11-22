@@ -46,8 +46,8 @@ ITEMS = {
                   "info": "One full 10-draft pull in rcdraft"},
     "legendary": {"name": "Legendary Pack", "cost": 1_300, "give": "pack:legendary",
                   "info": "One 90 to 95 OVR card, open it with rcopen"},
-    "eoae":      {"name": "End of an Era Pack", "cost": 1_000, "give": "pack:eoae",
-                  "info": "20% MS Dhoni (EOAE)  ·  80% Glenn Maxwell (EOAE)  ·  Dhoni guaranteed within 3 packs  ·  rcopen eoae"},
+    "eoae":      {"name": "End of an Era Pack", "cost": 2_500, "give": "pack:eoae",
+                  "info": "Guaranteed MS Dhoni (End of an Era) card  ·  open it with rcopen eoae"},
     "drinks":    {"name": "100 Energy Drinks", "cost": 1_000, "give": "drinks", "qty": 100,
                   "info": "Premium only: upgrade your My Player with rcmyp upgrade"},
 }
@@ -311,6 +311,10 @@ class RCPCog(commands.Cog, name="RCP"):
             give = it["give"]
             if give == "role:starpass":
                 return await self._buy_pass(member, season_id)
+            if give.startswith("pack:"):
+                import squad_logic as sl
+                if not await asyncio.to_thread(sl.pack_available, give[5:]):
+                    return f"❌ **{it['name']}** isn't available right now. No RCP was taken."
             res = await asyncio.to_thread(economy.rcp_buy, member.id, it["cost"], it["name"],
                                           "none" if give.startswith("role:") else give, it.get("qty", 1))
             if not res["ok"]:
