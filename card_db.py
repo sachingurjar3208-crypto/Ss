@@ -210,6 +210,16 @@ def init_card_db() -> None:
         for col, ddl in _NEW_CARD_COLUMNS:
             if col not in existing:
                 conn.execute(f"ALTER TABLE cards ADD COLUMN {col} {ddl}")
+        # old England / Scotland / Wales cards were saved with a plain black flag
+        try:
+            from card_countries import resolve_country
+            for name in ("England", "Scotland", "Wales"):
+                found = resolve_country(name)
+                if found and len(found[1]) > 1:
+                    conn.execute("UPDATE cards SET country_emoji = ? WHERE country = ? AND country_emoji = ?",
+                                 (found[1], found[0], "\U0001F3F4"))
+        except Exception as e:
+            print(f"[card_db] flag fix skipped: {type(e).__name__}: {e}")
         conn.commit()
 
 
