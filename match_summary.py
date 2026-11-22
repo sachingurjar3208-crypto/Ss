@@ -219,9 +219,9 @@ def build_summary_file(game) -> tuple[bytes, str]:
     everything else - or if the gif can't be made - is the normal static PNG, so the match end never breaks."""
     data = build_summary_data(game)
     style, img = _theme_for(game)
-    if style == "halloween" and img:
+    import summary_anim
+    if style in summary_anim.ANIMATED and img:
         try:
-            import summary_anim
             res = summary_anim.build_animated_summary(data, img, style)
             if res:
                 return res

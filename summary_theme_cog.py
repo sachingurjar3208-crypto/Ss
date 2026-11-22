@@ -269,9 +269,9 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
         # preview with sample numbers, so you see the text design on your image right away
         try:
             anim = None
-            if pathname.value == "halloween":                 # Halloween is animated (gif), others stay a PNG
-                import summary_anim
-                anim = await asyncio.to_thread(summary_anim.build_animated_summary, _SAMPLE, data, "halloween")
+            import summary_anim
+            if pathname.value in summary_anim.ANIMATED:      # animated themes get a gif preview
+                anim = await asyncio.to_thread(summary_anim.build_animated_summary, _SAMPLE, data, pathname.value)
             if anim:
                 file = discord.File(io.BytesIO(anim[0]), filename="summary_theme_preview.gif")
             else:

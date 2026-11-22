@@ -28,6 +28,7 @@ import summary_image
 W, H = summary_image.SIZE
 MAX_BYTES = 3_000_000            # small file = fast upload at match end (Discord allows 10 MB)
 FILENAME = "match_summary.gif"
+ANIMATED = ("halloween", "winter")      # themes that get the animated GIF summary
 
 # (frames, width) tries from the best to the lightest. Height keeps the 3:2 shape.
 # Lighter than before (was 20 frames at 1536px, up to 7.4 MB) so the summary arrives quickly.
@@ -306,8 +307,80 @@ def _lzw_block(fr: Image.Image) -> bytes:
     return b[start:pos + 1]
 
 
-def _build_frames(layers, n: int, width: int) -> list[Image.Image]:
+# ── Winter Wonder: falling snow (3 depths), twinkling ice sparkles, frost in the corners ──
+
+class _Snow:
+    def __init__(self, seed: int = 7):
+        rnd = random.Random(seed)
+        self.flakes = []
+        # (count, radius range, fall cycles per loop, alpha, blur-ish halo) for far / mid / near
+        for count, rr, cyc, alpha in ((90, (1.4, 2.4), 1, 150), (55, (2.6, 4.0), 1, 200), (16, (5.5, 8.0), 2, 230)):
+            for _ in range(count):
+                self.flakes.append(dict(x=rnd.uniform(0, W), y0=rnd.uniform(0, H), r=rnd.uniform(*rr),
+                                        cyc=cyc, a=alpha, sway=rnd.uniform(6, 26), ph=rnd.random()))
+        self.sparks = [dict(x=rnd.uniform(40, W - 40), y=rnd.uniform(40, H - 40), ph=rnd.random(),
+                            s=rnd.uniform(7, 15)) for _ in range(26)]
+
+    def draw(self, layer: Image.Image, u: float) -> None:
+        d = ImageDraw.Draw(layer, "RGBA")
+        for f in self.flakes:
+            y = (f["y0"] + (H + 40) * f["cyc"] * u) % (H + 40) - 20          # whole cycles = seamless loop
+            x = f["x"] + f["sway"] * math.sin(2 * math.pi * (u * f["cyc"] + f["ph"]))
+            r = f["r"]
+            if r > 5:
+                d.ellipse((x - r * 1.8, y - r * 1.8, x + r * 1.8, y + r * 1.8), fill=(220, 240, 255, 40))
+            d.ellipse((x - r, y - r, x + r, y + r), fill=(255, 255, 255, f["a"]))
+        for sp in self.sparks:                                             # little 4-point twinkles
+            a = max(0.0, math.sin(2 * math.pi * (u * 2 + sp["ph"]))) ** 3
+            if a < 0.05:
+                continue
+            x, y, s_ = sp["x"], sp["y"], sp["s"] * (0.6 + 0.4 * a)
+            col = (210, 240, 255, int(235 * a))
+            d.line([(x - s_, y), (x + s_, y)], fill=col, width=2)
+            d.line([(x, y - s_), (x, y + s_)], fill=col, width=2)
+            d.ellipse((x - 2.5, y - 2.5, x + 2.5, y + 2.5), fill=(255, 255, 255, int(255 * a)))
+
+
+def _frost_corners(bg: Image.Image) -> None:
+    """Soft frost creeping in from the four corners (static, drawn once)."""
+    rnd = random.Random(3)
+    fr = Image.new("L", (W, H), 0)
+    d = ImageDraw.Draw(fr)
+    for cx, cy in ((0, 0), (W, 0), (0, H), (W, H)):
+        for _ in range(260):
+            ang = rnd.uniform(0, 2 * math.pi)
+            dist = abs(rnd.gauss(0, 120))
+            x, y = cx + math.cos(ang) * dist, cy + math.sin(ang) * dist
+            r = rnd.uniform(3, 12)
+            d.ellipse((x - r, y - r, x + r, y + r), fill=rnd.randint(70, 170))
+    from PIL import ImageFilter
+    layer = Image.new("RGBA", (W, H), (225, 245, 255, 0))
+    layer.putalpha(fr.filter(ImageFilter.GaussianBlur(7)))
+    bg.alpha_composite(layer)
+
+
+def _build_frames(layers, n: int, width: int, style: str = "halloween") -> list[Image.Image]:
     bg, glow, text = layers
+    if style == "winter":
+        snow = _Snow()
+        base = bg.copy()
+        _frost_corners(base)
+        frames = []
+        for i in range(n):
+            u = i / n
+            fr = base.copy()
+            fxl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            snow.draw(fxl, u)
+            fr.alpha_composite(fxl)
+            if glow is not None:
+                pulse = 0.82 + 0.18 * math.sin(2 * math.pi * u)
+                fr.alpha_composite(_scale_alpha(glow, pulse))
+            fr.alpha_composite(text)
+            rgb = fr.convert("RGB")
+            if width != W:
+                rgb = rgb.resize((width, round(H * width / W)), Image.LANCZOS)
+            frames.append(rgb)
+        return frames
     fx = _Fx()
     base = bg.copy()
     _decorate(base)
@@ -334,13 +407,13 @@ def _build_frames(layers, n: int, width: int) -> list[Image.Image]:
 def build_animated_summary(data: dict, bg_bytes: bytes | None, style: str = "halloween",
                            max_bytes: int = MAX_BYTES):
     """(gif_bytes, filename) or None. None = use the normal static PNG."""
-    if style != "halloween" or not bg_bytes:
+    if style not in ANIMATED or not bg_bytes:
         return None
     layers = summary_image.generate_summary_layers(data, style, bg_bytes)
     if layers is None:
         return None
     for n, width in _LADDER:
-        frames = _build_frames(layers, n, width)
+        frames = _build_frames(layers, n, width, style)
         pal = _palette_image(frames)
         delay = max(_DELAY_MS, round(_LOOP_MS / n))
         gif = _encode(_to_index_frames(frames, pal), delay)

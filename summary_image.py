@@ -64,6 +64,13 @@ STYLES = {
         "stroke": (8, 48, 24, 255), "stroke_w": 3, "glow": (60, 220, 110, 225), "glow_r": 7,
         "shadow": (0, 0, 0, 200),
     },
+    "winter": {
+        "label": "Winter Wonder", "title": "WINTER WONDER SUMMARY", "foot": "RUSH CRICKET  -  WINTER WONDER",
+        "name": (245, 252, 255, 255), "num": (150, 225, 255, 255), "sub": (200, 236, 255, 255),
+        "potm": (255, 222, 130, 255), "result": (150, 225, 255, 255), "foot_fill": (180, 232, 255, 255),
+        "stroke": (6, 22, 58, 255), "stroke_w": 3, "glow": (90, 190, 255, 230), "glow_r": 7,
+        "shadow": (0, 0, 0, 200),
+    },
 }
 STYLE_NAMES = tuple(STYLES)
 SIZE = (1536, 1024)
