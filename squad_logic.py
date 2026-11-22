@@ -194,7 +194,9 @@ PACKS = {
              "range": (60, 150), "event": "end of an era", "shop": False,
              # fixed chance per card (part of the card name -> weight). Cards of the event not listed
              # here share nothing; if none of these is found, any card of the event is given.
-             "name_weights": {"dhoni": 20, "maxwell": 80}},
+             "name_weights": {"dhoni": 20, "maxwell": 80},
+             # pity: the highest-OVR card of the event is guaranteed by this pack number
+             "pity": 3},
 }
 
 
@@ -232,13 +234,16 @@ def pack_available(pack_type: str) -> bool:
     return bool(_pack_cards(spec))
 
 
-def roll_pack(pack_type: str) -> list:
+def roll_pack(pack_type: str, force_best: bool = False) -> list:
     """Pick the single card for one pack. Returns a list with 1 card row
-    (empty list only if the game has no cards at all)."""
+    (empty list only if the game has no cards at all). force_best = pity hit: the highest-OVR card."""
     spec = PACKS[pack_type]
     cards = _pack_cards(spec)                       # not obtainable=False, not a disabled event
     if not cards:
         return []
+    if force_best:
+        top = max(int(c["ovr"]) for c in cards)
+        return [_rng.choice([c for c in cards if int(c["ovr"]) == top])]
     named = spec.get("name_weights")
     if named:
         pool, wts = [], []

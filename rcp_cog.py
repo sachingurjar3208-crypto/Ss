@@ -47,7 +47,7 @@ ITEMS = {
     "legendary": {"name": "Legendary Pack", "cost": 1_300, "give": "pack:legendary",
                   "info": "One 90 to 95 OVR card, open it with rcopen"},
     "eoae":      {"name": "End of an Era Pack", "cost": 1_000, "give": "pack:eoae",
-                  "info": "20% MS Dhoni (EOAE)  ·  80% Glenn Maxwell (EOAE)  ·  open it with rcopen eoae"},
+                  "info": "20% MS Dhoni (EOAE)  ·  80% Glenn Maxwell (EOAE)  ·  Dhoni guaranteed within 3 packs  ·  rcopen eoae"},
     "drinks":    {"name": "100 Energy Drinks", "cost": 1_000, "give": "drinks", "qty": 100,
                   "info": "Premium only: upgrade your My Player with rcmyp upgrade"},
 }

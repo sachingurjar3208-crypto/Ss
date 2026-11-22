@@ -1120,7 +1120,15 @@ class EconomyCog(commands.Cog, name="Economy"):
             await ctx.send("❌ You don't have that pack.")
             return
         spec = sl.PACKS[key]
-        rolled = sl.roll_pack(key)
+        pity_at = int(spec.get("pity") or 0)
+        pity_key = f"pity_{key}"
+        since = 0
+        if pity_at:
+            try:
+                since = int(economy.get_pref(ctx.author.id, pity_key, "0") or 0)
+            except ValueError:
+                since = 0
+        rolled = sl.roll_pack(key, force_best=bool(pity_at) and since >= pity_at - 1)
         if not rolled:
             if spec.get("event"):
                 await ctx.send(f"⚠️ The {spec['label']} has no player cards right now (its event is switched off). "
@@ -1147,6 +1155,17 @@ class EconomyCog(commands.Cog, name="Economy"):
                 return price_line(by_key[k], extra)
             return _card_line(by_key[k], extra)
 
+        pity_note = ""
+        if pity_at:
+            evcards = sl._pack_cards(spec)
+            top = max((int(c["ovr"]) for c in evcards), default=0)
+            got_best = int(rolled[0]["ovr"]) >= top
+            since = 0 if got_best else since + 1
+            await asyncio.to_thread(economy.set_pref, ctx.author.id, pity_key, str(since))
+            left = pity_at - since
+            pity_note = ("Top card guaranteed in **1** more pack" if left == 1
+                         else f"Top card guaranteed within **{left}** packs")
+
         lines = [_line(k, "  🆕") for k in result["new"]]
         lines += [_line(k, "  ⏳ keep / sell?") for k in result.get("pending", [])]
         lines += [_line(k, "  ♻️ duplicate") for k in result["dupes"]]
@@ -1156,6 +1175,8 @@ class EconomyCog(commands.Cog, name="Economy"):
             embed = discord.Embed(title=f"{spec['emoji']} {spec['label']} opened!", description="\n".join(lines), color=discord.Color.gold())
         if result["refund"]:
             embed.set_footer(text=f"Duplicates gave you back {result['refund']:,} coins")
+        elif pity_note:
+            embed.set_footer(text=pity_note.replace("**", ""))
 
         # The REAL card image (the same one rcview / rcbuy show) is prepared BEFORE the animation
         # starts, so it can appear the moment the animation ends.
