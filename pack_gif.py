@@ -45,9 +45,12 @@ PACK_COLORS = {
     # Retro Stars: neon pink with a deep purple rim.
     "retro": ((40, 8, 70), (255, 70, 200), (96, 24, 140), (210, 40, 170),
               (255, 160, 230), (255, 214, 245), (150, 20, 120)),
+    # End of an Era: deep brown rim, warm gold face
+    "eoae": ((46, 26, 10), (236, 172, 74), (110, 64, 24), (196, 130, 46),
+             (255, 214, 140), (255, 238, 196), (150, 92, 30)),
 }
 LABELS = {"bronze": "BRONZE PACK", "silver": "SILVER PACK", "gold": "GOLD PACK",
-          "legendary": "LEGENDARY PACK", "halloween": "HALLOWEEN PACK", "retro": "RETRO STARS PACK"}
+          "legendary": "LEGENDARY PACK", "halloween": "HALLOWEEN PACK", "retro": "RETRO STARS PACK", "eoae": "END OF AN ERA PACK"}
 GOLD_TRIM = (232, 214, 140)
 CREAM = (238, 228, 165)
 

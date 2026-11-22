@@ -46,12 +46,15 @@ ITEMS = {
                   "info": "One full 10-draft pull in rcdraft"},
     "legendary": {"name": "Legendary Pack", "cost": 1_300, "give": "pack:legendary",
                   "info": "One 90 to 95 OVR card, open it with rcopen"},
+    "eoae":      {"name": "End of an Era Pack", "cost": 2_000, "give": "pack:eoae",
+                  "info": "One End of an Era card (88 to 98 OVR, legends are rare), open it with rcopen eoae"},
     "drinks":    {"name": "100 Energy Drinks", "cost": 1_000, "give": "drinks", "qty": 100,
                   "info": "Premium only: upgrade your My Player with rcmyp upgrade"},
 }
 DRINK_EMOJI = "<:energydrink:1572435428928135230>"
 ALIASES = {"prem": "premium", "membership": "premium", "pass": "starpass", "star": "starpass",
            "voucher": "vouchers", "10vouchers": "vouchers", "legend": "legendary", "pack": "legendary",
+           "era": "eoae", "eoaepack": "eoae", "endofanera": "eoae",
            "drink": "drinks", "energy": "drinks", "energydrinks": "drinks", "100drinks": "drinks"}
 
 RCP_COLOR = discord.Color.from_rgb(30, 170, 110)
@@ -75,7 +78,7 @@ async def premium_bonus(member) -> int:
 def _item_emoji(key: str) -> str:
     return {"premium": emojis.PREMIUM, "starpass": emojis.STAR_PASS,
             "vouchers": emojis.VOUCHER, "legendary": emojis.LEGENDARY_PACK,
-            "drinks": DRINK_EMOJI}.get(key, emojis.RCP)
+            "drinks": DRINK_EMOJI, "eoae": emojis.EOAE_PACK}.get(key, emojis.RCP)
 
 
 def _store_embed(balance: int, bonus: int = 0) -> discord.Embed:

@@ -42,6 +42,7 @@ GOLD_PACK      = "<:Goldpack:1564835565323423764>"
 LEGENDARY_PACK = "<:Legpack:1564835557396189345>"
 HALLOWEEN_PACK = "<:Halloweenpack:1564836597046837258>"
 RETRO_PACK = "<:Retropack:1570481667108503642>"
+EOAE_PACK = "🏆"   # replace with the custom End of an Era pack emoji once it is uploaded
 
 # Player roles (Developer Portal names)
 WICKETKEEPER = "<:Wicketkepper:1558757467045888100>"   # portal name is spelled "Wicketkepper"

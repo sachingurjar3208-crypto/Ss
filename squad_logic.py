@@ -134,6 +134,11 @@ _RETRO_PRICE = 1_000_000
 # Retro Stars Pack: % chance per OVR (only the OVRs the set has).
 # At 1,000,000: 88% of packs sell back for less than the price (86-88), 89 is a small profit, 94-97 a big one;
 # on average a pack sells back for ~69% of its price.
+# End of an Era Pack (sold only for RCP in rcstore): relative chance of each OVR. 97-98 are the legends.
+EOAE_OVR_WEIGHTS: dict[int, float] = {
+    88: 40, 89: 26, 90: 15, 91: 8, 92: 5, 93: 3, 94: 1.6, 95: 0.8, 96: 0.4, 97: 0.15, 98: 0.05,
+}
+
 RETRO_OVR_WEIGHTS: dict[int, float] = {
     86: 42, 87: 28, 88: 18, 89: 9.5,
     94: 1.6, 95: 0.6, 96: 0.2, 97: 0.1,
@@ -183,6 +188,12 @@ PACKS = {
               "range": (86, 99), "event": "retro star",
               "keep_odds": True,
               "weights": RETRO_OVR_WEIGHTS},
+    # End of an Era Pack: ONLY cards of the "End Of An ERA" event. Not in the coin shop:
+    # bought with RCP in rcstore (rcp_cog ITEMS["eoae"]), opened with rcopen eoae.
+    "eoae": {"label": "End of an Era Pack", "emoji": emojis.EOAE_PACK, "price": 0, "cards": 1,
+             "range": (88, 99), "event": "end of an era", "shop": False,
+             "keep_odds": True,
+             "weights": EOAE_OVR_WEIGHTS},
 }
 
 
