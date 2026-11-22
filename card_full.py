@@ -799,6 +799,15 @@ def _glass_panel(canvas, st, accent, raw_bg=None, icy=True):
     canvas.alpha_composite(sf)
 
 
+def _clear_panel(canvas, st, accent, raw_bg):
+    """Panel with the card background exactly as it is (no blur, no colour tint), thin accent border."""
+    m = st["panel"]
+    src = raw_bg if raw_bg.size == canvas.size else raw_bg.resize(canvas.size, Image.LANCZOS)
+    canvas.paste(src.convert("RGBA"), (0, 0), m)
+    edge = ImageChops.subtract(m, m.filter(ImageFilter.MinFilter(5)))
+    canvas.paste(accent + (255,), (0, 0), edge)
+
+
 def _panel_fill(themed):
     """Theme gradient, or the card background mirrored into the panel and tinted in the theme colour."""
     grad = themed["panel_fill"]
@@ -832,7 +841,14 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     ev = _event(card_row) or {}
     own_glass = bool(ci._col(card_row, "own_glass", 0)) if ci._col(card_row, "own_bg") else None
     glass_on = own_glass if own_glass is not None else (ev.get("panel_glass") or _is_winter(card_row))
-    if glass_on and themed.get("raw_bg") is not None:
+    mode = str(ci._col(card_row, "panel_mode", "") or "").lower()
+    if mode == "normal":
+        glass_on = False
+    elif mode == "glass":
+        glass_on = True
+    if mode == "clear" and themed.get("raw_bg") is not None:
+        _clear_panel(canvas, st, accent, themed["raw_bg"])
+    elif glass_on and themed.get("raw_bg") is not None:
         _glass_panel(canvas, st, accent, themed["raw_bg"], icy=_is_winter(card_row))
     else:
         canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
@@ -873,6 +889,16 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     right = (bowl, "BOWLING") if is_batter else (bat, "BATTING")
     num_f = _font(ci.FONT_DISPLAY_BOLD, 175)
     lab_f = _font(ci.FONT_LABEL, 30)
+    if mode == "clear":                          # clear panel: dark soft shadow behind every label / number
+        sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+        sd_ = ImageDraw.Draw(sh)
+        for cx, (val, lab) in ((172, left), (865, right)):
+            sd_.text(_q(cx, 1300), str(val), font=num_f, fill=(0, 0, 0, 200), anchor="mm")
+            _spaced(sd_, _q(cx, 1410), lab, lab_f, (0, 0, 0, 255), 4)
+        _spaced(sd_, _q(518, 1410), "OVR", lab_f, (0, 0, 0, 255), 4)
+        sh = sh.filter(ImageFilter.MaxFilter(5)).filter(ImageFilter.GaussianBlur(7 * S))
+        canvas.alpha_composite(sh)
+        canvas.alpha_composite(sh)
     for cx, (val, lab) in ((172, left), (865, right)):
         if num_grad:
             _shadow_text(canvas, _q(cx, 1300), str(val), num_f, (0, 0, 0, 0), anchor="mm", blur=5, alpha=200)
@@ -1386,7 +1412,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     raw_bg = _card_bg(card_row)
     if raw_bg is not None and (any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES)
                                or (_event(card_row) or {}).get("panel_glass") or _is_winter(card_row)
-                               or (ci._col(card_row, "own_bg") and ci._col(card_row, "own_glass", 0))):
+                               or (ci._col(card_row, "own_bg") and ci._col(card_row, "own_glass", 0))
+                               or str(ci._col(card_row, "panel_mode", "") or "").lower() in ("glass", "clear")):
         themed = dict(themed, raw_bg=raw_bg)
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
     if th.get("style") == "gold" and raw_bg is None:

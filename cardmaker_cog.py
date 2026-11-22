@@ -58,7 +58,7 @@ from card_db import (
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
     set_card_event, set_card_obtainable, get_event, list_events, create_event, rename_event,
     set_event_disabled, parse_emoji_input, count_event_cards, event_emoji_str,
-    set_event_bg, set_card_own_bg, cards_in_event, set_event_for_background, update_card_full_offset,
+    set_event_bg, set_card_own_bg, set_card_panel_mode, cards_in_event, set_event_for_background, update_card_full_offset,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
 from card_image import generate_card_image, cache_all_foregrounds
@@ -846,10 +846,15 @@ class CardMakerCog(commands.Cog):
         obtainable="True = packs & all sources. False = not found anywhere, only added by hand",
         theme="Card theme. Halloween = Halloween frame + orange text. Normal = back to purple",
         image="New player cutout picture: just upload it here (instead of a link)",
+        panelstyle="Stats panel look: Normal = theme colour, Glass = blurred background, Clear = background as it is",
     )
     @app_commands.choices(
         role=ROLE_CHOICES, battinghand=HAND_CHOICES,
         bowlingtype=BOWLTYPE_CHOICES, theme=THEME_CHOICES,
+        panelstyle=[app_commands.Choice(name="Normal (theme colour)", value="normal"),
+                    app_commands.Choice(name="Glass (blurred background)", value="glass"),
+                    app_commands.Choice(name="Clear (background as it is)", value="clear"),
+                    app_commands.Choice(name="Auto (event decides)", value="auto")],
     )
     @app_commands.autocomplete(
         playername=playername_autocomplete,
@@ -882,6 +887,7 @@ class CardMakerCog(commands.Cog):
         obtainable: bool | None = None,
         theme: app_commands.Choice[str] | None = None,
         image: discord.Attachment | None = None,
+        panelstyle: app_commands.Choice[str] | None = None,
     ):
         await interaction.response.defer()
 
@@ -892,6 +898,8 @@ class CardMakerCog(commands.Cog):
             return
 
         updates: dict = {}
+        if panelstyle is not None:
+            set_card_panel_mode(playername, None if panelstyle.value == "auto" else panelstyle.value)
         if displayname is not None:
             updates["displayname"] = displayname
         if image is not None:
@@ -980,7 +988,7 @@ class CardMakerCog(commands.Cog):
                 new_event_key = erow["event_key"]
 
         if (not updates and not slot_updates and not panel_update_pending
-                and not event_update_pending and obtainable is None and theme is None):
+                and not event_update_pending and obtainable is None and theme is None and panelstyle is None):
             await interaction.followup.send("❌ Nothing to change — give at least one field besides playername.")
             return
 
