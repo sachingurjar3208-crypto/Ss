@@ -729,7 +729,7 @@ def _frost_branch(d, x, y, ang, length, depth, rnd, alpha):
                           length * 0.38, depth - 1, rnd, int(alpha * 0.85))
 
 
-def _glass_panel(canvas, st, accent, raw_bg=None):
+def _glass_panel(canvas, st, accent, raw_bg=None, icy=True):
     """Frosted ice-glass stats panel: the background shows through (blurred, darkened), frost in the
     top corners, a glowing icy border and a snowflake."""
     import random
@@ -743,7 +743,8 @@ def _glass_panel(canvas, st, accent, raw_bg=None):
     region = src.crop(box).convert("RGB")
     small = region.resize((max(1, region.width // 3), max(1, region.height // 3)), Image.BILINEAR)
     blur = small.filter(ImageFilter.GaussianBlur(1.5)).resize(region.size, Image.BICUBIC)
-    dark = Image.blend(blur, Image.new("RGB", region.size, (8, 20, 48)), 0.45)
+    tint = (8, 20, 48) if icy else tuple(max(0, int(c * 0.12)) for c in accent)
+    dark = Image.blend(blur, Image.new("RGB", region.size, tint), 0.45 if icy else 0.5)
     glass = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     glass.paste(dark, box[:2])
     canvas.paste(glass, (0, 0), m)
@@ -753,7 +754,13 @@ def _glass_panel(canvas, st, accent, raw_bg=None):
     sd = ImageDraw.Draw(shine)
     for k in range(0, int(150 * S)):
         sd.line((0, top + k, W, top + k), fill=int(40 * (1 - k / (150 * S)) ** 1.5))
-    canvas.paste((150, 210, 255, 255), (0, 0), ImageChops.multiply(shine, m))
+    canvas.paste((150, 210, 255, 255) if icy else accent + (255,), (0, 0), ImageChops.multiply(shine, m))
+    if not icy:                                   # warm glass (event themes): accent border, no frost / snowflake
+        edge = ImageChops.subtract(m, m.filter(ImageFilter.MinFilter(5)))
+        glow = edge.filter(ImageFilter.MaxFilter(9)).filter(ImageFilter.GaussianBlur(9 * S))
+        canvas.paste(accent + (255,), (0, 0), glow.point(lambda v: min(255, v * 2)))
+        canvas.paste(tuple(min(255, c + 60) for c in accent) + (255,), (0, 0), edge)
+        return
 
     deco = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     dd = ImageDraw.Draw(deco)
@@ -817,7 +824,7 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     # panel body: the card's own background shows through, tinted in the theme colour
     ev = _event(card_row) or {}
     if (ev.get("panel_glass") or _is_winter(card_row)) and themed.get("raw_bg") is not None:
-        _glass_panel(canvas, st, accent, themed["raw_bg"])
+        _glass_panel(canvas, st, accent, themed["raw_bg"], icy=_is_winter(card_row))
     else:
         canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
 
