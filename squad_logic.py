@@ -191,9 +191,10 @@ PACKS = {
     # End of an Era Pack: ONLY cards of the "End Of An ERA" event. Not in the coin shop:
     # bought with RCP in rcstore (rcp_cog ITEMS["eoae"]), opened with rcopen eoae.
     "eoae": {"label": "End of an Era Pack", "emoji": emojis.EOAE_PACK, "price": 0, "cards": 1,
-             "range": (88, 99), "event": "end of an era", "shop": False,
-             "keep_odds": True,
-             "weights": EOAE_OVR_WEIGHTS},
+             "range": (60, 150), "event": "end of an era", "shop": False,
+             # fixed chance per card (part of the card name -> weight). Cards of the event not listed
+             # here share nothing; if none of these is found, any card of the event is given.
+             "name_weights": {"dhoni": 20, "maxwell": 80}},
 }
 
 
@@ -238,6 +239,18 @@ def roll_pack(pack_type: str) -> list:
     cards = _pack_cards(spec)                       # not obtainable=False, not a disabled event
     if not cards:
         return []
+    named = spec.get("name_weights")
+    if named:
+        pool, wts = [], []
+        for c in cards:
+            k = str(c["playername_key"]).lower()
+            w = next((v for part, v in named.items() if part in k), 0)
+            if w > 0:
+                pool.append(c)
+                wts.append(w)
+        if pool:
+            return [_rng.choices(pool, weights=wts, k=1)[0]]
+        return [_rng.choice(cards)]
     lo, hi = spec["range"]
     weights = spec.get("weights")
     if weights:
