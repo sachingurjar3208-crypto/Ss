@@ -58,7 +58,7 @@ from card_db import (
     get_country_logo, add_country_logo, list_country_logos, update_country_logo_layout,
     set_card_event, set_card_obtainable, get_event, list_events, create_event, rename_event,
     set_event_disabled, parse_emoji_input, count_event_cards, event_emoji_str,
-    set_event_bg, cards_in_event, set_event_for_background, update_card_full_offset,
+    set_event_bg, set_card_own_bg, cards_in_event, set_event_for_background, update_card_full_offset,
     GENERATED_DIR, BACKGROUNDS_DIR, LOGOS_DIR, PANELS_DIR, COUNTRY_LOGOS_DIR,
 )
 from card_image import generate_card_image, cache_all_foregrounds
@@ -1103,6 +1103,31 @@ class CardMakerCog(commands.Cog):
                 ok += 1
             await asyncio.sleep(0.2)
         await interaction.followup.send(f"✅ Done: {ok}/{len(names)} card(s) of **{ev['eventname']}** redrawn.")
+
+    @app_commands.command(name="cardbg",
+                          description="Give ONE card its own background (beats the event background)")
+    @app_commands.describe(playername="Which card",
+                           background="Background from /bgadder, or none to remove the card's own background",
+                           panel_bg="Show the background behind the stats panel too (glass). Empty = keep as it is")
+    @app_commands.autocomplete(playername=playername_autocomplete, background=background_autocomplete)
+    @is_owner()
+    async def cardbg(self, interaction: discord.Interaction, playername: str, background: str,
+                     panel_bg: bool | None = None):
+        await interaction.response.defer()
+        if not card_exists(playername):
+            await interaction.followup.send(f"❌ No card called **{playername}**.")
+            return
+        bg_name = None
+        if background.strip().lower() != "none":
+            bg = get_background(background)
+            if bg is None:
+                await interaction.followup.send(f"❌ Unknown background `{background}`. Add it with `/bgadder` first.")
+                return
+            bg_name = bg["pathname"]
+        set_card_own_bg(playername, bg_name, panel_bg)
+        await _regenerate_silently(playername)
+        what = f"its own background **{bg_name}**" if bg_name else "no own background (event / normal again)"
+        await interaction.followup.send(f"🖼️ **{playername}** now uses {what}. Card redrawn.")
 
     @app_commands.command(name="eventfrombg",
                           description="Put every card of one background into an event (e.g. ICONS cards -> Icon event)")

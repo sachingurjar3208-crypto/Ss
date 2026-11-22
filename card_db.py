@@ -44,6 +44,8 @@ _UNSET = object()
 # Columns added after the first version of the table. They are added to an
 # existing cards_maker.db automatically on start-up, so old cards keep working.
 _NEW_CARD_COLUMNS = [
+    ("own_bg",        "TEXT"),                              # card-only background (beats the event bg)
+    ("own_glass",     "INTEGER"),                           # 1 = glass stats panel showing own_bg
     ("role",          "TEXT"),                              # BAT / BOWL / AR / WK
     ("batting_hand",  "TEXT"),                              # R / L
     ("playstyle1",    "TEXT"),                              # logo pathname, slot 1
@@ -1043,6 +1045,21 @@ def set_card_panel(playername: str, panel_image: str | None) -> bool:
             "panelimg_scale = 100, updated_at = ? WHERE playername_key = ?",
             (panel_image, time.time(), playername.strip().lower()),
         )
+        conn.commit()
+    return True
+
+
+def set_card_own_bg(playername: str, bg_name: str | None, glass: bool | None = None) -> bool:
+    """Card-only background (/cardbg). None removes it. glass=None keeps the panel setting."""
+    if get_card(playername) is None:
+        return False
+    with _conn() as conn:
+        if glass is None:
+            conn.execute("UPDATE cards SET own_bg = ?, updated_at = ? WHERE playername_key = ?",
+                         (bg_name, time.time(), playername.strip().lower()))
+        else:
+            conn.execute("UPDATE cards SET own_bg = ?, own_glass = ?, updated_at = ? WHERE playername_key = ?",
+                         (bg_name, 1 if glass else 0, time.time(), playername.strip().lower()))
         conn.commit()
     return True
 

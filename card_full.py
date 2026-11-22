@@ -284,7 +284,13 @@ def _winter_bg() -> Image.Image | None:
 
 
 def _card_bg(card_row) -> Image.Image | None:
-    """Event background (/eventbg) first, then the Winter theme backdrop, then the card's own background."""
+    """Card-only background (/cardbg) first, then the event background (/eventbg), then the Winter theme
+    backdrop, then the card's own template background."""
+    own = ci._col(card_row, "own_bg")
+    if own:
+        img = _bg_image(own)
+        if img is not None:
+            return img
     ev = _event(card_row)
     if (ev or {}).get("bg"):
         img = _bg_image(ev["bg"])
@@ -680,7 +686,8 @@ PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the re
 
 def _is_full(card_row) -> bool:
     """Cards of an event with its own background use the full rectangle (no cut corners)."""
-    return (bool((_event(card_row) or {}).get("bg")) or _is_winter(card_row)) and _card_bg(card_row) is not None
+    return (bool(ci._col(card_row, "own_bg")) or bool((_event(card_row) or {}).get("bg")) or _is_winter(card_row)) \
+        and _card_bg(card_row) is not None
 
 
 def _full_panel() -> Image.Image:
@@ -823,7 +830,9 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
 
     # panel body: the card's own background shows through, tinted in the theme colour
     ev = _event(card_row) or {}
-    if (ev.get("panel_glass") or _is_winter(card_row)) and themed.get("raw_bg") is not None:
+    own_glass = bool(ci._col(card_row, "own_glass", 0)) if ci._col(card_row, "own_bg") else None
+    glass_on = own_glass if own_glass is not None else (ev.get("panel_glass") or _is_winter(card_row))
+    if glass_on and themed.get("raw_bg") is not None:
         _glass_panel(canvas, st, accent, themed["raw_bg"], icy=_is_winter(card_row))
     else:
         canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.93)))
@@ -1376,7 +1385,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
     accent = th["accent"] or _accent(card_row["ovr"])
     raw_bg = _card_bg(card_row)
     if raw_bg is not None and (any(th["bg"] == THEMES[k]["bg"] for k in PANEL_BG_THEMES)
-                               or (_event(card_row) or {}).get("panel_glass") or _is_winter(card_row)):
+                               or (_event(card_row) or {}).get("panel_glass") or _is_winter(card_row)
+                               or (ci._col(card_row, "own_bg") and ci._col(card_row, "own_glass", 0))):
         themed = dict(themed, raw_bg=raw_bg)
     canvas = (raw_bg or themed["bg"]).convert("RGBA")
     if th.get("style") == "gold" and raw_bg is None:
