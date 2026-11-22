@@ -148,18 +148,28 @@ def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
             f"`BATTING  {_bar(bat_avg)} {bat_avg:>3}`",
             f"`BOWLING  {_bar(bowl_avg)} {bowl_avg:>3}`", ""]
 
-    sections = (("TOP ORDER", range(1, 4)), ("MIDDLE ORDER", range(4, 8)), ("LOWER ORDER", range(8, 12)))
+    groups = {"BAT": [], "WK": [], "AR": [], "BOWL": []}
+    empty = []
+    for slot in range(1, economy.XI_SIZE + 1):
+        key = xi.get(slot)
+        card = card_db.get_card(key) if key else None
+        if card is None:
+            empty.append(slot)
+            continue
+        groups.get(card_db.effective_role(card), groups["BAT"]).append((slot, card))
+    titles = (("BAT", f"{emojis.BATTER} BATTERS"), ("WK", f"{emojis.WICKETKEEPER} WICKETKEEPERS"),
+              ("AR", f"{emojis.ALLROUNDER} ALL-ROUNDERS"), ("BOWL", f"{emojis.PACER} BOWLERS"))
     body = []
-    for title, slots in sections:
-        body.append(f"**{title}**" if not body else f"\n**{title}**")
-        for slot in slots:
-            key = xi.get(slot)
-            card = card_db.get_card(key) if key else None
-            if card is None:
-                body.append(xd.empty_row(slot))
-                continue
+    for role, title in titles:
+        rows = groups[role]
+        if not rows:
+            continue
+        body.append(("" if not body else "\n") + f"**{title}**  ·  {len(rows)}")
+        for slot, card in rows:
             body.append(xd.player_row(xd.entry_from_card(card), slot=slot,
                                       captain=card["playername_key"] == cap_key))
+    if empty:
+        body.append("\n" + "\n".join(xd.empty_row(sl_) for sl_ in empty))
 
     color = (discord.Color.gold() if ovr >= 95 else discord.Color.purple() if ovr >= 90
              else discord.Color.blue() if ovr >= 80 else discord.Color.green())
