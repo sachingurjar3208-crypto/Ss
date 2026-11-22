@@ -82,7 +82,29 @@ def _card_img(card, h: int):
     return src.resize((max(1, round(src.width * h / src.height)), h), Image.LANCZOS)
 
 
+_PURPLE = dict(GOLD=GOLD, GOLD_HI=GOLD_HI, WHITE=WHITE, DIM=DIM, TILE=TILE, TILE_LINE=TILE_LINE,
+               sub="SIGNATURE EDITION", pic=None)
+_EOAE = dict(GOLD=(255, 196, 104), GOLD_HI=(255, 230, 170), WHITE=(250, 240, 226), DIM=(214, 182, 140),
+             TILE=(44, 28, 14), TILE_LINE=(170, 116, 52), sub="END OF AN ERA", pic="sigbox_eoae_bg.jpg")
+_THEME = _PURPLE
+
+
+def _set_theme(box) -> None:
+    """End of an Era look when the box name says so ("era" / "eoae"), else the normal purple."""
+    global _THEME, GOLD, GOLD_HI, WHITE, DIM, TILE, TILE_LINE
+    name = str((box or {}).get("name", "")).lower()
+    _THEME = _EOAE if ("era" in name or "eoae" in name) else _PURPLE
+    GOLD, GOLD_HI, WHITE, DIM = _THEME["GOLD"], _THEME["GOLD_HI"], _THEME["WHITE"], _THEME["DIM"]
+    TILE, TILE_LINE = _THEME["TILE"], _THEME["TILE_LINE"]
+
+
 def _background() -> Image.Image:
+    if _THEME.get("pic"):
+        try:
+            from PIL import ImageOps
+            return ImageOps.fit(Image.open(_HERE / _THEME["pic"]).convert("RGB"), (W, H)).convert("RGBA")
+        except Exception as e:
+            print(f"[sigbox] theme picture missing: {type(e).__name__}: {e}")
     bg = Image.new("RGB", (W, H))
     d = ImageDraw.Draw(bg)
     for y in range(H):
@@ -164,7 +186,8 @@ def _draw_card(img: Image.Image, board: dict, cards: dict) -> None:
     if card is None:                                  # no image yet: a gold placeholder
         d = ImageDraw.Draw(img)
         d.rounded_rectangle((x0, y0, x1, y1), 22, fill=(70, 48, 20), outline=GOLD, width=4)
-        d.text(((x0 + x1) / 2, (y0 + y1) / 2), "SIGNATURE", font=_f(_NUM, 40), fill=GOLD, anchor="mm")
+        d.text(((x0 + x1) / 2, (y0 + y1) / 2), "SIGNATURE" if _THEME is _PURPLE else "LEGEND",
+               font=_f(_NUM, 40), fill=GOLD, anchor="mm")
     else:
         cx = (W - card.width) // 2
         sh = Image.new("RGBA", card.size, (0, 0, 0, 0))
@@ -188,6 +211,7 @@ def _ends_text(end_ts: float) -> str:
 
 
 def _base(board: dict, cards: dict) -> Image.Image:
+    _set_theme(board.get("box"))
     img = _background()
     box = board["box"]
     sig_card = cards.get(box["player_key"])
@@ -197,14 +221,15 @@ def _base(board: dict, cards: dict) -> Image.Image:
     title = box["name"].upper()
     d.text((W / 2, 46), title, font=_fit(d, title, _NUM, 48, 700), fill=GOLD, anchor="mm")
     name = (sig_card["playername"] if sig_card is not None else box["player_key"]).upper()
-    sub = f"{name}  ·  SIGNATURE EDITION"
+    sub = f"{name}  ·  {_THEME['sub']}"
     d.text((W / 2, 88), sub, font=_fit(d, sub, _LAB, 20, 700), fill=DIM, anchor="mm")
     d.text((SIDE_X, 50), _ends_text(box["end_ts"]), font=_f(_LAB, 20), fill=DIM, anchor="lm")
     bal = f"{board['balance']:,} RCP"
     f = _f(_NUM, 26)
     bw = d.textlength(bal, font=f) + 66
     bx1 = W - SIDE_X
-    d.rounded_rectangle((bx1 - bw, 28, bx1, 72), 22, fill=(14, 10, 28), outline=TILE_LINE, width=2)
+    d.rounded_rectangle((bx1 - bw, 28, bx1, 72), 22, fill=(14, 10, 28) if _THEME is _PURPLE else (24, 15, 8),
+                        outline=TILE_LINE, width=2)
     gx, gy = bx1 - bw + 28, 50
     d.polygon([(gx, gy - 13), (gx + 11, gy - 3), (gx, gy + 13), (gx - 11, gy - 3)], fill=(70, 200, 220))
     d.text((gx + 20, gy), bal, font=f, fill=WHITE, anchor="lm")
@@ -216,18 +241,20 @@ def _base(board: dict, cards: dict) -> Image.Image:
 
     # info panel: progress + next spin
     px0, px1 = SIDE_X, W - SIDE_X
-    d.rounded_rectangle((px0, PANEL_Y, px1, PANEL_Y + 80), 16, fill=(14, 10, 28), outline=TILE_LINE, width=2)
-    d.text((px0 + 24, PANEL_Y + 24), "Every reward drops once  ·  Signature card guaranteed by spin 10",
+    dark = (14, 10, 28) if _THEME is _PURPLE else (24, 15, 8)
+    d.rounded_rectangle((px0, PANEL_Y, px1, PANEL_Y + 80), 16, fill=dark, outline=TILE_LINE, width=2)
+    d.text((px0 + 24, PANEL_Y + 24), "Every reward drops once  ·  "
+           + ("Signature card" if _THEME is _PURPLE else "Legend card") + " guaranteed by spin 10",
            font=_f(_LAB, 20), fill=WHITE, anchor="lm")
     bx0, bx1_, by = px0 + 24, px0 + 640, PANEL_Y + 56
     spins = board["spins"]
-    d.rounded_rectangle((bx0, by - 7, bx1_, by + 7), 7, fill=(50, 40, 80))
+    d.rounded_rectangle((bx0, by - 7, bx1_, by + 7), 7, fill=(50, 40, 80) if _THEME is _PURPLE else (70, 46, 22))
     if spins:
         d.rounded_rectangle((bx0, by - 7, bx0 + (bx1_ - bx0) * spins / sigbox.SPINS, by + 7), 7, fill=GOLD)
     d.text((bx1_ + 16, by), f"{spins} / {sigbox.SPINS}", font=_f(_LAB, 19), fill=DIM, anchor="lm")
     nx1, nx0 = px1 - 12, px1 - 300
     if board["done"]:
-        txt, fill, ink = "BOX COMPLETE", (60, 52, 90), WHITE
+        txt, fill, ink = "BOX COMPLETE", (60, 52, 90) if _THEME is _PURPLE else (80, 54, 26), WHITE
     else:
         cost = board["next_cost"]
         txt = f"SPIN {board['next_spin']}:  FREE" if cost == 0 else f"SPIN {board['next_spin']}:  {cost:,} RCP"
@@ -245,8 +272,9 @@ def _base(board: dict, cards: dict) -> Image.Image:
         done = i + 1 <= spins
         cur = nxt == i + 1
         d.rounded_rectangle((x0, LADDER_Y, x0 + cw, LADDER_Y + 52), 10,
-                            fill=(70, 52, 22) if cur else (22, 16, 40),
-                            outline=GOLD if cur else (60, 48, 96), width=2 if cur else 1)
+                            fill=(70, 52, 22) if cur else ((22, 16, 40) if _THEME is _PURPLE else (30, 19, 9)),
+                            outline=GOLD if cur else ((60, 48, 96) if _THEME is _PURPLE else (110, 74, 34)),
+                            width=2 if cur else 1)
         col = (110, 100, 140) if done else (GOLD if cur else WHITE)
         d.text((x0 + cw / 2, LADDER_Y + 16), f"SPIN {i + 1}", font=_f(_LAB, 14), fill=col if cur else DIM, anchor="mm")
         d.text((x0 + cw / 2, LADDER_Y + 37), "FREE" if cost == 0 else f"{cost:,}",
