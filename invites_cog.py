@@ -36,9 +36,9 @@ CHECK_MINUTES = 10
 # invites -> rewards. kind: "voucher" or a pack type (silver / gold / legendary)
 MILESTONES: list[tuple[int, list[tuple[str, int]]]] = [
     (1,  [("voucher", 2),  ("silver", 2)]),
-    (5,  [("voucher", 5),  ("silver", 2), ("gold", 1)]),
-    (10, [("voucher", 10), ("silver", 3), ("gold", 2)]),
-    (20, [("voucher", 20), ("silver", 10), ("gold", 5), ("legendary", 1)]),
+    (5,  [("voucher", 7),  ("silver", 2), ("gold", 1)]),
+    (10, [("voucher", 13), ("silver", 3), ("gold", 2)]),
+    (20, [("voucher", 25), ("silver", 10), ("gold", 5), ("legendary", 1)]),
 ]
 _NAMES = {"voucher": "Draft Voucher", "silver": "Silver Pack", "gold": "Gold Pack", "legendary": "Legendary Pack"}
 _ICON = {"voucher": emojis.VOUCHER, "silver": emojis.SILVER_PACK, "gold": emojis.GOLD_PACK,
