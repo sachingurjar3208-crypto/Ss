@@ -4,8 +4,9 @@ When someone joins through a member's invite link, the join is recorded as PENDI
   * the new account is at least MIN_ACCOUNT_DAYS old (checked at join),
   * it is not a bot, not the inviter themself, and has never joined before (rejoins never count again),
   * it was NOT already a member before (everyone who was in the server when this started is saved as
-    "existing", so leaving and coming back never counts), and
-  * it made a team with rcdebut.
+    "existing", so leaving and coming back never counts).
+It counts straight away (no rcdebut needed). The INVITER needs a team (rcdebut) to receive the items;
+if they have none yet, the rewards wait and are given once they debut.
 Leaving the server takes the invite away (rewards already given are kept, each milestone pays once).
 
 Milestone rewards (MILESTONES) are given automatically and DM'd to the inviter.
@@ -29,7 +30,7 @@ from security import esc
 
 MIN_ACCOUNT_DAYS = 30
 STAY_DAYS = 0          # counts as soon as the new member has used rcdebut
-CHECK_MINUTES = 2
+CHECK_MINUTES = 10
 
 # invites -> rewards. kind: "voucher" or a pack type (silver / gold / legendary)
 MILESTONES: list[tuple[int, list[tuple[str, int]]]] = [
@@ -85,6 +86,25 @@ def pending_ready() -> list:
                             (time.time() - STAY_DAYS * 86400,)).fetchall()
     finally:
         conn.close()
+
+
+def inviters_with_due_rewards() -> list[int]:
+    first = MILESTONES[0][0]
+    conn = _db()
+    try:
+        rows = conn.execute("SELECT inviter_id, COUNT(*) n FROM invite_joins WHERE status = 'counted' "
+                            "GROUP BY inviter_id HAVING n >= ?", (first,)).fetchall()
+        paid = {}
+        for r in conn.execute("SELECT user_id, MAX(milestone) m FROM invite_rewards GROUP BY user_id"):
+            paid[r["user_id"]] = r["m"]
+    finally:
+        conn.close()
+    out = []
+    for r in rows:
+        reached = max((m for m, _ in MILESTONES if r["n"] >= m), default=0)
+        if reached > paid.get(r["inviter_id"], 0):
+            out.append(r["inviter_id"])
+    return out
 
 
 def set_counted(member_id: int) -> None:
@@ -239,6 +259,9 @@ class InvitesCog(commands.Cog):
             status, note = "pending", ""
         new = await asyncio.to_thread(record_join, member.id, inviter, status, note)
         print(f"[invites] {member.id} joined via {inviter}: {status if new else 'rejoin (ignored)'} {note}")
+        if new and status == "pending":
+            await asyncio.to_thread(set_counted, member.id)
+            await self._pay(inviter)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
@@ -247,27 +270,9 @@ class InvitesCog(commands.Cog):
 
     @tasks.loop(minutes=CHECK_MINUTES)
     async def loop(self):
-        g = self._guild()
-        if g is None:
-            return
+        """Pays rewards that are waiting (the inviter had no team yet when they earned them)."""
         try:
-            rows = await asyncio.to_thread(pending_ready)
-            touched = set()
-            for r in rows:
-                if g.get_member(r["member_id"]) is None:
-                    try:
-                        await g.fetch_member(r["member_id"])
-                    except discord.NotFound:
-                        await asyncio.to_thread(mark_left, r["member_id"])
-                        continue
-                    except discord.HTTPException:
-                        continue
-                if await asyncio.to_thread(economy.get_user, r["member_id"]) is None:
-                    continue                                 # not debuted yet: stays pending
-                await asyncio.to_thread(set_counted, r["member_id"])
-                touched.add(r["inviter_id"])
-            # also retry inviters who reached a milestone before they had debuted themselves
-            for uid in touched:
+            for uid in await asyncio.to_thread(inviters_with_due_rewards):
                 await self._pay(uid)
         except Exception as e:
             print(f"[invites] check failed: {type(e).__name__}: {e}")
@@ -300,9 +305,9 @@ class InvitesCog(commands.Cog):
         await self._pay(member.id)                           # safety: pays anything still due
         st = await asyncio.to_thread(stats, member.id)
         nxt = next((m for m, _ in MILESTONES if m > st["counted"]), None)
-        lines = [f"✅ **Counted:** {st['counted']}",
-                 f"⏳ **Pending:** {st['pending']}  (they still need to use `rcdebut`)",
-                 f"🚪 **Left:** {st['left']}", ""]
+        lines = [f"✅ **Invites:** {st['counted']}", f"🚪 **Left:** {st['left']}", ""]
+        if await asyncio.to_thread(economy.get_user, member.id) is None:
+            lines.insert(0, "⚠️ Make your team with `rcdebut` to receive your invite rewards.\n")
         for m, _ in MILESTONES:
             mark = "✅" if m in st["paid"] else ("🔓" if st["counted"] >= m else "🔒")
             lines.append(f"{mark} **{m} invite{'s' if m > 1 else ''}:** " +
