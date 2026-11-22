@@ -20,6 +20,7 @@ from discord.ext import commands
 import card_cache
 import card_db
 import economy
+import emojis
 import quest
 import security
 import squad_logic as sl
@@ -124,31 +125,48 @@ def _card_line(card, extra: str = "", emojis: bool = True) -> str:
     return f"{prefix}**{esc(card['playername'])}** · {card['ovr']} · {role}{extra}"
 
 
+def _bar(value: int, width: int = 10) -> str:
+    filled = max(0, min(width, round((value - 50) / 5)))       # 50 = empty, 100 = full
+    return "▰" * filled + "▱" * (width - filled)
+
+
 def _xi_embed(member: discord.abc.User, user_row) -> discord.Embed:
-    """rcxi: the XI in batting order, one monospace row per player (see xi_display.py)."""
+    """rcxi: header with team strength bars, then the XI split into Top / Middle / Lower order."""
     import xi_display as xd
     xi = economy.get_xi(member.id)
     cap_key = user_row["captain_key"]
     cards = sl.xi_cards(member.id)
-    lines = [f"Team OVR **{sl.average_ovr(cards)}**  ·  CHEM **{sl.chem_of(cards)}**", ""]
-    for slot in range(1, economy.XI_SIZE + 1):
-        key = xi.get(slot)
-        card = card_db.get_card(key) if key else None
-        if card is None:
-            lines.append(xd.empty_row(slot))
-            continue
-        lines.append(xd.player_row(
-            xd.entry_from_card(card), slot=slot, captain=card["playername_key"] == cap_key,
-        ))
-    embed = discord.Embed(
-        title=f"{esc(user_row['team_name'])} — Playing XI",
-        description="\n".join(lines),
-        color=discord.Color.blue(),
-    )
+    ovr, chem = sl.average_ovr(cards), sl.chem_of(cards)
+
+    bats = sorted((int(c["bat"] or 0) for c in cards), reverse=True)[:6]
+    bowls = sorted((int(c["bowl"] or 0) for c in cards), reverse=True)[:5]
+    bat_avg = round(sum(bats) / len(bats)) if bats else 0
+    bowl_avg = round(sum(bowls) / len(bowls)) if bowls else 0
+    cap = next((c["playername"] for c in cards if c["playername_key"] == cap_key), None)
+
+    head = [f"**OVR {ovr}**  ·  **CHEM {chem}**" + (f"  ·  {emojis.CAPTAIN} {esc(cap)}" if cap else ""),
+            f"`BATTING  {_bar(bat_avg)} {bat_avg:>3}`",
+            f"`BOWLING  {_bar(bowl_avg)} {bowl_avg:>3}`", ""]
+
+    sections = (("TOP ORDER", range(1, 4)), ("MIDDLE ORDER", range(4, 8)), ("LOWER ORDER", range(8, 12)))
+    body = []
+    for title, slots in sections:
+        body.append(f"**{title}**" if not body else f"\n**{title}**")
+        for slot in slots:
+            key = xi.get(slot)
+            card = card_db.get_card(key) if key else None
+            if card is None:
+                body.append(xd.empty_row(slot))
+                continue
+            body.append(xd.player_row(xd.entry_from_card(card), slot=slot,
+                                      captain=card["playername_key"] == cap_key))
+
+    color = (discord.Color.gold() if ovr >= 95 else discord.Color.purple() if ovr >= 90
+             else discord.Color.blue() if ovr >= 80 else discord.Color.green())
+    embed = discord.Embed(title=f"{esc(user_row['team_name'])}  ·  Playing XI",
+                          description="\n".join(head + body), color=color)
     problem = sl.xi_problem(member.id)
-    embed.set_footer(text=(
-        (f"⚠️ {problem}" if problem else "✅ Ready to play") + f" • {xd.COLUMNS_NOTE}"
-    ))
+    embed.set_footer(text=(f"⚠️ {problem}" if problem else "✅ Ready to play") + "  •  OVR · BAT · BOWL  •  rcswap · rcautoxi")
     return embed
 
 
