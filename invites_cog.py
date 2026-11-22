@@ -25,6 +25,7 @@ import discord
 from discord.ext import commands, tasks
 
 import economy
+import emojis
 from bot_guard import ADMIN_GUILD_ID
 from security import esc
 
@@ -40,6 +41,8 @@ MILESTONES: list[tuple[int, list[tuple[str, int]]]] = [
     (20, [("voucher", 20), ("silver", 10), ("gold", 5), ("legendary", 1)]),
 ]
 _NAMES = {"voucher": "Draft Voucher", "silver": "Silver Pack", "gold": "Gold Pack", "legendary": "Legendary Pack"}
+_ICON = {"voucher": emojis.VOUCHER, "silver": emojis.SILVER_PACK, "gold": emojis.GOLD_PACK,
+         "legendary": emojis.LEGENDARY_PACK}
 
 
 # ── database ─────────────────────────────────────────────────────────────────
@@ -155,7 +158,7 @@ def claim_milestones(user_id: int) -> list[int]:
 
 
 def _reward_text(m: int) -> str:
-    return "\n".join(f"• {q} {_NAMES[k]}{'s' if q > 1 else ''}" for k, q in dict(MILESTONES)[m])
+    return "\n".join(f"{_ICON[k]} {q} {_NAMES[k]}{'s' if q > 1 else ''}" for k, q in dict(MILESTONES)[m])
 
 
 # ── cog ──────────────────────────────────────────────────────────────────────
@@ -290,8 +293,8 @@ class InvitesCog(commands.Cog):
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             for m in given:
                 embed = discord.Embed(
-                    title=f"🎉 {m} Invite{'s' if m > 1 else ''} Reward!",
-                    description=(f"Thanks for growing Rush Cricket! You now have **{st['counted']}** invites.\n\n"
+                    title=f"{m} Invite{'s' if m > 1 else ''} Reward!",
+                    description=(f"{emojis.GIFT} Thanks for growing Rush Cricket! You now have **{st['counted']}** invites.\n\n"
                                  f"**You received:**\n{_reward_text(m)}\n\nCheck your invites with `rcinvites`."),
                     color=discord.Color.gold())
                 await user.send(embed=embed)
@@ -305,15 +308,15 @@ class InvitesCog(commands.Cog):
         await self._pay(member.id)                           # safety: pays anything still due
         st = await asyncio.to_thread(stats, member.id)
         nxt = next((m for m, _ in MILESTONES if m > st["counted"]), None)
-        lines = [f"✅ **Invites:** {st['counted']}", f"🚪 **Left:** {st['left']}", ""]
+        lines = [f"{emojis.ARROW} **Invites:** {st['counted']}", f"{emojis.ARROW} **Left:** {st['left']}", ""]
         if await asyncio.to_thread(economy.get_user, member.id) is None:
-            lines.insert(0, "⚠️ Make your team with `rcdebut` to receive your invite rewards.\n")
+            lines.insert(0, f"{emojis.LOCK} Make your team with `rcdebut` to receive your invite rewards.\n")
         for m, _ in MILESTONES:
-            mark = "✅" if m in st["paid"] else ("🔓" if st["counted"] >= m else "🔒")
+            mark = emojis.TICK if m in st["paid"] else (emojis.GIFT if st["counted"] >= m else emojis.LOCK)
             lines.append(f"{mark} **{m} invite{'s' if m > 1 else ''}:** " +
-                         ", ".join(f"{q} {_NAMES[k]}" for k, q in dict(MILESTONES)[m]))
+                         "  ".join(f"{_ICON[k]} {q}" for k, q in dict(MILESTONES)[m]))
         if nxt:
-            lines.append(f"\nNext reward in **{nxt - st['counted']}** more invite{'s' if nxt - st['counted'] > 1 else ''}.")
+            lines.append(f"\n{emojis.PREMIUM} Next reward in **{nxt - st['counted']}** more invite{'s' if nxt - st['counted'] > 1 else ''}.")
         embed = discord.Embed(title=f"{esc(member.display_name)}'s Invites", description="\n".join(lines),
                               color=discord.Color.blurple())
         embed.set_footer(text=f"New members only, accounts {MIN_ACCOUNT_DAYS}+ days old. Rejoins don't count. Each reward is given once.")
