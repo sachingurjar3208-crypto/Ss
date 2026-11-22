@@ -3,7 +3,8 @@
 When someone joins through a member's invite link, the join is recorded as PENDING. It only COUNTS when:
   * the new account is at least MIN_ACCOUNT_DAYS old (checked at join),
   * it is not a bot, not the inviter themself, and has never joined before (rejoins never count again),
-  * it stayed in the server STAY_DAYS, and
+  * it was NOT already a member before (everyone who was in the server when this started is saved as
+    "existing", so leaving and coming back never counts), and
   * it made a team with rcdebut.
 Leaving the server takes the invite away (rewards already given are kept, each milestone pays once).
 
@@ -27,8 +28,8 @@ from bot_guard import ADMIN_GUILD_ID
 from security import esc
 
 MIN_ACCOUNT_DAYS = 30
-STAY_DAYS = 3
-CHECK_MINUTES = 10
+STAY_DAYS = 0          # counts as soon as the new member has used rcdebut
+CHECK_MINUTES = 2
 
 # invites -> rewards. kind: "voucher" or a pack type (silver / gold / legendary)
 MILESTONES: list[tuple[int, list[tuple[str, int]]]] = [
@@ -144,6 +145,7 @@ class InvitesCog(commands.Cog):
         self.bot = bot
         self.uses: dict[str, int] = {}
         self.inviter_of: dict[str, int] = {}
+        self._seeded = False
 
     async def cog_load(self):
         await asyncio.to_thread(lambda: _db().close())
@@ -172,6 +174,33 @@ class InvitesCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         self.uses = await self._snapshot()
+        if not self._seeded:
+            self._seeded = True
+            await self._seed_existing()
+
+    async def _seed_existing(self):
+        """Save every current member as 'existing' (once), so leave + rejoin never earns an invite."""
+        g = self._guild()
+        if g is None:
+            return
+        ids = []
+        try:
+            async for m in g.fetch_members(limit=None):
+                ids.append(m.id)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            print(f"[invites] could not list members: {e}")
+            return
+
+        def save():
+            conn = _db()
+            try:
+                conn.executemany("INSERT OR IGNORE INTO invite_joins (member_id, inviter_id, joined_ts, status, note) "
+                                 "VALUES (?, NULL, ?, 'existing', 'member before invite tracking')",
+                                 [(i, time.time()) for i in ids])
+            finally:
+                conn.close()
+        await asyncio.to_thread(save)
+        print(f"[invites] {len(ids)} existing members saved (they can never count as invites)")
 
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite):
@@ -272,7 +301,7 @@ class InvitesCog(commands.Cog):
         st = await asyncio.to_thread(stats, member.id)
         nxt = next((m for m, _ in MILESTONES if m > st["counted"]), None)
         lines = [f"✅ **Counted:** {st['counted']}",
-                 f"⏳ **Pending:** {st['pending']}  (they must stay {STAY_DAYS} days and use `rcdebut`)",
+                 f"⏳ **Pending:** {st['pending']}  (they still need to use `rcdebut`)",
                  f"🚪 **Left:** {st['left']}", ""]
         for m, _ in MILESTONES:
             mark = "✅" if m in st["paid"] else ("🔓" if st["counted"] >= m else "🔒")
@@ -282,7 +311,7 @@ class InvitesCog(commands.Cog):
             lines.append(f"\nNext reward in **{nxt - st['counted']}** more invite{'s' if nxt - st['counted'] > 1 else ''}.")
         embed = discord.Embed(title=f"{esc(member.display_name)}'s Invites", description="\n".join(lines),
                               color=discord.Color.blurple())
-        embed.set_footer(text=f"Invited accounts must be {MIN_ACCOUNT_DAYS}+ days old. Rejoins and alts don't count.")
+        embed.set_footer(text=f"New members only, accounts {MIN_ACCOUNT_DAYS}+ days old. Rejoins don't count. Each reward is given once.")
         await ctx.send(embed=embed)
 
 
