@@ -1084,6 +1084,43 @@ async def _send_match_summary(channel, game) -> None:
         await channel.send(file=discord.File(io.BytesIO(data), filename=filename))
     except Exception as e:
         print(f"[summary] card failed: {type(e).__name__}: {e}")
+    if POTM_CARD:
+        await _send_potm_card(channel, game)
+
+
+POTM_CARD = True     # Player of the Match card after the summary (False = off)
+
+
+async def _send_potm_card(channel, game) -> None:
+    """Player of the Match: his card, his numbers and a badge. Never breaks the match end."""
+    try:
+        from match_summary import potm_details
+        import card_cache
+        p = await asyncio.to_thread(potm_details, game)
+        if not p:
+            return
+        lines = []
+        if p["bat"] and (p["bat"]["balls"] or p["bat"]["runs"]):
+            b = p["bat"]
+            sr = round(b["runs"] * 100 / b["balls"]) if b["balls"] else 0
+            star = "*" if b["not_out"] else ""
+            lines.append(f"**Batting:** {b['runs']}{star} ({b['balls']})  ·  {b['fours']} fours  ·  "
+                         f"{b['sixes']} sixes  ·  SR {sr}")
+        if p["bowl"]:
+            w = p["bowl"]
+            lines.append(f"**Bowling:** {w['wickets']}/{w['runs']} ({p['overs']} overs)")
+        title_name = discord.utils.escape_markdown(p["name"])
+        embed = discord.Embed(
+            title="🏅 PLAYER OF THE MATCH",
+            description=f"## {title_name}\n" + (f"-# {discord.utils.escape_markdown(p['team'])}\n\n" if p["team"] else "\n")
+                        + "\n".join(lines),
+            color=discord.Color.gold())
+        import card_db
+        card = await asyncio.to_thread(card_db.get_card, p["name"])
+        path = card["image_path"] if card is not None else None
+        await card_cache.send_embed(channel, embed, path)
+    except Exception as e:
+        print(f"[potm] card skipped: {type(e).__name__}: {e}")
 
 
 async def _get_card_image_bytes(player: dict) -> bytes | None:

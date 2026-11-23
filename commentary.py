@@ -599,3 +599,11 @@ def build_ball_commentary(
         else:
             game.__dict__.pop("_anim_frames", None)
     return block
+
+
+# Extra lines for more variety (commentary_more.py). Delete these lines to switch them off.
+try:
+    import commentary_more as _more
+    _more.extend(__import__(__name__))
+except Exception as _e:
+    print(f"[commentary] extra lines skipped: {type(_e).__name__}: {_e}")

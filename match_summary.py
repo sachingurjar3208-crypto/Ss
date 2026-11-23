@@ -152,6 +152,29 @@ def pick_potm(game, inn_data: dict) -> str | None:
     return best.split("|", 1)[1] if scores[best] > 0 else None
 
 
+def potm_details(game) -> dict | None:
+    """Player of the Match with his numbers, for the POTM card after the summary."""
+    first, second = _team_uids(game)
+    i1 = _innings_stats(game, 1)
+    i2 = _innings_stats(game, 2)
+    data_inn = {
+        first:  {"batters": _batters(game, first, i1[0], i1[4]),
+                 "bowlers": _bowlers(game, first, i2[1], i2[2], i2[3])},
+        second: {"batters": _batters(game, second, i2[0], i2[4]),
+                 "bowlers": _bowlers(game, second, i1[1], i1[2], i1[3])},
+    }
+    name = pick_potm(game, data_inn)
+    if not name:
+        return None
+    for uid, d in data_inn.items():
+        bat = next((b for b in d["batters"] if b["name"] == name), None)
+        bowl = next((w for w in d["bowlers"] if w["name"] == name), None)
+        if bat or bowl:
+            return {"name": name, "team": _team_name(game, uid), "uid": uid, "bat": bat, "bowl": bowl,
+                    "overs": _overs_from_balls(bowl["balls"]) if bowl else None}
+    return {"name": name, "team": "", "uid": None, "bat": None, "bowl": None, "overs": None}
+
+
 # ── public ───────────────────────────────────────────────────────────────────
 def build_summary_data(game) -> dict:
     first, second = _team_uids(game)
