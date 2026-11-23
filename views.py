@@ -2,8 +2,6 @@ import asyncio
 import io
 import os
 import random
-
-import shot_engine
 import discord
 import emojis
 from discord import ui
@@ -274,11 +272,7 @@ async def _resume_prompt(channel: discord.TextChannel, game: GameState) -> bool:
         stage1_choice = getattr(game, "pending_stage1_choice", "")
         is_free_hit = getattr(game, "current_ball_free_hit", False)
         _btype = (game.current_bowler or {}).get("bowling_type", "Fast")
-        _line = game.__dict__.get("pending_line")
-        if _btype in ("Fast", "Medium Pacer"):
-            label = pace_ball_label(_btype, game.pending_delivery, _line)
-        else:
-            label = button_label(_btype, game.pending_delivery) + (f" · {_line}" if _line else "")
+        label = delivery_label(_btype, stage1_choice, game.pending_delivery)
         batting_view = BattingView(game, stage1_choice=stage1_choice, is_free_hit=is_free_hit)
         batting_view._channel = channel
         content = (
@@ -654,9 +648,6 @@ async def _auto_select_one(view, make):
 
 async def _auto_fast_bowl(view, make):
     await random.choice(view._stage1_btns).callback(make())
-    if getattr(view, "_line_btns", None):
-        line = random.choices(list(view._line_btns), weights=[45, 40, 15], k=1)[0]   # mostly off / stumps
-        await view._line_btns[line].callback(make())
     # skip greyed-out buttons (e.g. Toe Crusher after 2 in the over)
     allowed = [b for b in view._stage2_btns if not b.disabled] or view._stage2_btns
     await random.choice(allowed).callback(make())
@@ -1440,9 +1431,7 @@ async def _process_delivery(
         return
 
     shot_internal     = SHOT_BUTTON_MAP.get(shot_button, "Drive")
-    _bat_intent       = game.__dict__.pop("pending_intent", None)   # Hit / Loft (Direction + Shot buttons)
-    _placement        = game.__dict__.pop("pending_placement", None) # line + length judgement (shot_engine)
-    game.__dict__.pop("pending_line", None)
+    _bat_intent       = game.__dict__.pop("pending_intent", None)   # Push / Hit / Loft (Direction + Intent buttons)
     delivery_button   = game.pending_delivery
     delivery_internal = game.pending_delivery_internal
     bowler            = game.current_bowler
@@ -1511,9 +1500,6 @@ async def _process_delivery(
         # (nobody scores runs off a ball they didn't play at). A genuine
         # leave is always a dot ball: no runs, no wicket.
         outcome, is_extra = "0", False
-        if _placement:   # line + length batting: leaving a straight ball can cost the stumps
-            outcome = shot_engine.leave_outcome(_placement["line"], _placement["length"],
-                                                _placement["btype"], bowler.get("bowl", 80))
     else:
         outcome, is_extra = calculate_outcome(
             delivery_internal, shot_internal,
@@ -1536,7 +1522,6 @@ async def _process_delivery(
             bowler_levels=player_attr_levels(bowler),
             batsman_levels=player_attr_levels(striker),
             intent=_bat_intent,
-            placement=_placement,
         )
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
@@ -1568,11 +1553,7 @@ async def _process_delivery(
         bowling_type=bowler.get("bowling_type", "Fast"),
         stage1_choice=stage1_choice,
         game=game,
-        shot_quality=(({"perfect": "good", "good": "good", "risky": "bad", "bad": "bad"}.get(_placement["quality"])
-                       if _placement and _placement["intent"] in ("Ground", "Loft") else None)
-                      if _placement else
-                      ("good" if is_recommended_shot else ("bad" if guide_entry_exists else None))),
-        placement=_placement,
+        shot_quality=("good" if is_recommended_shot else ("bad" if guide_entry_exists else None)),
     )
     if commentary_suffix:
         commentary = _comm.add_lines(commentary, commentary_suffix)
@@ -2480,7 +2461,6 @@ _FAST_STAGE1_STYLES = {
 }
 
 _FAST_STAGE2_STYLES = {
-    "Short":   discord.ButtonStyle.danger,
     "Bouncer": discord.ButtonStyle.danger,
     "Full":    discord.ButtonStyle.primary,
     "Good":    discord.ButtonStyle.success,
@@ -2495,7 +2475,6 @@ _MEDIUM_STAGE1_STYLES = {
     "Slower":   discord.ButtonStyle.success,
 }
 _MEDIUM_STAGE2_STYLES = {
-    "Short":       discord.ButtonStyle.danger,
     "Bouncer":     discord.ButtonStyle.primary,
     "Yorker":      discord.ButtonStyle.danger,
     "Good Length": discord.ButtonStyle.success,
@@ -2503,25 +2482,12 @@ _MEDIUM_STAGE2_STYLES = {
 }
 
 
-_LINE_STYLES = {
-    "Outside Off": discord.ButtonStyle.primary,
-    "Stumps":      discord.ButtonStyle.danger,
-    "Leg Stump":   discord.ButtonStyle.success,
-}
-
-
-def pace_ball_label(btype: str, delivery_button: str, line: str | None) -> str:
-    """What the batter is told about a pace ball: length and line only (the swing / pace is hidden)."""
-    length = button_label(btype, delivery_button)
-    return f"{length} · {line}" if line else length
-
-
 class FastBowlStage1View(_TimeoutMixin, ui.View):
-    """Fast / medium bowling — ONE message, three rows.
+    """Fast bowling — ONE message, two rows.
 
-    Row 0 (type: swing / pace / slower) and row 1 (line) are open together, in any order.
-    Once both are picked they turn grey TOGETHER and row 2 (length) opens.
-    Picking the length bowls the ball.
+    Row 0 (swing/speed) is active first; row 1 (line/length) is greyed out.
+    Once row 0 is picked, row 0 turns grey/disabled and row 1 becomes active.
+    Picking row 1 triggers the actual delivery.
     """
 
     def __init__(self, game: GameState, is_free_hit: bool = False):
@@ -2529,9 +2495,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
         self.game          = game
         self.is_free_hit   = is_free_hit
         self.stage1_choice = ""
-        self.line_choice   = ""
         self._stage1_btns: list[ui.Button] = []
-        self._line_btns: dict[str, ui.Button] = {}
         self._stage2_btns: list[ui.Button] = []
         self._stage2_keys: list[str] = []   # original (logic) names, same order as _stage2_btns
 
@@ -2547,62 +2511,21 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             style = self._s1_styles.get(label, discord.ButtonStyle.secondary)
             btn   = ui.Button(label=button_label(self.btype, label), style=style, row=0)
             btn.callback = self._make_stage1_callback(label)
-            btn.__dict__["_key"] = label
             self._stage1_btns.append(btn)
             self.add_item(btn)
 
-        for line in shot_engine.LINES:
-            btn = ui.Button(label=line, style=_LINE_STYLES.get(line, discord.ButtonStyle.secondary), row=1)
-            btn.callback = self._make_line_callback(line)
-            self._line_btns[line] = btn
-            self.add_item(btn)
-
         for label in stage2_labels:
-            # Locked + grey until type and line are chosen
-            btn = ui.Button(label=button_label(self.btype, label), style=discord.ButtonStyle.secondary, row=2, disabled=True)
+            # Locked + grey until step 1 is chosen
+            btn = ui.Button(label=button_label(self.btype, label), style=discord.ButtonStyle.secondary, row=1, disabled=True)
             btn.callback = self._make_stage2_callback(label)
             self._stage2_btns.append(btn)
             self._stage2_keys.append(label)
             self.add_item(btn)
 
-    async def _refresh(self, interaction: discord.Interaction):
-        """Mark the picks; when type AND line are both chosen, grey both rows and open the length row."""
-        done = bool(self.stage1_choice and self.line_choice)
-        for b in self._stage1_btns:
-            key = b.__dict__.get("_key")
-            if done:
-                b.disabled, b.style = True, discord.ButtonStyle.secondary
-            elif key == self.stage1_choice and not b.label.startswith("✓"):
-                b.style, b.label = discord.ButtonStyle.success, "✓ " + b.label   # the pick is ticked, the rest stay
-        for line, b in self._line_btns.items():
-            if done:
-                b.disabled, b.style = True, discord.ButtonStyle.secondary
-            elif line == self.line_choice and not b.label.startswith("✓"):
-                b.style, b.label = discord.ButtonStyle.success, "✓ " + b.label
-        if done:
-            # (a limited ball like Toe Crusher stays grey once used 2 times this over)
-            for b, key in zip(self._stage2_btns, self._stage2_keys):
-                if self.game.special_ball_left(key):
-                    b.disabled = False
-                    b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
-                else:
-                    b.disabled = True
-                    b.style    = discord.ButtonStyle.secondary
-        try:
-            await interaction.response.edit_message(view=self)   # view only, the text stays
-        except Exception as e:
-            if not str(e).startswith("autoplay"):   # bot clicking for a player: nothing on screen to edit
-                print(f"[fast bowl] row edit failed ({type(e).__name__}: {e})")
-
-    async def _own(self, interaction) -> bool:
-        if interaction.user.id != self.game.bowling_user_id:
-            await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
-            return False
-        return True
-
     def _make_stage1_callback(self, stage1_label: str):
         async def callback(interaction: discord.Interaction):
-            if not await self._own(interaction):
+            if interaction.user.id != self.game.bowling_user_id:
+                await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
                 return
             if self.stage1_choice:  # already picked — ignore double taps
                 try:
@@ -2611,29 +2534,36 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
                     pass
                 return
             self.stage1_choice = stage1_label
-            await self._refresh(interaction)
-        return callback
 
-    def _make_line_callback(self, line: str):
-        async def callback(interaction: discord.Interaction):
-            if not await self._own(interaction):
-                return
-            if self.line_choice:
-                try:
-                    await interaction.response.defer()
-                except Exception:
-                    pass
-                return
-            self.line_choice = line
-            await self._refresh(interaction)
+            # Row 0 -> grey + disabled
+            for b in self._stage1_btns:
+                b.disabled = True
+                b.style    = discord.ButtonStyle.secondary
+            # Row 1 -> unlock with the normal colours
+            # (a limited ball like Toe Crusher stays grey once used 2 times this over)
+            for b, key in zip(self._stage2_btns, self._stage2_keys):
+                if self.game.special_ball_left(key):
+                    b.disabled = False
+                    b.style    = self._s2_styles.get(key, discord.ButtonStyle.secondary)
+                else:
+                    b.disabled = True
+                    b.style    = discord.ButtonStyle.secondary
+
+            try:
+                # view only — keeps the existing message text/embed as it is
+                await interaction.response.edit_message(view=self)
+            except Exception as e:
+                if not str(e).startswith("autoplay"):   # bot clicking for a player: nothing on screen to edit
+                    print(f"[fast bowl] stage1 edit failed ({type(e).__name__}: {e})")
         return callback
 
     def _make_stage2_callback(self, delivery_button: str):
         async def callback(interaction: discord.Interaction):
-            if not await self._own(interaction):
+            if interaction.user.id != self.game.bowling_user_id:
+                await interaction.response.send_message("Only the bowling team bowls!", ephemeral=True)
                 return
-            if not (self.stage1_choice and self.line_choice):
-                await interaction.response.send_message("Pehle type aur line dono choose karo.", ephemeral=True)
+            if not self.stage1_choice:
+                await interaction.response.send_message("Pehle swing/speed choose karo.", ephemeral=True)
                 return
             if not self.game.special_ball_left(delivery_button):
                 await interaction.response.send_message(
@@ -2645,11 +2575,10 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             delivery_internal = DELIVERY_BUTTON_MAP.get(delivery_button, delivery_button)
             self.game.pending_delivery          = delivery_button
             self.game.pending_delivery_internal = delivery_internal
-            self.game.__dict__["pending_line"]  = self.line_choice
             self.game.phase = "bat_select"
 
             speed    = random.uniform(*get_delivery_speed(delivery_button, self.btype))
-            shown    = pace_ball_label(self.btype, delivery_button, self.line_choice)
+            combined = delivery_label(self.btype, self.stage1_choice, delivery_button)
             # Cached so a failed send can be retried (or _resume_prompt used)
             # with the exact same speed/label instead of losing it.
             self.game.pending_delivery_speed  = speed
@@ -2660,7 +2589,7 @@ class FastBowlStage1View(_TimeoutMixin, ui.View):
             batting_view._channel = channel
             await _post_delivery_prompt(
                 interaction, channel, self.game,
-                content=_delivery_announcement(shown, speed, self.game.batting_user, free_hit=self.is_free_hit),
+                content=_delivery_announcement(combined, speed, self.game.batting_user, free_hit=self.is_free_hit),
                 view=batting_view,
                 allowed_ids=_match_ids(self.game),
             )
@@ -2729,7 +2658,6 @@ class BowlingView(_TimeoutMixin, ui.View):
             delivery_internal = resolve_delivery(delivery_button, btype)
             self.game.pending_delivery          = delivery_button
             self.game.pending_delivery_internal = delivery_internal
-            self.game.__dict__["pending_line"]  = shot_engine.SPIN_LINE.get(delivery_button, "Stumps")
             self.game.phase = "bat_select"
 
             speed = random.uniform(*get_delivery_speed(delivery_button, btype))
@@ -2741,8 +2669,7 @@ class BowlingView(_TimeoutMixin, ui.View):
             batting_view._channel = channel
             await _post_delivery_prompt(
                 interaction, channel, self.game,
-                content=_delivery_announcement(f"{button_label(btype, delivery_button)} · {self.game.__dict__['pending_line']}",
-                                               speed, self.game.batting_user, free_hit=self.is_free_hit),
+                content=_delivery_announcement(button_label(btype, delivery_button), speed, self.game.batting_user, free_hit=self.is_free_hit),
                 view=batting_view,
                 allowed_ids=_match_ids(self.game),
             )
@@ -2771,47 +2698,42 @@ class BattingView(_TimeoutMixin, ui.View):
 
         self._add_buttons()
 
-    # Direction + Shot (shot_engine.py):
-    #   rows 0-1 = where, fixed like the field map (same for right and left handers):
-    #              Third Man · Off Side · Deep Cover · Straight / Mid Wicket · Leg Side · Fine Leg
-    #   row 2    = how: Ground · Loft · Block · Leave
-    # Pick a direction -> both direction rows turn grey together -> pick the shot. Block / Leave play at once.
+    # Direction + Intent: row 1 = where (Off Side / Straight / Leg Side / Behind),
+    # row 2 = the shot: Drive (= intent Hit), Loft, Block, Flick (= intent Push).
+    # Order: direction FIRST (then the top row goes grey and the shots open). Block plays at once; otherwise the
+    # ball is played when both are picked (in any order).
     _INTENT_STYLE = {
-        "Ground": discord.ButtonStyle.success, "Loft": discord.ButtonStyle.danger,
-        "Block": discord.ButtonStyle.secondary, "Leave": discord.ButtonStyle.secondary,
+        "Block": discord.ButtonStyle.secondary, "Push": discord.ButtonStyle.primary,
+        "Hit": discord.ButtonStyle.success, "Loft": discord.ButtonStyle.danger,
     }
-
-    def _ball(self) -> tuple[str, str, str]:
-        """(line, length, type) of the ball being faced."""
-        g = self.game
-        btype_bowler = (g.current_bowler or {}).get("bowling_type", "Fast")
-        is_spin = btype_bowler not in ("Fast", "Medium Pacer")
-        btn = g.pending_delivery or ""
-        return (shot_engine.line_of(g, btn, is_spin), shot_engine.length_of(btn, is_spin),
-                shot_engine.type_of(self.stage1_choice, is_spin))
 
     def _add_buttons(self):
         self.direction: str | None = None
+        self.intent: str | None = None
         self._dir_btns, self._int_btns = {}, {}
-        for i, d in enumerate(shot_engine.DIRECTIONS):
-            b = ui.Button(label=d, style=discord.ButtonStyle.primary, row=0 if i < 4 else 1, custom_id=f"batdir_{d}")
+        for d in BAT_DIRECTIONS:
+            b = ui.Button(label=d, style=discord.ButtonStyle.secondary, row=0, custom_id=f"batdir_{d}")
             b.callback = self._make_dir(d)
             self._dir_btns[d] = b
             self.add_item(b)
-        for it in shot_engine.INTENTS:
-            b = ui.Button(label=it, style=self._INTENT_STYLE[it], row=2, custom_id=f"batint_{it}",
-                          disabled=it in ("Ground", "Loft"))   # open after a direction (Block / Leave always work)
+        for it in BAT_INTENTS:
+            b = ui.Button(label=BAT_INTENT_LABEL.get(it, it), style=self._INTENT_STYLE[it], row=1, custom_id=f"batint_{it}",
+                          disabled=(it != "Block"))      # shots open after a direction is picked (Block always works)
             b.callback = self._make_int(it)
             self._int_btns[it] = b
             self.add_item(b)
 
+    def _shot_for(self, direction: str, intent: str) -> str:
+        return intent_to_shot(direction, intent, self.game.pending_delivery or "",
+                              self.game.pending_delivery_internal or "", self.recommended)
+
     def _mark(self):
-        """Direction picked: BOTH direction rows turn grey together (the pick stays green), the shots open."""
+        """Direction picked: the top row turns grey (locked, the chosen one stays green), the shots open."""
         for d, b in self._dir_btns.items():
             b.style = discord.ButtonStyle.success if d == self.direction else discord.ButtonStyle.secondary
-            b.disabled = True
+            b.disabled = self.direction is not None
         for it, b in self._int_btns.items():
-            b.disabled = False
+            b.disabled = self.direction is None and it != "Block"
 
     async def _ok(self, interaction) -> bool:
         if interaction.user.id != self.game.batting_user_id:
@@ -2835,14 +2757,14 @@ class BattingView(_TimeoutMixin, ui.View):
         async def callback(interaction: discord.Interaction):
             if not await self._ok(interaction):
                 return
-            if it in ("Block", "Leave") or self.direction:
-                await self.resolve(interaction, self.direction, it)
+            if it == "Block" or self.direction:
+                await self.resolve(interaction, self.direction or "Straight", it)
                 return
-            await interaction.response.send_message("Pehle direction choose karo (upar ki rows).", ephemeral=True)
+            await interaction.response.send_message("Pick a direction first (top row).", ephemeral=True)
         return callback
 
-    async def resolve(self, interaction, direction, intent: str):
-        """Play the ball: (direction, shot) + the ball's line / length / type -> the normal ball processing."""
+    async def resolve(self, interaction, direction: str, intent: str):
+        """Play the ball: (direction, intent) -> shot, then the normal ball processing."""
         if getattr(self, "_resolved", False) or self.is_finished():
             try:
                 await interaction.response.defer()
@@ -2850,23 +2772,25 @@ class BattingView(_TimeoutMixin, ui.View):
                 pass
             return
         self._resolved = True
-        line, length, btype = self._ball()
-        ev = shot_engine.evaluate(direction, intent, line, length, btype)
-        self.game.__dict__["pending_intent"] = shot_engine.INTENT_ENGINE.get(intent)
-        self.game.__dict__["pending_placement"] = ev
+        shot = self._shot_for(direction, intent)
+        self.game.__dict__["pending_intent"] = intent if intent in ("Push", "Hit", "Loft") else None
         self.stop()
         await _process_delivery(
-            interaction, self.game, ev["shot_key"],
+            interaction, self.game, shot,
             stage1_choice=self.stage1_choice,
-            is_recommended_shot=False,
-            guide_entry_exists=False,
+            is_recommended_shot=shot in self.recommended,
+            guide_entry_exists=self.guide_entry_exists,
             is_free_hit=self.is_free_hit,
         )
 
     def auto_choice(self, skill):
-        """Autoplay / ranked bot: reads the line and length (a better bot reads it better)."""
-        line, length, btype = self._ball()
-        return shot_engine.auto_pick(line, length, btype, skill)
+        """Autoplay / ranked bot: a (direction, intent) pair, like the old auto batting."""
+        pairs = [(d, i) for d in BAT_DIRECTIONS for i in ("Push", "Hit", "Loft")]
+        good = [p for p in pairs if self._shot_for(*p) in (self.recommended or [])]
+        if skill is not None and random.random() > skill:
+            good = []
+        pool = good or [p for p in pairs if not (p[0] == "Behind" and p[1] == "Loft")]
+        return random.choice(pool)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

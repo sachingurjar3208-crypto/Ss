@@ -76,8 +76,8 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Cancel", "rccancel", "End the match running in this channel. Either player or a moderator can use it."),
         ("Resume", "rcresume", "Re-send the current prompt if your match looks stuck."),
         ("Auto Play", "rcautoplay", "Premium only. The bot plays your side for you. Use it again to switch it off."),
-        ("Bowling", "Type + Line + Length", "Pace bowlers: pick the type (swing, pace or slower) and the line (Outside Off, Stumps, Leg Stump), then the length (Yorker, Full, Good, Short, Bouncer). The batter sees the line and length, not the type. Spinners pick one ball.", "bowling"),
-        ("Batting", "Direction + Shot", "Pick where to hit (Third Man, Off Side, Deep Cover, Straight, Mid Wicket, Leg Side, Fine Leg), then Ground, Loft, Block or Leave. Match the line and length: off side for balls outside off, leg side for balls on the pads, ground shots on good length, lofts on full balls, pulls and cuts on short ones. A good shot gets out less, it never makes you safe. Leave a straight ball and you can be bowled.", "batting"),
+        ("Bowling", "Line + Power", "Pick a line first (Wide Off, Off, Stumps, Pads, Wide Leg), then the power (Slow, Medium, Fast, MAX). The batter can't see your line. MAX is fastest but can be a no-ball.", "bowling"),
+        ("Batting", "Direction + Shot", "Pick a direction first (Off Side, Straight, Leg Side, Behind), then the shot: Drive = fours, Loft = sixes but risky, Flick = safe singles, Block = defend. Guess the bowler's line for more runs.", "batting"),
     ]),
     "auction": ("Auction", "Daily Live Auction at 9 PM", [
         ("Auction", "rcauction", "Next auction time, or the lot that is live now. Every day at 9 PM: 5 mystery players (85-99 OVR)."),

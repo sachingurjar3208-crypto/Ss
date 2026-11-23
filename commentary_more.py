@@ -143,16 +143,9 @@ def _validate() -> None:
         for line in walk(pool):
             low = line.lower()
             assert not any(b in low for b in _BANNED), f"banned word in non-wicket line: {line}"
-    # views._dismissal_type reads the text: LBW / PLUMB / IN FRONT -> lbw, STUMP -> stumped,
-    # CAUGHT / CATCH -> caught. So each kind may only use its own words.
-    own = {"bowled": (), "lbw": ("lbw", "plumb", "in front"), "caught": ("caught", "catch"), "stumped": ("stump",)}
     for kind, lines in WICKET_LINES.items():
         for line in lines:
             assert sum(line.count(w) for w in _WORDS) == 1, f"wicket line needs one word: {line}"
-            low = line.lower()
-            for other, words in own.items():
-                if other != kind:
-                    assert not any(w in low for w in words), f"{kind} line uses {other} words: {line}"
 
 
 def extend(mod) -> None:
