@@ -1199,7 +1199,10 @@ _BG_GIF_TASKS: set = set()
 
 
 # ── End-of-over scoreboard image (small, one per over) ──────────────────────
-_EMOJI_TO_BALL = {v: ("NB" if k.startswith("NB") else k) for k, v in TIMELINE_EMOJIS.items()}
+# both emoji sets, so a match that started before a theme switch still reads correctly
+from data import TIMELINE_EMOJIS_NORMAL, TIMELINE_EMOJIS_WINTER, ALL_NOT_OUT_EMOJIS
+_EMOJI_TO_BALL = {v: ("NB" if k.startswith("NB") else k)
+                  for d in (TIMELINE_EMOJIS_NORMAL, TIMELINE_EMOJIS_WINTER) for k, v in d.items()}
 
 
 def _over_image_data(game: GameState) -> dict | None:
@@ -1209,8 +1212,8 @@ def _over_image_data(game: GameState) -> dict | None:
     seg = tl[:-1]
     if "|" in seg:
         seg = seg[len(seg) - seg[::-1].index("|"):]
-    balls = [("0" if t == NOT_OUT_EMOJI else _EMOJI_TO_BALL[t]) for t in seg
-             if t in _EMOJI_TO_BALL or t == NOT_OUT_EMOJI]     # NOT OUT after a review = a dot
+    balls = [("0" if t in ALL_NOT_OUT_EMOJIS else _EMOJI_TO_BALL[t]) for t in seg
+             if t in _EMOJI_TO_BALL or t in ALL_NOT_OUT_EMOJIS]     # NOT OUT after a review = a dot
     hist = getattr(game, "over_history", []) or []
     over_runs = hist[-1].get("runs", 0) if hist else sum(int(b) for b in balls if b.isdigit())
     bat = game.get_batting_team().get("name", "Batting")

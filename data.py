@@ -203,7 +203,11 @@ def random_match_conditions() -> dict:
 TOSS_HEAD_EMOJI = "<:cs_head:1503331241133342864>"
 TOSS_TAIL_EMOJI = "<:cs_tail:1503331245281513533>"
 
-TIMELINE_EMOJIS = {
+# Match timeline emojis. Change TIMELINE_THEME and restart the bot to switch:
+#   "winter" = Winter Wonder ice emojis,  "normal" = the old emojis (kept below, nothing deleted)
+TIMELINE_THEME = "winter"
+
+TIMELINE_EMOJIS_NORMAL = {
     "0":    "<:28397:1557661636293169213>",
     "1":    "<:28389:1557661683474898965>",
     "2":    "<:28391:1557661645097148477>",
@@ -215,8 +219,28 @@ TIMELINE_EMOJIS = {
     "NB+1": "<a:Noball:1557661688432693248>",
     "Wd":   "<:28395:1557661638772138064>",
 }
+NOT_OUT_EMOJI_NORMAL = "<:notout:1559153832435523624>"
 
-NOT_OUT_EMOJI = "<:notout:1559153832435523624>"   # if it is an animated emoji use <a:notout:...> instead
+TIMELINE_EMOJIS_WINTER = {
+    "0":    "<:w_0:1574282600686559353>",
+    "1":    "<:w_1:1574282604763422851>",
+    "2":    "<:w_2:1574282608156606564>",
+    "3":    "<:w_3:1574282611570774156>",
+    "4":    "<a:w_four:1574282619829493911>",
+    "6":    "<a:w_six:1574282633955774534>",
+    "W":    "<a:w_wicket:1574282640926838906>",
+    "NB":   "<:w_noball:1574282623298310194>",
+    "NB+1": "<:w_noball:1574282623298310194>",
+    "Wd":   "<:w_wide:1574282644877738055>",
+}
+NOT_OUT_EMOJI_WINTER = "<:w_notout:1574282626762809374>"
+
+_TL_SETS = {"normal": (TIMELINE_EMOJIS_NORMAL, NOT_OUT_EMOJI_NORMAL),
+            "winter": (TIMELINE_EMOJIS_WINTER, NOT_OUT_EMOJI_WINTER)}
+TIMELINE_EMOJIS = dict(_TL_SETS.get(TIMELINE_THEME, _TL_SETS["normal"])[0])
+NOT_OUT_EMOJI   = _TL_SETS.get(TIMELINE_THEME, _TL_SETS["normal"])[1]
+ALL_NOT_OUT_EMOJIS = {NOT_OUT_EMOJI_NORMAL, NOT_OUT_EMOJI_WINTER}
+
 LBW_EMOJI     = "<a:LBW:1558777617434419240>"
 
 BOWLING_TYPE_ICON = {
