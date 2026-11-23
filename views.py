@@ -1396,10 +1396,23 @@ async def _send_next_batsman_prompt(
 # Core delivery processor
 # ─────────────────────────────────────────────────────────────────────────────
 
+RANKED_LEVEL_CAP = {"CheatCode": 2}   # ranked matches: these playstyles play at most at this level (2 = Gold)
+
+
+def _match_levels(game, player) -> dict:
+    """Playstyle levels for this match. In ranked, CheatCode's Golden Pink cheat mode is capped to Gold."""
+    lv = dict(player_attr_levels(player) or {})
+    if getattr(game, "ranked", False):
+        for name, cap in RANKED_LEVEL_CAP.items():
+            if lv.get(name, 2) > cap:
+                lv[name] = cap
+    return lv
+
+
 def _cheat_plan(game, striker, current_over: int) -> dict | None:
     """CheatCode (L3) over plan for this batter, made on the first ball he faces in the over."""
     try:
-        if "CheatCode" not in player_attributes(striker) or player_attr_levels(striker).get("CheatCode", 2) < 3:
+        if "CheatCode" not in player_attributes(striker) or _match_levels(game, striker).get("CheatCode", 2) < 3:
             return None
         import logic
         plans = game.__dict__.setdefault("_cheat_plans", {})
@@ -1434,7 +1447,7 @@ def _genius_over_plan(game, bowler, striker, outcome: str, current_over: int) ->
         plan = plans[key]
         ball = game.current_over_balls              # legal balls already bowled in this over
         if ball in plan["W"]:
-            vs_cheat = "CheatCode" in player_attributes(striker) and player_attr_levels(striker).get("CheatCode", 2) >= 3
+            vs_cheat = "CheatCode" in player_attributes(striker) and _match_levels(game, striker).get("CheatCode", 2) >= 3
             if not vs_cheat or random.random() < 0.5:      # CheatCode (L3) beats him half the time
                 return "W"
         elif ball in plan["0"]:
@@ -1571,7 +1584,7 @@ async def _process_delivery(
             bowler_balls_done=game.bowler_ball_count.get(bname, 0),
             bowler_max_balls=game.max_bowler_balls(),
             bowler_levels=player_attr_levels(bowler),
-            batsman_levels=player_attr_levels(striker),
+            batsman_levels=_match_levels(game, striker),
             intent=_bat_intent,
             ball_in_over=game.current_over_balls,
             batter_runs=int(game.batsman_stats.get(game._player_key(striker), {}).get("r", 0) or 0),
