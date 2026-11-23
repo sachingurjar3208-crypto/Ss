@@ -881,6 +881,11 @@ class GameState:
             return False
         players[idx] = incoming
         self.impact_used[uid] = True
+        try:
+            import scorecard
+            scorecard.note_impact(self, incoming)
+        except Exception:
+            pass
         pool = self.impact_subs_pool.get(uid, [])
         self.impact_subs_pool[uid] = [p for p in pool if _pname(p) != _pname(incoming)]
         return True
@@ -905,6 +910,11 @@ class GameState:
             "dismissed": list(self.dismissed),
             "overs": self.overs_str(),
         }
+        try:   # scorecard records of innings 1 (how out, fall of wickets, dots, batting order)
+            import scorecard
+            self.inn1_snapshot.update(scorecard.snapshot(self))
+        except Exception as e:
+            print(f"[scorecard] snapshot failed: {type(e).__name__}: {e}")
         self.batting_user_id, self.bowling_user_id = (
             self.bowling_user_id,
             self.batting_user_id,

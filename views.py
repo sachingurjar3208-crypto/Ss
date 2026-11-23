@@ -2,6 +2,8 @@ import asyncio
 import io
 import os
 import random
+
+import scorecard
 import discord
 import emojis
 from discord import ui
@@ -1086,6 +1088,7 @@ async def _send_match_summary(channel, game) -> None:
         print(f"[summary] card failed: {type(e).__name__}: {e}")
     if POTM_CARD:
         await _send_potm_card(channel, game)
+    await scorecard.send_cards(channel, game, 2)      # full scorecard of innings 2
 
 
 POTM_CARD = True     # Player of the Match card after the summary (False = off)
@@ -1572,6 +1575,10 @@ async def _process_delivery(
     bowler_wickets_before = game.bowler_stats[bname]["wickets"]
 
     # ── Update game state ─────────────────────────────────────────────────
+    scorecard.note_batter(game, game.striker)        # batting order for the scorecard
+    scorecard.note_batter(game, game.non_striker)
+    if outcome in ("0", "W"):
+        scorecard.note_dot(game, bowler)
 
     if outcome == "W":
         game.add_legal_ball()
@@ -1581,6 +1588,7 @@ async def _process_delivery(
         _pre_wicket_balls_since = game.balls_since_wicket
         _pre_wicket_striker     = game.striker
         game.add_wicket(_dismissal_type(commentary))
+        scorecard.note_wicket(game, _dismissal_type(commentary), _pname(_pre_wicket_striker), bowler)
         # Timeline emoji deferred until DRS decision (or added immediately if no DRS)
 
     elif outcome == "Wd":
@@ -1923,6 +1931,7 @@ async def _start_second_innings(channel, game: GameState):
             f"off {balls} balls  (RRR: {rrr_val})**"
         )
     )
+    await scorecard.send_cards(channel, game, 1)      # full scorecard of innings 1
     await _send_opener_prompt(channel, game)
 
 
@@ -2914,6 +2923,7 @@ class DRSView(ui.View):
                 self.game.wickets[inn] = max(0, self.game.wickets[inn] - 1)
                 if self.game.dismissed:
                     self.game.dismissed.pop()
+                scorecard.undo_wicket(self.game, _pname(self._striker) if self._striker is not None else "")
                 _moments.undo_wicket(self.game)   # a not-out ball breaks any hat-trick run
                 bowler_key = _pname(self.game.current_bowler) if self.game.current_bowler else None
                 if bowler_key and bowler_key in self.game.bowler_stats:
@@ -2955,6 +2965,7 @@ class DRSView(ui.View):
                     g.add_extra_runs(1, charge_bowler=True)
                     g.pending_free_hit = True
                     g.timeline.append(_timeline_emoji("NB"))
+                    scorecard.note_dot(g, g.current_bowler, -1)    # it was a no-ball, not a dot
                 else:
                     self.game.timeline.append(NOT_OUT_EMOJI)
                 # (the decision itself is already on screen: last animation frame)
