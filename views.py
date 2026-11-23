@@ -1396,6 +1396,38 @@ async def _send_next_batsman_prompt(
 # Core delivery processor
 # ─────────────────────────────────────────────────────────────────────────────
 
+GENIUS_CHANCE = {1: 0.425, 2: 0.85, 3: 0.85}   # chance an over of a Genius bowler gets the plan, per level
+
+
+def _genius_over_plan(game, bowler, striker, outcome: str, current_over: int) -> str:
+    """Genius playstyle: at the start of each of his overs, 85% chance of a plan with 2 wickets and
+    2 dot balls on random legal balls of that over. Wides / no-balls are left as they are."""
+    try:
+        attrs = player_attributes(bowler)
+        if "Genius" not in attrs or outcome in ("Wd", "NB", "NB+1"):
+            return outcome
+        key = (game.innings, current_over, _pname(bowler))
+        plans = game.__dict__.setdefault("_genius_plans", {})
+        if key not in plans:
+            lvl = player_attr_levels(bowler).get("Genius", 2)
+            if random.random() < GENIUS_CHANCE.get(lvl, 0.85):
+                picks = random.sample(range(6), 4)
+                plans[key] = {"W": set(picks[:2]), "0": set(picks[2:])}
+            else:
+                plans[key] = {"W": set(), "0": set()}
+        plan = plans[key]
+        ball = game.current_over_balls              # legal balls already bowled in this over
+        if ball in plan["W"]:
+            vs_cheat = "CheatCode" in player_attributes(striker) and player_attr_levels(striker).get("CheatCode", 2) >= 3
+            if not vs_cheat or random.random() < 0.5:      # CheatCode (L3) beats him half the time
+                return "W"
+        elif ball in plan["0"]:
+            return "0"
+    except Exception as e:
+        print(f"[genius] plan skipped: {type(e).__name__}: {e}")
+    return outcome
+
+
 async def _process_delivery(
     interaction: discord.Interaction,
     game: GameState,
@@ -1525,7 +1557,11 @@ async def _process_delivery(
             bowler_levels=player_attr_levels(bowler),
             batsman_levels=player_attr_levels(striker),
             intent=_bat_intent,
+            ball_in_over=game.current_over_balls,
+            batter_runs=int(game.batsman_stats.get(game._player_key(striker), {}).get("r", 0) or 0),
         )
+    outcome = _genius_over_plan(game, bowler, striker, outcome, current_over)
+    is_extra = outcome in ("Wd", "NB", "NB+1")
     # Remember this delivery type for the next ball ("Mind Games" playstyle).
     game.last_delivery_internal = delivery_internal
 

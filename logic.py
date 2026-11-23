@@ -246,6 +246,17 @@ ATTR_EFFECTS = {
                         "six_reduce":       0.65,   # sixes 35% rarer
                         "wkt_mult":         1.20,   # +20% wickets
                         "wkt_cap_add":      0.045}, # and the wicket limit is a little higher against them
+    # CheatCode (bat). Silver / Gold: a strong hitter. Golden Pink (L3, 1.5x) switches on the
+    # cheat mode below in calculate_outcome (about 95% sixes, ~90% not out over a match, keeps
+    # the strike on the last ball of the over): a century even in a 5-over match.
+    "CheatCode":       {"boundary_mult":    1.50,   # +50% fours / sixes
+                        "six_mult":         1.40,   # extra sixes
+                        "wkt_reduce":       0.60,   # -40% wicket chance
+                        "dot_reduce":       0.80},  # -20% dot balls
+    # Genius (bowl). The over plan (2 wickets + 2 dots, 85% of overs) runs in views.py;
+    # these numbers are the everyday edge on the other balls.
+    "Genius":          {"wkt_mult":         1.20,   # +20% wickets
+                        "run_reduce":       0.90},  # -10% runs
     # Breakthrough (Maxwell / Russell / Pollard type game changer). Never shown to users.
     "Breakthrough":    {"chase_six_mult":   1.30,   # +30% sixes while chasing (2nd innings)
                         "chase_death_mult": 1.30,   # +30% 1s/2s/3s/4s in the last overs of a chase (match winner)
@@ -335,6 +346,27 @@ PHASE_MODIFIERS = {
 }
 
 
+# CheatCode L3 numbers (per ball). The wicket chance is tiny until he has his hundred
+# (century in ~95% of matches) and a little higher after it (~90% not out over a match).
+CHEAT_SIX, CHEAT_FOUR = 0.95, 0.03
+CHEAT_WICKET_BEFORE_100, CHEAT_WICKET_AFTER_100 = 0.0012, 0.006
+CHEAT_KEEP_STRIKE = 0.85     # last ball of the over: takes a single to keep the strike
+
+
+def cheatcode_ball(ball_in_over: int = 0, batter_runs: int = 0) -> str:
+    r = random.random()
+    if r < (CHEAT_WICKET_AFTER_100 if batter_runs >= 100 else CHEAT_WICKET_BEFORE_100):
+        return "W"
+    if ball_in_over >= 5 and random.random() < CHEAT_KEEP_STRIKE:
+        return "1"
+    r = random.random()
+    if r < CHEAT_SIX:
+        return "6"
+    if r < CHEAT_SIX + CHEAT_FOUR:
+        return "4"
+    return "1"
+
+
 def calculate_outcome(
     delivery_internal: str,
     shot_internal: str,
@@ -358,6 +390,8 @@ def calculate_outcome(
     bowler_levels: dict | None = None,
     batsman_levels: dict | None = None,
     intent: str | None = None,
+    ball_in_over: int = 0,
+    batter_runs: int = 0,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -375,6 +409,10 @@ def calculate_outcome(
     """
     bowler_attrs  = [_ATTR_ALIASES.get(a, a) for a in (bowler_attrs  or [])]
     batsman_attrs = [_ATTR_ALIASES.get(a, a) for a in (batsman_attrs or [])]
+
+    # ── CHEATCODE at Golden Pink (L3): cheat mode, nothing else matters ──────
+    if "CheatCode" in batsman_attrs and (batsman_levels or {}).get("CheatCode", 2) >= 3:
+        return cheatcode_ball(ball_in_over, batter_runs), False
     # playstyle levels (Silver / Gold / Golden Pink): batter and bowler each get their own numbers
     AE_BAT  = _scaled_effects(batsman_levels, "bat")
     AE_BOWL = _scaled_effects(bowler_levels, "bowl")
@@ -581,7 +619,20 @@ def calculate_outcome(
         w["4"] = w["4"] * m360["four_mult"]
         w["6"] = w["6"] * m360["six_mult"]
 
+    # CHEATCODE (Silver / Gold): a strong hitter, much harder to get out
+    if "CheatCode" in batsman_attrs:
+        cc = AE_BAT["CheatCode"]
+        w["4"] = w["4"] * cc["boundary_mult"]
+        w["6"] = w["6"] * cc["boundary_mult"] * cc["six_mult"]
+        w["W"] = w["W"] * cc["wkt_reduce"]
+        w["0"] = w["0"] * cc["dot_reduce"]
+
     # ── Bowler attribute effects ─────────────────────────────────────────────
+
+    # GENIUS: everyday edge (the 2-wickets-2-dots over plan is in views.py)
+    if "Genius" in bowler_attrs:
+        w["W"] = w["W"] * AE_BOWL["Genius"]["wkt_mult"]
+        for k in ("1", "2", "3", "4", "6"): w[k] = w[k] * AE_BOWL["Genius"]["run_reduce"]
 
     # WICKET HUNTER: +wickets always
     if "Wicket Hunter" in bowler_attrs:

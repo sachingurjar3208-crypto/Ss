@@ -584,7 +584,33 @@ def _i_wicket_hunter(m):
     _stumps(m, C, C + 190, 330, gap=70, w=40)
 
 
+def _i_cheatcode(m):
+    """Code brackets  < / >  with a bat as the slash: the batter who breaks the game."""
+    d = ImageDraw.Draw(m)
+    _line(d, (C - 200, C - 190), (C - 360, C), 62)
+    _line(d, (C - 360, C), (C - 200, C + 190), 62)
+    _line(d, (C + 200, C - 190), (C + 360, C), 62)
+    _line(d, (C + 360, C), (C + 200, C + 190), 62)
+    m.paste(_bat(m, C, C, 500, 110, -65))
+
+
+def _i_genius(m):
+    """Light bulb with a cricket ball inside: the bowler who plans every over."""
+    d = ImageDraw.Draw(m)
+    _ring(d, C, C - 80, 250, 46)
+    d.rounded_rectangle((C - 120, C + 160, C + 120, C + 220), radius=20, fill=255)
+    d.rounded_rectangle((C - 100, C + 240, C + 100, C + 290), radius=20, fill=255)
+    d.rounded_rectangle((C - 60, C + 310, C + 60, C + 350), radius=18, fill=255)
+    _ball(m, C, C - 80, 120)
+    for k in range(5):                      # rays
+        a = math.radians(-160 + k * 35)
+        _line(d, (C + 300 * math.cos(a), C - 80 + 300 * math.sin(a)),
+              (C + 380 * math.cos(a), C - 80 + 380 * math.sin(a)), 36)
+
+
 ICONS = {
+    "CheatCode": _i_cheatcode,
+    "Genius": _i_genius,
     "Accumulator": _i_accumulator,
     "Blitz": _i_blitz,
     "Disruptor": _i_disruptor,
