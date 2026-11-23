@@ -247,8 +247,7 @@ ATTR_EFFECTS = {
                         "wkt_mult":         1.20,   # +20% wickets
                         "wkt_cap_add":      0.045}, # and the wicket limit is a little higher against them
     # CheatCode (bat). Silver / Gold: a strong hitter. Golden Pink (L3, 1.5x) switches on the
-    # cheat mode: ~95% sixes until 50 runs, then max 2 sixes + 1 four an over and a single on
-    # the last ball 70% of the time.
+    # cheat mode: ~95% sixes every ball, a single on the last ball to keep the strike.
     "CheatCode":       {"boundary_mult":    1.50,   # +50% fours / sixes
                         "six_mult":         1.40,   # extra sixes
                         "wkt_reduce":       0.60,   # -40% wicket chance
@@ -372,17 +371,19 @@ def cheatcode_plan(first_ball: int) -> dict:
     return plan
 
 
-# Until he has CHEAT_FAST_UNTIL runs he bats the first (full power) way: ~95% sixes and a single
-# on the last ball to keep the strike. From there on the over plan above takes over.
-CHEAT_FAST_UNTIL = 50
+# Full power mode (the first CheatCode): ~95% sixes and a single on the last ball to keep the
+# strike, the whole innings. Set CHEAT_FAST_UNTIL to a number (e.g. 50) to switch to the over plan
+# above once he has that many runs.
+CHEAT_FAST_UNTIL = 10 ** 9
 CHEAT_FAST_SIX, CHEAT_FAST_FOUR = 0.95, 0.03
-CHEAT_FAST_WICKET = 0.0012
+CHEAT_FAST_WICKET = 0.0012          # before his hundred
+CHEAT_FAST_WICKET_AFTER_100 = 0.006
 CHEAT_FAST_KEEP_STRIKE = 0.85
 
 
 def cheatcode_ball(ball_in_over: int = 0, batter_runs: int = 0, plan: dict | None = None) -> str:
     if batter_runs < CHEAT_FAST_UNTIL:
-        if random.random() < CHEAT_FAST_WICKET:
+        if random.random() < (CHEAT_FAST_WICKET if batter_runs < 100 else CHEAT_FAST_WICKET_AFTER_100):
             return "W"
         if ball_in_over >= 5 and random.random() < CHEAT_FAST_KEEP_STRIKE:
             return "1"
