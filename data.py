@@ -259,6 +259,7 @@ DELIVERY_BUTTON_MAP = {
     "Slow":     "Good Length",
     "Fast":     "Fast",
     "Bouncer":  "Bouncer",
+    "Short":    "Bouncer",      # short of a length (engine: line + length in shot_engine.py)
     "Good":     "Good Length",
     "Full":     "Full",
     "Yorker":   "Yorker",
@@ -297,6 +298,7 @@ BALL_SPEEDS = {
     "Slow":       (100, 118),
     "Fast":       (135, 150),
     "Bouncer":    (135, 150),
+    "Short":      (130, 146),
     "Good":       (125, 140),
     "Full":       (126, 138),
     "Yorker":     (138, 148),
@@ -363,11 +365,11 @@ SHOT_DESCRIPTIONS = {
 
 # Fast bowler two-stage button groups
 FAST_STAGE1 = ["Outswing", "Inswing", "Fast", "Slow"]
-FAST_STAGE2 = ["Bouncer", "Full", "Good", "Yorker"]
+FAST_STAGE2 = ["Yorker", "Full", "Good", "Short", "Bouncer"]
 
 # Medium pacer — same two-stage flow as the fast bowler (row 1 first, then row 2)
 MEDIUM_STAGE1 = ["Outswing", "Inswing", "Cutter", "Slower"]
-MEDIUM_STAGE2 = ["Bouncer", "Full", "Good Length", "Yorker"]   # Bouncer · Over Pitch · Good · Toe Crusher
+MEDIUM_STAGE2 = ["Yorker", "Full", "Good Length", "Short", "Bouncer"]   # Bouncer · Over Pitch · Good · Toe Crusher
 MEDIUM_PACER_SPEED = (110, 135)    # km/h — every medium-pacer delivery is random in this range
 
 OFF_SPIN_BUTTONS  = ["Offspin", "Carrom", "Arm Ball", "Doosra", "Topspin"]
@@ -405,10 +407,12 @@ BUTTON_DISPLAY: dict[str, dict[str, str]] = {
     "Fast": {
         "Outswing": "Swing Away", "Inswing": "Swing In", "Fast": "Full Pace", "Slow": "Slow Ball",
         "Bouncer": "Bouncer", "Good": "Good Length", "Full": "Full", "Yorker": "Yorker",
+        "Short": "Short",
     },
     "Medium Pacer": {
         "Outswing": "Swing Away", "Inswing": "Swing In", "Cutter": "Cutter", "Slower": "Slow Ball",
         "Bouncer": "Bouncer", "Good Length": "Good Length", "Full": "Full", "Yorker": "Yorker",
+        "Short": "Short",
     },
     "Off Spin": {
         "Offspin": "Turn In", "Carrom": "Mystery Ball", "Arm Ball": "Straight Ball",

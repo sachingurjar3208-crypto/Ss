@@ -248,6 +248,15 @@ WICKET_LINES = {
                 "STUMPED. Way out of his crease, the keeper does the rest."],
 }
 
+# Leaving a ball that hits the stumps (line + length batting). Same word rules as WICKET_LINES.
+LEAVE_WICKET_LINES = {
+    "bowled": ["Shoulders arms... and the bails are off. BOWLED.",
+               "Leaves it, the ball comes back in. BOWLED, a terrible leave.",
+               "No shot offered, and he hears the timber. BOWLED."],
+    "lbw":    ["No shot, rapped on the pad. LBW.",
+               "Leaves it and gets hit on the pad. LBW, he has to go."],
+}
+
 WICKET_FLAVOUR = {
     "yorker":   "{ball}, right on the money.",
     "short":    "{ball}, and it does the job.",
@@ -516,7 +525,10 @@ async def play_animated(channel, content, embed, frames, interaction=None) -> bo
 # Main entry
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _dismissal_kind(shot_internal, delivery_internal, bowling_type) -> str:
+def _dismissal_kind(shot_internal, delivery_internal, bowling_type, weights_override=None) -> str:
+    if weights_override:   # line + length batting decides how the wicket happened
+        kinds, w = zip(*weights_override.items())
+        return random.choices(kinds, weights=w, k=1)[0]
     group = _DELIVERY_GROUP.get(delivery_internal, "")
     if group == "yorker":
         weights = {"bowled": 55, "lbw": 35, "caught": 10}
@@ -544,6 +556,7 @@ def build_ball_commentary(
     stage1_choice: str = "",
     game=None,
     shot_quality: str | None = None,
+    placement: dict | None = None,
 ) -> str:
     """One ball of commentary (Discord markdown, see module doc).
 
@@ -551,7 +564,7 @@ def build_ball_commentary(
                   Must be called BEFORE the ball is applied to the game (as views do).
     shot_quality  "good" (recommended shot), "bad" (guide existed, ignored), or None.
     """
-    shot = bat_label(shot_button)
+    shot = (placement or {}).get("shot_name") or bat_label(shot_button)
     ball = button_label(bowling_type, delivery_button) if delivery_button else "delivery"
     kw = dict(b=_short(batsman_name), bw=_short(bowler_name), shot=shot, ball=ball)
     tag = TAGS.get(outcome, str(outcome))
@@ -560,8 +573,12 @@ def build_ball_commentary(
     if outcome in EXTRA_LINES:
         main = _pick(game, EXTRA_LINES[outcome])
     elif outcome == "W":
-        kind = _dismissal_kind(shot_internal, delivery_internal, bowling_type)
-        main = _pick(game, WICKET_LINES[kind])
+        kind = _dismissal_kind(shot_internal, delivery_internal, bowling_type,
+                               (placement or {}).get("kind_weights"))
+        if shot_button == "Leave" and kind in LEAVE_WICKET_LINES:
+            main = random.choice(LEAVE_WICKET_LINES[kind])
+        else:
+            main = _pick(game, WICKET_LINES[kind])
         flav = WICKET_FLAVOUR.get(_DELIVERY_GROUP.get(delivery_internal, ""))
         if flav and random.random() < 0.5:
             main = f"{main} {flav}"
@@ -573,9 +590,25 @@ def build_ball_commentary(
             dpool = DOT_BY_DELIVERY.get(_DELIVERY_GROUP.get(delivery_internal, ""))
             if dpool and (not shot_pool or random.random() < 0.5):
                 shot_pool = dpool
+        if placement and outcome in ("4", "6"):
+            try:
+                import shot_engine
+                dpool = shot_engine.dir_pool(placement, outcome)
+                if dpool and random.random() < 0.85:
+                    shot_pool = dpool          # name the right part of the ground
+            except Exception as e:
+                print(f"[commentary] direction lines skipped: {type(e).__name__}: {e}")
         main = _pick(game, shot_pool or GENERIC_LINES.get(outcome, ["No run."]))
 
     text = _esc(clean(_fill(main, **kw)))
+    if placement:
+        try:
+            import shot_engine
+            where = shot_engine.zone_line(placement, outcome, kind, text)
+            if where:
+                text = f"{text} {where}"
+        except Exception as e:
+            print(f"[commentary] zone skipped: {type(e).__name__}: {e}")
     if kind:   # make the dismissal word stand out: **CAUGHT**
         word = _KIND_WORD[kind]
         text = text.replace(word, f"**{word}**", 1)

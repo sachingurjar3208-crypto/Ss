@@ -358,6 +358,7 @@ def calculate_outcome(
     bowler_levels: dict | None = None,
     batsman_levels: dict | None = None,
     intent: str | None = None,
+    placement: dict | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -380,6 +381,10 @@ def calculate_outcome(
     AE_BOWL = _scaled_effects(bowler_levels, "bowl")
 
     m = MATCHUP_MATRIX.get((delivery_internal, shot_internal), {"bat": 1.0, "wkt": 1.0})
+    # Line + length batting (shot_engine.py) judges the shot itself for pace bowling, so the old
+    # matchup table is switched off there (it would count the same thing twice). Spin keeps it.
+    if placement is not None and not placement.get("use_matrix"):
+        m = {"bat": 1.0, "wkt": 1.0}
 
     # ── Bat / Bowl rating scaling ─────────────────────────────────────────────
     # Ratings DIRECTLY drive the result and every single point counts
@@ -748,6 +753,11 @@ def calculate_outcome(
     for k, m in INTENT_MULT.get(intent or "", {}).items():
         if k in w:
             w[k] *= m
+
+    # ── Line + length + direction (shot_engine.evaluate): perfect shot = fewer outs, more runs ──
+    for k, f in ((placement or {}).get("mult") or {}).items():
+        if k in w:
+            w[k] *= f
 
     # ── Final six limit ──────────────────────────────────────────────────────
     # However many playstyles, phases and the Loft intent stack up, a six can never be more

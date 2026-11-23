@@ -111,7 +111,7 @@ DOT_BY_DELIVERY = {
 }
 
 WICKET_LINES = {
-    "bowled":  ["BOWLED! Middle stump cartwheeling.", "BOWLED. Plays down the wrong line, timber!",
+    "bowled":  ["BOWLED! Middle pole cartwheeling.", "BOWLED. Plays down the wrong line, timber!",
                 "BOWLED him, the sound of the woodwork says it all.", "BOWLED through bat and pad!",
                 "BOWLED! A perfect delivery, nothing he could do."],
     "lbw":     ["LBW! Dead straight, no doubt about it.", "Rapped on the pads, LBW given.",
@@ -143,9 +143,16 @@ def _validate() -> None:
         for line in walk(pool):
             low = line.lower()
             assert not any(b in low for b in _BANNED), f"banned word in non-wicket line: {line}"
+    # views._dismissal_type reads the text: LBW / PLUMB / IN FRONT -> lbw, STUMP -> stumped,
+    # CAUGHT / CATCH -> caught. So each kind may only use its own words.
+    own = {"bowled": (), "lbw": ("lbw", "plumb", "in front"), "caught": ("caught", "catch"), "stumped": ("stump",)}
     for kind, lines in WICKET_LINES.items():
         for line in lines:
             assert sum(line.count(w) for w in _WORDS) == 1, f"wicket line needs one word: {line}"
+            low = line.lower()
+            for other, words in own.items():
+                if other != kind:
+                    assert not any(w in low for w in words), f"{kind} line uses {other} words: {line}"
 
 
 def extend(mod) -> None:
