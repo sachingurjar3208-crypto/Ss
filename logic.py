@@ -247,8 +247,8 @@ ATTR_EFFECTS = {
                         "wkt_mult":         1.20,   # +20% wickets
                         "wkt_cap_add":      0.045}, # and the wicket limit is a little higher against them
     # CheatCode (bat). Silver / Gold: a strong hitter. Golden Pink (L3, 1.5x) switches on the
-    # cheat mode below in calculate_outcome (about 95% sixes, ~90% not out over a match, keeps
-    # the strike on the last ball of the over): a century even in a 5-over match.
+    # cheat mode (cheatcode_plan): max 2 sixes + 1 four an over, single on the last ball,
+    # century in about 65% of 5-over matches.
     "CheatCode":       {"boundary_mult":    1.50,   # +50% fours / sixes
                         "six_mult":         1.40,   # extra sixes
                         "wkt_reduce":       0.60,   # -40% wicket chance
@@ -346,25 +346,41 @@ PHASE_MODIFIERS = {
 }
 
 
-# CheatCode L3 numbers (per ball). The wicket chance is tiny until he has his hundred
-# (century in ~95% of matches) and a little higher after it (~90% not out over a match).
-CHEAT_SIX, CHEAT_FOUR = 0.95, 0.03
-CHEAT_WICKET_BEFORE_100, CHEAT_WICKET_AFTER_100 = 0.0012, 0.006
-CHEAT_KEEP_STRIKE = 0.85     # last ball of the over: takes a single to keep the strike
+# CheatCode L3 (Golden Pink). Every over he plans: at most 2 sixes and 1 four, the LAST ball is
+# always a single (keeps the strike), the other balls are 2s or dots (a single would give the
+# strike away). Max ~21 an over, so a century in a 5-over match needs nearly every over:
+# about 65% of 5-over matches when he opens (tune CHEAT_TWO / CHEAT_HIT below).
+CHEAT_MAX_SIX, CHEAT_MAX_FOUR = 2, 1
+CHEAT_HIT = 0.99            # a planned six / four comes off (else a dot)
+CHEAT_TWO = 0.84            # the other balls: 2 runs, else a dot
+CHEAT_WICKET = 0.0015       # per ball
 
 
-def cheatcode_ball(ball_in_over: int = 0, batter_runs: int = 0) -> str:
-    r = random.random()
-    if r < (CHEAT_WICKET_AFTER_100 if batter_runs >= 100 else CHEAT_WICKET_BEFORE_100):
+def cheatcode_plan(first_ball: int) -> dict:
+    """Plan for the rest of this over, from the first ball he faces in it (0-5)."""
+    balls = list(range(first_ball, 6))
+    plan = {5: "1"} if 5 in balls else {}
+    free = [b for b in balls if b != 5]
+    random.shuffle(free)
+    for b in free[:CHEAT_MAX_SIX]:
+        plan[b] = "6"
+    for b in free[CHEAT_MAX_SIX:CHEAT_MAX_SIX + CHEAT_MAX_FOUR]:
+        plan[b] = "4"
+    for b in free[CHEAT_MAX_SIX + CHEAT_MAX_FOUR:]:
+        plan[b] = "2"
+    return plan
+
+
+def cheatcode_ball(ball_in_over: int = 0, batter_runs: int = 0, plan: dict | None = None) -> str:
+    if random.random() < CHEAT_WICKET:
         return "W"
-    if ball_in_over >= 5 and random.random() < CHEAT_KEEP_STRIKE:
-        return "1"
-    r = random.random()
-    if r < CHEAT_SIX:
-        return "6"
-    if r < CHEAT_SIX + CHEAT_FOUR:
-        return "4"
-    return "1"
+    plan = plan if plan is not None else cheatcode_plan(ball_in_over)
+    want = plan.get(ball_in_over, "0")
+    if want in ("6", "4"):
+        return want if random.random() < CHEAT_HIT else "0"
+    if want == "2":
+        return "2" if random.random() < CHEAT_TWO else "0"
+    return want                      # "1" on the last ball
 
 
 def calculate_outcome(
@@ -392,6 +408,7 @@ def calculate_outcome(
     intent: str | None = None,
     ball_in_over: int = 0,
     batter_runs: int = 0,
+    cheat_plan: dict | None = None,
 ) -> tuple[str, bool]:
     """
     Simulate a single ball outcome.
@@ -412,7 +429,7 @@ def calculate_outcome(
 
     # ── CHEATCODE at Golden Pink (L3): cheat mode, nothing else matters ──────
     if "CheatCode" in batsman_attrs and (batsman_levels or {}).get("CheatCode", 2) >= 3:
-        return cheatcode_ball(ball_in_over, batter_runs), False
+        return cheatcode_ball(ball_in_over, batter_runs, cheat_plan), False
     # playstyle levels (Silver / Gold / Golden Pink): batter and bowler each get their own numbers
     AE_BAT  = _scaled_effects(batsman_levels, "bat")
     AE_BOWL = _scaled_effects(bowler_levels, "bowl")

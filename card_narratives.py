@@ -57,8 +57,9 @@ NARRATIVES: dict[str, str] = {
     "Bouncer Specialist": "Short-ball expert: +25% wickets with bouncers.",
     "Economical": "Hard to score off: -15% runs conceded.",
     "Wicket Hunter": "Always attacking: +35% wickets all match long.",
-    "CheatCode": ("Unstoppable batter. Golden Pink (L3): about 95% sixes, ~90% not out, keeps the strike, "
-                  "a century even in a 5-over match. Silver / Gold: +50% fours/sixes, -40% wicket chance."),
+    "CheatCode": ("Unstoppable batter. Golden Pink (L3): up to 2 sixes and 1 four every over, always a single on "
+                  "the last ball to keep the strike, a century in about 65% of 5-over matches. "
+                  "Silver / Gold: +50% fours/sixes, -40% wicket chance."),
     "Genius": ("Mastermind bowler: 85% of his overs bring 2 wickets and 2 dot balls (Silver: about half as often), "
                "plus +20% wickets and -10% runs on the other balls."),
 }

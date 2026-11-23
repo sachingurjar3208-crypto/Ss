@@ -1396,6 +1396,22 @@ async def _send_next_batsman_prompt(
 # Core delivery processor
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _cheat_plan(game, striker, current_over: int) -> dict | None:
+    """CheatCode (L3) over plan for this batter, made on the first ball he faces in the over."""
+    try:
+        if "CheatCode" not in player_attributes(striker) or player_attr_levels(striker).get("CheatCode", 2) < 3:
+            return None
+        import logic
+        plans = game.__dict__.setdefault("_cheat_plans", {})
+        key = (game.innings, current_over, _pname(striker))
+        if key not in plans:
+            plans[key] = logic.cheatcode_plan(game.current_over_balls)
+        return plans[key]
+    except Exception as e:
+        print(f"[cheatcode] plan skipped: {type(e).__name__}: {e}")
+        return None
+
+
 GENIUS_CHANCE = {1: 0.425, 2: 0.85, 3: 0.85}   # chance an over of a Genius bowler gets the plan, per level
 
 
@@ -1559,6 +1575,7 @@ async def _process_delivery(
             intent=_bat_intent,
             ball_in_over=game.current_over_balls,
             batter_runs=int(game.batsman_stats.get(game._player_key(striker), {}).get("r", 0) or 0),
+            cheat_plan=_cheat_plan(game, striker, current_over),
         )
     outcome = _genius_over_plan(game, bowler, striker, outcome, current_over)
     is_extra = outcome in ("Wd", "NB", "NB+1")
