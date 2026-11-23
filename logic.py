@@ -247,8 +247,8 @@ ATTR_EFFECTS = {
                         "wkt_mult":         1.20,   # +20% wickets
                         "wkt_cap_add":      0.045}, # and the wicket limit is a little higher against them
     # CheatCode (bat). Silver / Gold: a strong hitter. Golden Pink (L3, 1.5x) switches on the
-    # cheat mode (cheatcode_plan): max 2 sixes + 1 four an over, single on the last ball,
-    # century in about 65% of 5-over matches.
+    # cheat mode (cheatcode_plan): max 2 sixes + 1 four an over, single on the last ball 70%,
+    # century in about 35% of 5-over matches.
     "CheatCode":       {"boundary_mult":    1.50,   # +50% fours / sixes
                         "six_mult":         1.40,   # extra sixes
                         "wkt_reduce":       0.60,   # -40% wicket chance
@@ -347,13 +347,14 @@ PHASE_MODIFIERS = {
 
 
 # CheatCode L3 (Golden Pink). Every over he plans: at most 2 sixes and 1 four, the LAST ball is
-# always a single (keeps the strike), the other balls are 2s or dots (a single would give the
+# a single 70% of the time (keeps the strike), the other balls are 2s or dots (a single would give the
 # strike away). Max ~21 an over, so a century in a 5-over match needs nearly every over:
-# about 65% of 5-over matches when he opens (tune CHEAT_TWO / CHEAT_HIT below).
+# about 35% of 5-over matches when he opens (85% last-ball singles = ~60%).
 CHEAT_MAX_SIX, CHEAT_MAX_FOUR = 2, 1
-CHEAT_HIT = 0.99            # a planned six / four comes off (else a dot)
-CHEAT_TWO = 0.84            # the other balls: 2 runs, else a dot
+CHEAT_HIT = 0.995           # a planned six / four comes off (else a dot)
+CHEAT_TWO = 0.95            # the other balls: 2 runs, else a dot
 CHEAT_WICKET = 0.0015       # per ball
+CHEAT_LAST_SINGLE = 0.70    # last ball: 70% a single (keeps the strike), 30% a dot
 
 
 def cheatcode_plan(first_ball: int) -> dict:
@@ -380,7 +381,9 @@ def cheatcode_ball(ball_in_over: int = 0, batter_runs: int = 0, plan: dict | Non
         return want if random.random() < CHEAT_HIT else "0"
     if want == "2":
         return "2" if random.random() < CHEAT_TWO else "0"
-    return want                      # "1" on the last ball
+    if want == "1":                  # the last ball
+        return "1" if random.random() < CHEAT_LAST_SINGLE else "0"
+    return want
 
 
 def calculate_outcome(
