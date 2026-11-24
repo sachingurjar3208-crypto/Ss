@@ -62,8 +62,43 @@ def _background(innings: int) -> Image.Image:
     return img
 
 
+def _themed_background(theme, innings: int):
+    """Same layout as _background(), on the rcsb theme image with theme colours."""
+    import match_theme
+    style, img = theme
+    pal = match_theme.palette(style)
+    bg = match_theme.backdrop(img, (W, H), blur=4, dark=0.58, tint=pal["tint"])
+    d = ImageDraw.Draw(bg, "RGBA")
+    d.rectangle((0, 0, W, 64), fill=(*pal["tint"], 200))
+    d.rectangle((0, 0, 8, 64), fill=pal["bat"] if innings == 1 else pal["bowl"])
+    d.line((0, 64, W, 64), fill=pal["line"], width=2)
+    d.line((0, H - 40, W, H - 40), fill=(*pal["line"], 110), width=1)
+    d.line((470, 76, 470, H - 50), fill=(*pal["line"], 110), width=1)
+    return bg, pal
+
+
 def build(data: dict) -> io.BytesIO:
-    img = _background(1 if data.get("innings", 1) == 1 else 2).copy()
+    global GOLD, WHITE, DIM, TEAM1, TEAM2
+    inn = 1 if data.get("innings", 1) == 1 else 2
+    theme = data.get("theme")
+    pal = None
+    if theme and theme[0] and theme[1]:
+        try:
+            img, pal = _themed_background(theme, inn)
+        except Exception as e:
+            print(f"[over image] theme skipped: {type(e).__name__}: {e}")
+    if pal is None:
+        img = _background(inn).copy()
+    keep = (GOLD, WHITE, DIM, TEAM1, TEAM2)
+    if pal:   # theme colours for this one image
+        GOLD, WHITE, DIM, TEAM1, TEAM2 = pal["hi"], pal["text"], pal["sub"], pal["bat"], pal["bowl"]
+    try:
+        return _draw(img, data)
+    finally:
+        GOLD, WHITE, DIM, TEAM1, TEAM2 = keep
+
+
+def _draw(img, data: dict) -> io.BytesIO:
     d = ImageDraw.Draw(img)
 
     # header: OVER n  |  team ............ score (overs)

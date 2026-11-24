@@ -182,19 +182,32 @@ def build_data(game, innings: int) -> dict | None:
     return data
 
 
-async def send_cards(channel, game, innings: int) -> None:
-    """Post the batting + bowling card of one innings. Never breaks the match."""
+async def card_files(game, innings: int) -> list:
+    """[batting, bowling] discord.Files of one innings in the match's rcsb theme ([] if off / failed)."""
     if not SCORECARDS:
-        return
+        return []
     try:
         import discord
+        import match_theme
         import scorecard_image as si
         data = await asyncio.to_thread(build_data, game, innings)
         if not data:
-            return
+            return []
+        data["theme"] = match_theme.theme_for(game)
         bat = await asyncio.to_thread(si.batting_card, data)
         bowl = await asyncio.to_thread(si.bowling_card, data)
-        await channel.send(files=[discord.File(io.BytesIO(bat), filename=f"scorecard_{innings}_batting.png"),
-                                  discord.File(io.BytesIO(bowl), filename=f"scorecard_{innings}_bowling.png")])
+        return [discord.File(io.BytesIO(bat), filename=f"scorecard_{innings}_batting.png"),
+                discord.File(io.BytesIO(bowl), filename=f"scorecard_{innings}_bowling.png")]
     except Exception as e:
         print(f"[scorecard] cards skipped: {type(e).__name__}: {e}")
+        return []
+
+
+async def send_cards(channel, game, innings: int) -> None:
+    """Post the batting + bowling card of one innings. Never breaks the match."""
+    files = await card_files(game, innings)
+    if files:
+        try:
+            await channel.send(files=files)
+        except Exception as e:
+            print(f"[scorecard] send failed: {type(e).__name__}: {e}")

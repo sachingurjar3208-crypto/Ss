@@ -58,18 +58,27 @@ def _txt(d, xy, text, font, fill, anchor="lm", shadow=True):
     d.text(xy, text, font=font, fill=fill, anchor=anchor)
 
 
+_THEME = None      # (style, image) while a themed card is being drawn
+
+
 def _backdrop(accent) -> Image.Image:
-    """Graphite gradient, faint diagonal grain, a soft accent glow top-left, round logo."""
-    im = Image.new("RGB", (W, H))
-    px = ImageDraw.Draw(im)
-    for y in range(H):
-        t = y / H
-        px.line([(0, y), (W, y)], fill=tuple(int(BG_TOP[i] + (BG_BOT[i] - BG_TOP[i]) * t) for i in range(3)))
-    grain = Image.new("L", (W, H), 0)
-    g = ImageDraw.Draw(grain)
-    for x in range(-H, W, 22):
-        g.line([(x, 0), (x + H, H)], fill=10, width=1)
-    im.paste(Image.new("RGB", (W, H), (60, 70, 90)), (0, 0), grain)
+    """Graphite gradient, faint diagonal grain, a soft accent glow top-left, round logo.
+    With an rcsb theme: the theme image (blurred, darkened) instead of the graphite."""
+    if _THEME:
+        import match_theme
+        pal = match_theme.palette(_THEME[0])
+        im = match_theme.backdrop(_THEME[1], (W, H), blur=7, dark=0.62, tint=pal["tint"])
+    else:
+        im = Image.new("RGB", (W, H))
+        px = ImageDraw.Draw(im)
+        for y in range(H):
+            t = y / H
+            px.line([(0, y), (W, y)], fill=tuple(int(BG_TOP[i] + (BG_BOT[i] - BG_TOP[i]) * t) for i in range(3)))
+        grain = Image.new("L", (W, H), 0)
+        g = ImageDraw.Draw(grain)
+        for x in range(-H, W, 22):
+            g.line([(x, 0), (x + H, H)], fill=10, width=1)
+        im.paste(Image.new("RGB", (W, H), (60, 70, 90)), (0, 0), grain)
     glow = Image.new("L", (W, H), 0)
     ImageDraw.Draw(glow).ellipse([-420, -520, 760, 420], fill=70)
     glow = glow.filter(ImageFilter.GaussianBlur(160))
@@ -175,7 +184,7 @@ def _how_text(how: str) -> str:
 _BAT_COLS = [("B", 1150), ("4s", 1230), ("6s", 1302), ("SR", 1392)]
 
 
-def batting_card(data: dict) -> bytes:
+def _batting_card(data: dict) -> bytes:
     im = _backdrop(TEAL)
     d = ImageDraw.Draw(im)
     _header(im, d, data, True)
@@ -237,7 +246,7 @@ def _econ_col(e: float):
     return (92, 220, 140) if e < 7.5 else ((255, 205, 92) if e < 10 else (255, 110, 96))
 
 
-def bowling_card(data: dict) -> bytes:
+def _bowling_card(data: dict) -> bytes:
     im = _backdrop(AMBER)
     d = ImageDraw.Draw(im)
     _header(im, d, data, False)
@@ -310,6 +319,41 @@ def bowling_card(data: dict) -> bytes:
         d.text((x, ly), str(k + 1), font=_f(_LAB, 17), fill=WHITE, anchor="mm")
     _footer(im, d, data, AMBER)
     return _png(im)
+
+
+def _themed(fn, data: dict) -> bytes:
+    """Draw with the match's rcsb theme colours (data["theme"] = (style, image)), else the normal look."""
+    global _THEME, WHITE, MUTED, FAINT, GOLD, TEAL, AMBER
+    theme = data.get("theme")
+    pal = None
+    if theme and theme[0] and theme[1]:
+        import match_theme
+        pal = match_theme.palette(theme[0])
+    if not pal:
+        return fn(data)
+    keep = (WHITE, MUTED, FAINT, GOLD, TEAL, AMBER)
+    _THEME = theme
+    WHITE, GOLD, TEAL, AMBER = pal["text"], pal["hi"], pal["bat"], pal["bowl"]
+    MUTED = pal["sub"]
+    FAINT = tuple(int(c * 0.72) for c in pal["sub"])
+    try:
+        return fn(data)
+    except Exception as e:
+        print(f"[scorecard] theme skipped: {type(e).__name__}: {e}")
+        _THEME = None
+        WHITE, MUTED, FAINT, GOLD, TEAL, AMBER = keep
+        return fn(data)
+    finally:
+        _THEME = None
+        WHITE, MUTED, FAINT, GOLD, TEAL, AMBER = keep
+
+
+def batting_card(data: dict) -> bytes:
+    return _themed(_batting_card, data)
+
+
+def bowling_card(data: dict) -> bytes:
+    return _themed(_bowling_card, data)
 
 
 SAMPLE = {

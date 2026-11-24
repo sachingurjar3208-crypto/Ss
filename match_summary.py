@@ -219,6 +219,13 @@ def build_summary_data(game) -> dict:
 def _theme_for(game):
     """(style, image) of the winner's summary theme, else the other player's, else None."""
     try:
+        import match_theme                                             # same theme as the rest of the match
+        hit = match_theme.theme_for(game)
+        if hit and hit[0]:
+            return hit
+    except Exception as e:
+        print(f"[summary-theme] match theme skipped: {type(e).__name__}: {e}")
+    try:
         import summary_theme
         first, second = _team_uids(game)
         t1, t2 = game.runs[0], game.runs[1]

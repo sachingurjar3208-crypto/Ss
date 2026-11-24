@@ -1077,33 +1077,51 @@ def _start_match_summary(game):
 
 
 async def _send_match_summary(channel, game) -> None:
-    """The Rush Cricket SUMMARY card (never breaks the match end). Uses the card that
-    _start_match_summary() began building, if there is one."""
+    """Match end: summary card + Player of the Match card + both scorecards in ONE message,
+    all in the match's rcsb theme. Never breaks the match end."""
+    files = []
     try:
         task = game.__dict__.pop("_summary_task", None)
         if task is not None:
             data, filename = await task
         else:
             data, filename = await asyncio.to_thread(_build_summary_payload, game)
-        await channel.send(file=discord.File(io.BytesIO(data), filename=filename))
+        files.append(discord.File(io.BytesIO(data), filename=filename))
     except Exception as e:
         print(f"[summary] card failed: {type(e).__name__}: {e}")
-    if POTM_CARD:
-        await _send_potm_card(channel, game)
-    await scorecard.send_cards(channel, game, 2)      # full scorecard of innings 2
+    embed, potm_file = (await _potm_embed(game)) if POTM_CARD else (None, None)
+    if potm_file is not None:
+        files.append(potm_file)
+    files += await scorecard.card_files(game, 2)          # full scorecard of innings 2
+    if not files and embed is None:
+        return
+    try:
+        kw = {"files": files} if files else {}
+        if embed is not None:
+            kw["embed"] = embed
+        await channel.send(**kw)
+    except Exception as e:                               # fall back to one message each
+        print(f"[summary] combined send failed ({type(e).__name__}: {e}), sending separately")
+        for f in files:
+            try:
+                f.reset()
+                await channel.send(file=f)
+            except Exception:
+                pass
 
 
 POTM_CARD = True     # Player of the Match card after the summary (False = off)
 
 
-async def _send_potm_card(channel, game) -> None:
-    """Player of the Match: his card, his numbers and a badge. Never breaks the match end."""
+async def _potm_embed(game):
+    """(embed, card discord.File or None) for the Player of the Match, or (None, None)."""
     try:
         from match_summary import potm_details
         import card_cache
+        import match_theme
         p = await asyncio.to_thread(potm_details, game)
         if not p:
-            return
+            return None, None
         lines = []
         if p["bat"] and (p["bat"]["balls"] or p["bat"]["runs"]):
             b = p["bat"]
@@ -1115,17 +1133,37 @@ async def _send_potm_card(channel, game) -> None:
             w = p["bowl"]
             lines.append(f"**Bowling:** {w['wickets']}/{w['runs']} ({p['overs']} overs)")
         title_name = discord.utils.escape_markdown(p["name"])
+        pal = match_theme.palette(match_theme.theme_for(game)[0])
         embed = discord.Embed(
             title="🏅 PLAYER OF THE MATCH",
             description=f"## {title_name}\n" + (f"-# {discord.utils.escape_markdown(p['team'])}\n\n" if p["team"] else "\n")
                         + "\n".join(lines),
-            color=discord.Color.gold())
+            color=discord.Color(pal["embed"]) if pal else discord.Color.gold())
         import card_db
         card = await asyncio.to_thread(card_db.get_card, p["name"])
         path = card["image_path"] if card is not None else None
-        await card_cache.send_embed(channel, embed, path)
+        url = card_cache.cached_url(path)
+        if url:
+            embed.set_image(url=url)
+            return embed, None
+        file = await card_cache.card_file(path)
+        if file is not None:
+            embed.set_image(url=f"attachment://{file.filename}")
+        return embed, file
     except Exception as e:
         print(f"[potm] card skipped: {type(e).__name__}: {e}")
+        return None, None
+
+
+async def _send_potm_card(channel, game) -> None:
+    """Player of the Match on its own (kept for other callers)."""
+    embed, file = await _potm_embed(game)
+    if embed is None:
+        return
+    try:
+        await channel.send(embed=embed, **({"file": file} if file else {}))
+    except Exception as e:
+        print(f"[potm] send failed: {type(e).__name__}: {e}")
 
 
 async def _get_card_image_bytes(player: dict) -> bytes | None:
@@ -1138,22 +1176,33 @@ async def _get_card_image_bytes(player: dict) -> bytes | None:
         return None
 
 
-async def _bat_stats_file(user_id: int, player: dict, status: str = "", filename: str = "bat_stats.png") -> discord.File | None:
+def _game_theme(game):
+    if game is None:
+        return None
+    try:
+        import match_theme
+        return match_theme.theme_for(game)
+    except Exception:
+        return None
+
+
+async def _bat_stats_file(user_id: int, player: dict, status: str = "", filename: str = "bat_stats.png",
+                          game=None) -> discord.File | None:
     try:
         name  = _pname(player)
         stats = get_career_stats(str(user_id), name)
-        img   = await asyncio.to_thread(generate_bat_card, name, stats, None, status)
+        img   = await asyncio.to_thread(generate_bat_card, name, stats, None, status, _game_theme(game))
         return discord.File(fp=io.BytesIO(img), filename=filename)
     except Exception as e:
         print(f"[stats] bat card error: {e}")
         return None
 
 
-async def _bowl_stats_file(user_id: int, player: dict) -> discord.File | None:
+async def _bowl_stats_file(user_id: int, player: dict, game=None) -> discord.File | None:
     try:
         name  = _pname(player)
         stats = get_career_stats(str(user_id), name)
-        img   = await asyncio.to_thread(generate_bowl_card, name, stats, None, "CURRENT BOWLER")
+        img   = await asyncio.to_thread(generate_bowl_card, name, stats, None, "CURRENT BOWLER", _game_theme(game))
         return discord.File(fp=io.BytesIO(img), filename="bowl_stats.png")
     except Exception as e:
         print(f"[stats] bowl card error: {e}")
@@ -1265,6 +1314,7 @@ async def _over_image_file(game: GameState) -> discord.File | None:
         data = _over_image_data(game)
         if data is None:
             return None
+        data["theme"] = _game_theme(game)
         import over_image
         buf = await asyncio.to_thread(over_image.build, data)
         game.__dict__["_over_img_key"] = key
@@ -2464,8 +2514,8 @@ class StrikerDesignateView(_TimeoutMixin, ui.View):
 
             async def _send_openers_info():
                 f1, f2 = await asyncio.gather(
-                    _bat_stats_file(self.game.batting_user_id, striker, "ON STRIKE", "bat_striker.png"),
-                    _bat_stats_file(self.game.batting_user_id, non_striker, "NON-STRIKER", "bat_nonstriker.png"),
+                    _bat_stats_file(self.game.batting_user_id, striker, "ON STRIKE", "bat_striker.png", self.game),
+                    _bat_stats_file(self.game.batting_user_id, non_striker, "NON-STRIKER", "bat_nonstriker.png", self.game),
                 )
                 files = [f for f in (f1, f2) if f]
                 await channel.send(
@@ -2548,7 +2598,7 @@ class BowlerSelectView(_TimeoutMixin, ui.View):
             pass  # cosmetic only
 
         async def _send_prompt():
-            bowl_file = await _bowl_stats_file(self.game.bowling_user_id, bowler)
+            bowl_file = await _bowl_stats_file(self.game.bowling_user_id, bowler, self.game)
             files = [bowl_file] if bowl_file else []
             await _send_bowling_prompt(
                 channel, self.game,
@@ -3426,7 +3476,7 @@ class NextBatsmanView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
             pass  # cosmetic only
 
         async def _work():
-            bat_file = await _bat_stats_file(self.game.batting_user_id, player, "NEW BATTER")
+            bat_file = await _bat_stats_file(self.game.batting_user_id, player, "NEW BATTER", game=self.game)
             files = [bat_file] if bat_file else []
             await channel.send(
                 content=f"**{name}** ({player.get('ovr','?')}) comes to the crease",
@@ -3524,7 +3574,7 @@ class NextBowlerView(_ImpactButtonMixin, _TimeoutMixin, ui.View):
             pass  # cosmetic only
 
         async def _work():
-            bowl_file = await _bowl_stats_file(self.game.bowling_user_id, bowler)
+            bowl_file = await _bowl_stats_file(self.game.bowling_user_id, bowler, self.game)
             files = [bowl_file] if bowl_file else []
             await _send_bowling_prompt(
                 channel, self.game,

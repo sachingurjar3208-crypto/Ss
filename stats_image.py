@@ -96,18 +96,64 @@ def _bowl_cells(c: dict):
     ]
 
 
-def _render(tag: str, accent, name: str, status: str, cells) -> bytes:
-    im = Image.open(_BANNER).convert("RGBA")
+_HEX = [(0, 250), (80, 30), (390, 30), (505, 250), (390, 470), (80, 470)]   # logo hexagon on the template
+
+
+def _themed_banner(theme):
+    """The stat banner redrawn on the rcsb theme image (same layout, theme colours)."""
+    import match_theme
+    style, img = theme
+    pal = match_theme.palette(style)
+    base = Image.open(_BANNER).convert("RGBA")
+    w, h = base.size
+    bg = match_theme.backdrop(img, (w, h), blur=5, dark=0.5, tint=pal["tint"]).convert("RGBA")
+    # darker strip behind the stats so the numbers stay readable
+    strip = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    sd = ImageDraw.Draw(strip)
+    sd.rectangle((520, 272, w, h), fill=(*pal["tint"], 150))
+    sd.rectangle((520, 0, w, 272), fill=(*pal["tint"], 70))
+    bg = Image.alpha_composite(bg, strip)
+    d = ImageDraw.Draw(bg, "RGBA")
+    ln = (*pal["line"], 255)
+    d.line((380, 14, w, 14), fill=ln, width=5)
+    d.line((520, 272, w, 272), fill=(*pal["line"], 200), width=3)
+    d.line((380, h - 12, w, h - 12), fill=ln, width=5)
+    for x in _DIV:
+        d.line((x, 300, x, 470), fill=(*pal["line"], 220), width=3)
+    # keep the round logo from the template
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).polygon(_HEX, fill=255)
+    bg.paste(base, (0, 0), m)
+    d.polygon(_HEX, outline=(*pal["line"], 255), width=6)
+    return bg, pal
+
+
+def _render(tag: str, accent, name: str, status: str, cells, theme=None) -> bytes:
+    pal = None
+    if theme and theme[0] and theme[1]:
+        try:
+            im, pal = _themed_banner(theme)
+        except Exception as e:
+            print(f"[stats] theme skipped: {type(e).__name__}: {e}")
+            im = Image.open(_BANNER).convert("RGBA")
+    else:
+        im = Image.open(_BANNER).convert("RGBA")
     d = ImageDraw.Draw(im, "RGBA")
+    if pal:   # theme colours
+        accent = (*(pal["bat"] if tag == "BATTER" else pal["bowl"]), 255)
+        _sub, _gold, _white = (*pal["sub"], 255), (*pal["hi"], 255), (*pal["text"], 255)
+    else:
+        _sub, _gold, _white = _SKY2, _GOLD, _WHITE
+    tag_fg = (10, 14, 24, 255) if pal and sum(accent[:3]) > 520 else _WHITE
 
     # tag pill (BATTER / BOWLER) + status
     tf = _f(_LAB, 40)
     tw = d.textlength(tag, font=tf) + 60
     d.rounded_rectangle((640, 40, 640 + tw, 96), radius=8, fill=accent)
-    d.text((640 + tw / 2, 68), tag, font=tf, fill=_WHITE, anchor="mm")
+    d.text((640 + tw / 2, 68), tag, font=tf, fill=tag_fg, anchor="mm")
     if status:
-        d.text((640 + tw + 28, 68), status.upper(), font=_f(_LAB, 36), fill=_SKY2, anchor="lm")
-    d.text((im.width - 70, 68), "RUSH CRICKET  |  ALL TIME", font=_f(_LAB, 38), fill=_SKY2, anchor="rm")
+        d.text((640 + tw + 28, 68), status.upper(), font=_f(_LAB, 36), fill=_sub, anchor="lm")
+    d.text((im.width - 70, 68), "RUSH CRICKET  |  ALL TIME", font=_f(_LAB, 38), fill=_sub, anchor="rm")
 
     # name (shrinks to fit)
     nm = (name or "").upper()
@@ -116,23 +162,26 @@ def _render(tag: str, accent, name: str, status: str, cells) -> bytes:
     while d.textlength(nm, font=nf) > 1380 and size > 40:
         size -= 4
         nf = _f(_NAME, size)
-    d.text((640, 175), nm, font=nf, fill=_WHITE, anchor="lm")
+    if pal:
+        d.text((644, 179), nm, font=nf, fill=(0, 0, 0, 160), anchor="lm")
+    d.text((640, 175), nm, font=nf, fill=_white, anchor="lm")
 
     # 7 stat cells
     lf = _f(_LAB, 36)
     for i, (label, value, hi) in enumerate(cells):
         cx = (_DIV[i] + _DIV[i + 1]) // 2 + (15 if i == 0 else 0)
-        _num(d, cx, _ROW_Y - 30, str(value), _GOLD if hi else _WHITE, 150 if i == 0 else 190)
-        d.text((cx, _ROW_Y + 48), label, font=lf, fill=_SKY, anchor="mm")
+        _num(d, cx, _ROW_Y - 30, str(value), _gold if hi else _white, 150 if i == 0 else 190)
+        d.text((cx, _ROW_Y + 48), label, font=lf, fill=(*pal["sub"], 255) if pal else _SKY, anchor="mm")
 
     buf = io.BytesIO()
     im.save(buf, "PNG")
     return buf.getvalue()
 
 
-def generate_bat_card(name: str, stats: dict | None, card_image_bytes=None, status: str = "") -> bytes:
-    return _render("BATTER", _BLUE, name, status, _bat_cells(stats or {}))
+def generate_bat_card(name: str, stats: dict | None, card_image_bytes=None, status: str = "", theme=None) -> bytes:
+    return _render("BATTER", _BLUE, name, status, _bat_cells(stats or {}), theme)
 
 
-def generate_bowl_card(name: str, stats: dict | None, card_image_bytes=None, status: str = "CURRENT BOWLER") -> bytes:
-    return _render("BOWLER", _RED, name, status, _bowl_cells(stats or {}))
+def generate_bowl_card(name: str, stats: dict | None, card_image_bytes=None, status: str = "CURRENT BOWLER",
+                       theme=None) -> bytes:
+    return _render("BOWLER", _RED, name, status, _bowl_cells(stats or {}), theme)
