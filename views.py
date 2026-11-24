@@ -1442,33 +1442,46 @@ def _cheat_plan(game, striker, current_over: int) -> dict | None:
         return None
 
 
-GENIUS_CHANCE = {1: 0.425, 2: 0.85, 3: 0.85}   # chance an over of a Genius bowler gets the plan, per level
+GENIUS_PLAN_CHANCE = {1: 0.5, 2: 1.0, 3: 1.0}   # Silver: half his overs get the plan, Gold / Golden Pink: every over
+GENIUS_TWO_WICKETS = 0.30                       # a planned over: 70% one wicket, 30% two wickets
+GENIUS_MAX_RUNS = 15                            # a Genius over never goes for more than this
 
 
 def _genius_over_plan(game, bowler, striker, outcome: str, current_over: int) -> str:
-    """Genius playstyle: at the start of each of his overs, 85% chance of a plan with 2 wickets and
-    2 dot balls on random legal balls of that over. Wides / no-balls are left as they are."""
+    """Genius playstyle: each of his overs gets 1 wicket (70%) or 2 wickets (30%) on random legal
+    balls, and the over never goes for more than 15 runs."""
     try:
-        attrs = player_attributes(bowler)
-        if "Genius" not in attrs or outcome in ("Wd", "NB", "NB+1"):
+        if "Genius" not in player_attributes(bowler):
             return outcome
         key = (game.innings, current_over, _pname(bowler))
         plans = game.__dict__.setdefault("_genius_plans", {})
         if key not in plans:
             lvl = player_attr_levels(bowler).get("Genius", 2)
-            if random.random() < GENIUS_CHANCE.get(lvl, 0.85):
-                picks = random.sample(range(6), 4)
-                plans[key] = {"W": set(picks[:2]), "0": set(picks[2:])}
-            else:
-                plans[key] = {"W": set(), "0": set()}
+            wk = set()
+            if random.random() < GENIUS_PLAN_CHANCE.get(lvl, 1.0):
+                wk = set(random.sample(range(6), 2 if random.random() < GENIUS_TWO_WICKETS else 1))
+            plans[key] = {"W": wk, "runs": 0}
         plan = plans[key]
+        left = max(0, GENIUS_MAX_RUNS - plan["runs"])
+        if outcome in ("Wd", "NB", "NB+1"):
+            if left < (2 if outcome == "NB+1" else 1):
+                outcome = "0"                       # no extras once the over is at 15
+            else:
+                plan["runs"] += 2 if outcome == "NB+1" else 1
+                return outcome
         ball = game.current_over_balls              # legal balls already bowled in this over
         if ball in plan["W"]:
             vs_cheat = "CheatCode" in player_attributes(striker) and _match_levels(game, striker).get("CheatCode", 2) >= 3
             if not vs_cheat or random.random() < 0.5:      # CheatCode (L3) beats him half the time
                 return "W"
-        elif ball in plan["0"]:
-            return "0"
+        elif outcome == "W" and plan["W"]:
+            outcome = "0"                           # planned over: only the planned balls take wickets
+        if outcome in ("1", "2", "3", "4", "6"):
+            r = int(outcome)
+            if r > left:                            # keep the over at 15 or less
+                r = max([v for v in (0, 1, 2, 3, 4) if v <= left])
+            plan["runs"] += r
+            outcome = str(r)
     except Exception as e:
         print(f"[genius] plan skipped: {type(e).__name__}: {e}")
     return outcome

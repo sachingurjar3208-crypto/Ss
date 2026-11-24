@@ -57,11 +57,11 @@ NARRATIVES: dict[str, str] = {
     "Bouncer Specialist": "Short-ball expert: +25% wickets with bouncers.",
     "Economical": "Hard to score off: -15% runs conceded.",
     "Wicket Hunter": "Always attacking: +35% wickets all match long.",
-    "CheatCode": ("Unstoppable batter. Golden Pink (L3): about 95% sixes every ball, a single on the last ball to keep "
-                  "the strike, a century in about 95% of 5-over matches. Ranked: plays at Gold. "
+    "CheatCode": ("Unstoppable batter. Golden Pink (L3): every over 1-3 sixes and 1-2 fours at random, about 95% "
+                  "not out. Ranked: full power in Legendary and Ruby, Gold below. "
                   "Silver / Gold: +50% fours/sixes, -40% wicket chance."),
-    "Genius": ("Mastermind bowler: 85% of his overs bring 2 wickets and 2 dot balls (Silver: about half as often), "
-               "plus +20% wickets and -10% runs on the other balls."),
+    "Genius": ("Mastermind bowler: every over takes 1 wicket (70%) or 2 wickets (30%) and never goes for more "
+               "than 15 runs (Silver: half his overs), plus +20% wickets and -10% runs."),
 }
 
 NARRATIVE_NAMES: list[str] = list(NARRATIVES)

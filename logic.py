@@ -247,7 +247,7 @@ ATTR_EFFECTS = {
                         "wkt_mult":         1.20,   # +20% wickets
                         "wkt_cap_add":      0.045}, # and the wicket limit is a little higher against them
     # CheatCode (bat). Silver / Gold: a strong hitter. Golden Pink (L3, 1.5x) switches on the
-    # cheat mode: ~95% sixes every ball, a single on the last ball to keep the strike.
+    # cheat mode (cheatcode_plan): 0-3 sixes and 1-2 fours an over at random, ~95% not out.
     "CheatCode":       {"boundary_mult":    1.50,   # +50% fours / sixes
                         "six_mult":         1.40,   # extra sixes
                         "wkt_reduce":       0.60,   # -40% wicket chance
@@ -345,65 +345,48 @@ PHASE_MODIFIERS = {
 }
 
 
-# CheatCode L3 (Golden Pink). Every over he plans: at most 2 sixes and 1 four, the LAST ball is
-# a single 70% of the time (keeps the strike), the other balls are 2s or dots (a single would give the
-# strike away). Max ~21 an over, so a century in a 5-over match needs nearly every over:
-# about 35% of 5-over matches when he opens (85% last-ball singles = ~60%).
-CHEAT_MAX_SIX, CHEAT_MAX_FOUR = 2, 1
-CHEAT_HIT = 0.995           # a planned six / four comes off (else a dot)
-CHEAT_TWO = 0.95            # the other balls: 2 runs, else a dot
-CHEAT_WICKET = 0.0015       # per ball
-CHEAT_LAST_SINGLE = 0.70    # last ball: 70% a single (keeps the strike), 30% a dot
+# CheatCode L3 (Golden Pink). Each over he faces gets a random plan:
+#   sixes: 1st 80%, then a 2nd 60%, then a 3rd 30%     (0-3 a over, usually 1-2)
+#   fours: 1st 90%, then a 2nd 50%                       (usually 1-2)
+#   the other balls: dot / single / two (no forced single on the last ball, so he can lose the strike)
+# Wicket chance is tiny: about 95% not out over a 5-over innings.
+CHEAT_SIX_CHAIN = (0.80, 0.60, 0.30)
+CHEAT_FOUR_CHAIN = (0.90, 0.50)
+CHEAT_OTHER = (("0", 35), ("1", 45), ("2", 20))
+CHEAT_WICKET = 0.0017       # per ball (~95% not out over 30 balls)
+
+
+def _chain(probs) -> int:
+    n = 0
+    for p in probs:
+        if random.random() < p:
+            n += 1
+        else:
+            break
+    return n
 
 
 def cheatcode_plan(first_ball: int) -> dict:
     """Plan for the rest of this over, from the first ball he faces in it (0-5)."""
     balls = list(range(first_ball, 6))
-    plan = {5: "1"} if 5 in balls else {}
-    free = [b for b in balls if b != 5]
-    random.shuffle(free)
-    for b in free[:CHEAT_MAX_SIX]:
+    random.shuffle(balls)
+    sixes, fours = _chain(CHEAT_SIX_CHAIN), _chain(CHEAT_FOUR_CHAIN)
+    plan = {}
+    for b in balls[:sixes]:
         plan[b] = "6"
-    for b in free[CHEAT_MAX_SIX:CHEAT_MAX_SIX + CHEAT_MAX_FOUR]:
+    for b in balls[sixes:sixes + fours]:
         plan[b] = "4"
-    for b in free[CHEAT_MAX_SIX + CHEAT_MAX_FOUR:]:
-        plan[b] = "2"
+    vals, wts = zip(*CHEAT_OTHER)
+    for b in balls[sixes + fours:]:
+        plan[b] = random.choices(vals, weights=wts, k=1)[0]
     return plan
 
 
-# Full power mode (the first CheatCode): ~95% sixes and a single on the last ball to keep the
-# strike, the whole innings. Set CHEAT_FAST_UNTIL to a number (e.g. 50) to switch to the over plan
-# above once he has that many runs.
-CHEAT_FAST_UNTIL = 10 ** 9
-CHEAT_FAST_SIX, CHEAT_FAST_FOUR = 0.95, 0.03
-CHEAT_FAST_WICKET = 0.0012          # before his hundred
-CHEAT_FAST_WICKET_AFTER_100 = 0.006
-CHEAT_FAST_KEEP_STRIKE = 0.85
-
-
 def cheatcode_ball(ball_in_over: int = 0, batter_runs: int = 0, plan: dict | None = None) -> str:
-    if batter_runs < CHEAT_FAST_UNTIL:
-        if random.random() < (CHEAT_FAST_WICKET if batter_runs < 100 else CHEAT_FAST_WICKET_AFTER_100):
-            return "W"
-        if ball_in_over >= 5 and random.random() < CHEAT_FAST_KEEP_STRIKE:
-            return "1"
-        r = random.random()
-        if r < CHEAT_FAST_SIX:
-            return "6"
-        if r < CHEAT_FAST_SIX + CHEAT_FAST_FOUR:
-            return "4"
-        return "1"
     if random.random() < CHEAT_WICKET:
         return "W"
     plan = plan if plan is not None else cheatcode_plan(ball_in_over)
-    want = plan.get(ball_in_over, "0")
-    if want in ("6", "4"):
-        return want if random.random() < CHEAT_HIT else "0"
-    if want == "2":
-        return "2" if random.random() < CHEAT_TWO else "0"
-    if want == "1":                  # the last ball
-        return "1" if random.random() < CHEAT_LAST_SINGLE else "0"
-    return want
+    return plan.get(ball_in_over, "1")
 
 
 def calculate_outcome(
