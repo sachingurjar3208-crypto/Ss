@@ -13,6 +13,15 @@ RULE: WON / LOSS (the W and L emojis) are for the profile form only
 """
 
 # ── Emoji IDs (copied from the Developer Portal → Emojis) ────────────────────
+# Match scoreboard
+MATCH_BAT     = "<:rc_bat:1574680081857773638>"      # striker / batting
+MATCH_BALL    = "<:rc_ball:1574680078753996870>"     # bowler / delivery
+MATCH_FIRE    = "<:rc_fire:1574680084877676554>"     # batter on fire
+MATCH_PSHIP   = "<:rc_pship:1574680095094870218>"    # partnership
+MATCH_METER   = "<:rc_meter:1574680088891490315>"    # run rate / ball speed
+MATCH_PROJ    = "<:rc_proj:1574680092209188985>"     # projected score
+MATCH_TARGET  = "<:rc_target:1574680098110447706>"   # chase
+MATCH_TROPHY  = "<:rc_trophy:1574680101088399491>"   # match winner
 LOSS_PROFILE = "<:Lossprofile:1558139747275243643>"   # profile form only
 WON_PROFILE  = "<:Wonprofile:1558139744008020088>"    # profile form only
 DAILY        = "<:Dailypack:1558139740786528368>"

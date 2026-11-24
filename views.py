@@ -38,8 +38,10 @@ def _delivery_announcement(bowler_label: str, speed: float, batter: discord.Memb
     "**Inswing Yorker** is coming with **147.3 kmph** — @batter, pick your shot!"
     The bowler's name and the delivery type are NOT repeated in the result
     commentary afterwards — this line is the only place they're announced."""
+    from emojis import MATCH_BALL, MATCH_METER
     prefix = "**FREE HIT!**  " if free_hit else ""
-    return f"{prefix}**{bowler_label}** is coming with **{speed:.1f} kmph** — {batter.mention}, pick your shot!"
+    return (f"{prefix}{MATCH_BALL} **{bowler_label}** is coming with {MATCH_METER} **{speed:.1f} kmph** — "
+            f"{batter.mention}, pick your shot!")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

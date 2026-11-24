@@ -11,6 +11,8 @@ Design rules (no copied scoreboard look):
 import os
 import discord
 from game import GameState, _pname
+from emojis import (MATCH_BAT, MATCH_BALL, MATCH_FIRE, MATCH_PSHIP, MATCH_METER,
+                    MATCH_PROJ, MATCH_TARGET, MATCH_TROPHY)
 
 _LOGO_PATH = os.path.join(os.path.dirname(__file__), "cricstar_logo.png")
 
@@ -286,6 +288,7 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
 
     # Batters
     bat_rows = []
+    on_fire = []
     for p, is_striker in ((game.striker, True), (game.non_striker, False)):
         if not p:
             continue
@@ -293,17 +296,24 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
         s = game.batsman_stats.get(pn, {"runs": 0, "balls": 0})
         mark = "*" if is_striker else ""  # * marks the striker, like real scorecards
         bat_rows.append([f"{pn[:14]}{mark}", str(s["runs"]), str(s["balls"]), game.sr(pn) or "0.0"])
+        # on fire: 30+ runs at a strike rate of 150+
+        if s.get("runs", 0) >= 30 and s.get("balls", 0) and s["runs"] * 100 / s["balls"] >= 150:
+            on_fire.append(pn)
     if bat_rows:
-        embed.add_field(name="Batting", value=_table(["BATTER", "R", "B", "SR"], [15, 3, 3, 6], bat_rows), inline=False)
+        name = f"{MATCH_BAT} Batting"
+        if on_fire:
+            name += f"   {MATCH_FIRE} {', '.join(n.split()[-1] for n in on_fire)} on fire"
+        embed.add_field(name=name, value=_table(["BATTER", "R", "B", "SR"], [15, 3, 3, 6], bat_rows), inline=False)
 
     # Stat chips
     if inn == 2:
-        chip_last = f"`RRR {game.rrr()}`"
+        chip_last = f"{MATCH_TARGET} RRR **{game.rrr()}**"
     else:
-        chip_last = f"`Proj {game.projected()}`"
+        chip_last = f"{MATCH_PROJ} Proj **{game.projected()}**"
     embed.add_field(
         name="\u200b",
-        value=f"`P'ship {game.partnership_runs}({game.partnership_balls})`   `CRR {game.crr()}`   {chip_last}",
+        value=(f"{MATCH_PSHIP} P'ship **{game.partnership_runs}**({game.partnership_balls})   "
+               f"{MATCH_METER} CRR **{game.crr()}**   {chip_last}"),
         inline=False,
     )
 
@@ -313,7 +323,7 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
         bs = game.bowler_stats.get(bn, {"balls": 0, "runs": 0, "wickets": 0})
         ov = game.bowler_overs_str(bn)
         embed.add_field(
-            name="Bowling",
+            name=f"{MATCH_BALL} Bowling",
             value=_table(["BOWLER", "O", "R", "W"], [15, 4, 3, 3], [[bn[:14], ov, str(bs["runs"]), str(bs["wickets"])]]),
             inline=False,
         )
@@ -330,7 +340,7 @@ def build_scoreboard_embed(game: GameState) -> discord.Embed:
         balls_left = max(0, game.overs * 6 - game.current_legal_balls)
         embed.add_field(
             name="\u200b",
-            value=f"**{bat_team_name}** need **{needed}** off **{balls_left}** balls",
+            value=f"{MATCH_TARGET} **{bat_team_name}** need **{needed}** off **{balls_left}** balls",
             inline=False,
         )
         # Live win-probability bar (cosmetic — never lets a problem here break the scoreboard)
@@ -351,7 +361,7 @@ def build_result_embed(game: GameState) -> discord.Embed:
     result = game.match_result()
     embed = discord.Embed(
         title="Match Result",
-        description=result,
+        description=f"{MATCH_TROPHY} {result}",
         color=discord.Color.gold(),
     )
 
