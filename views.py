@@ -2906,6 +2906,9 @@ class BattingView(_TimeoutMixin, ui.View):
 # DRS
 # ─────────────────────────────────────────────────────────────────────────────
 
+DRS_GIF = True   # DRS replay GIF on every review (False = text frames only)
+
+
 class DRSView(ui.View):
     """
     DRS prompt.  Commentary has already been sent before this view appears.
@@ -2998,6 +3001,17 @@ class DRSView(ui.View):
             await interaction.response.edit_message(content=frames[0], view=None)
         except Exception:
             pass
+        # DRS replay GIF (ball tracking / UltraEdge / front foot / back foot) for this decision
+        _drs_gif_sent = False
+        if DRS_GIF:
+            try:
+                from drs_gif import drs_file
+                _f = await drs_file(self.kind, result)
+                if _f is not None:
+                    await self.channel.send(file=_f)
+                    _drs_gif_sent = True
+            except Exception as _e:
+                print(f"[drs_gif] skipped ({type(_e).__name__}: {_e})")
 
         try:
             final_shown = False
@@ -3070,7 +3084,7 @@ class DRSView(ui.View):
                     self.game.timeline.append(NOT_OUT_EMOJI)
                 # (the decision itself is already on screen: last animation frame)
 
-                _notout_gif = get_umpire_gif("notout")
+                _notout_gif = None if _drs_gif_sent else get_umpire_gif("notout")   # the DRS GIF already shows NOT OUT
                 if _notout_gif:
                     await self.channel.send(_notout_gif)
 
