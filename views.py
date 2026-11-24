@@ -2074,11 +2074,13 @@ def _banner_names(game: GameState) -> tuple[str, str]:
 async def _send_match_banner(channel, game: GameState) -> None:
     """Posts the MATCH STARTING GIF. Cosmetic only: any failure is skipped, the match goes on."""
     try:
-        from match_start_gif import match_start_file
-        a, b = _banner_names(game)
-        f = await match_start_file(a, b)
-        if f is not None:
-            await channel.send(file=f)
+        # ranked matches already showed the RANKED MATCH intro GIF, so no second banner there
+        if not getattr(game, "ranked", False):
+            from match_start_gif import match_start_file
+            a, b = _banner_names(game)
+            f = await match_start_file(a, b)
+            if f is not None:
+                await channel.send(file=f)
         if UMPIRE_BANNER:   # pre-render the umpire banners in the background
             from umpire_gif import warm
             asyncio.create_task(warm())
