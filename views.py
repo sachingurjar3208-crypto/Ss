@@ -1399,10 +1399,27 @@ async def _send_next_batsman_prompt(
 RANKED_LEVEL_CAP = {"CheatCode": 2}   # ranked matches: these playstyles play at most at this level (2 = Gold)
 
 
+RANKED_FULL_POWER_TIERS = {"Legendary", "Ruby"}   # in these ranked tiers the cap above does not apply
+
+
+def _owner_tier(game) -> str:
+    """Ranked tier of the batting side's owner (looked up once per match)."""
+    uid = getattr(game, "batting_user_id", None)
+    key = f"_rank_tier_{uid}"
+    if key not in game.__dict__:
+        try:
+            import ranked
+            game.__dict__[key] = ranked.get_player(uid)["tier"] if uid and int(uid) > 0 else ""
+        except Exception:
+            game.__dict__[key] = ""
+    return game.__dict__[key]
+
+
 def _match_levels(game, player) -> dict:
-    """Playstyle levels for this match. In ranked, CheatCode's Golden Pink cheat mode is capped to Gold."""
+    """Playstyle levels for this match. In ranked, CheatCode's Golden Pink cheat mode is capped to Gold,
+    except for players in the Legendary and Ruby tiers (full power there)."""
     lv = dict(player_attr_levels(player) or {})
-    if getattr(game, "ranked", False):
+    if getattr(game, "ranked", False) and _owner_tier(game) not in RANKED_FULL_POWER_TIERS:
         for name, cap in RANKED_LEVEL_CAP.items():
             if lv.get(name, 2) > cap:
                 lv[name] = cap
