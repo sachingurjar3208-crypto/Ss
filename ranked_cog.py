@@ -75,6 +75,7 @@ def _search_embed(entry: _Entry, dots: int = 1, text: str | None = None) -> disc
         embed.description = f"{_sep()}\n{text}\n{_sep()}"
         return embed
     secs = int(time.monotonic() - entry.joined)
+    embed.set_image(url="attachment://ranked_search.gif")   # Season 2 searching GIF (sent with the message)
     embed.description = (
         f"{_sep()}\n"
         f"**Searching for a player{'.' * dots}**\n"
@@ -97,7 +98,8 @@ class _SearchView(OwnedView):
         self.stop()
         text = "Search cancelled." if removed else "Match is starting."
         try:
-            await interaction.response.edit_message(embed=_search_embed(self.entry, text=text), view=None)
+            await interaction.response.edit_message(embed=_search_embed(self.entry, text=text), view=None,
+                                                    attachments=[])
         except discord.HTTPException:
             pass
 
@@ -117,6 +119,11 @@ class RankedCog(commands.Cog, name="Ranked"):
 
     async def cog_load(self):
         self.season_loop.start()
+        try:   # build the Season 2 searching GIF for every tier in the background
+            import ranked_search_gif
+            asyncio.get_event_loop().create_task(ranked_search_gif.warm(ranked.RANKED_OVERS))
+        except Exception as e:
+            print(f"[ranked] search gif warm-up skipped: {type(e).__name__}: {e}")
 
     async def cog_unload(self):
         self.season_loop.cancel()
@@ -262,7 +269,14 @@ class RankedCog(commands.Cog, name="Ranked"):
                     await ctx.send("❌ Couldn't start the match right now. Try again in a moment.")
                 return
 
-        entry.message = await ctx.send(embed=_search_embed(entry, 1), view=_SearchView(self, entry))
+        import ranked_search_gif
+        gif = await ranked_search_gif.search_file(entry.tier, ranked.RANKED_OVERS)
+        emb = _search_embed(entry, 1)
+        if gif is None:
+            emb.set_image(url=None)
+            entry.message = await ctx.send(embed=emb, view=_SearchView(self, entry))
+        else:
+            entry.message = await ctx.send(embed=emb, view=_SearchView(self, entry), file=gif)
         entry.task = asyncio.create_task(self._wait_task(entry))
         entry.anim = asyncio.create_task(self._anim_task(entry))
 
@@ -310,7 +324,8 @@ class RankedCog(commands.Cog, name="Ranked"):
     async def _edit_search(self, entry: _Entry, text: str):
         if entry.message is not None:
             try:
-                await entry.message.edit(content=None, embed=_search_embed(entry, text=text), view=None)
+                await entry.message.edit(content=None, embed=_search_embed(entry, text=text), view=None,
+                                         attachments=[])
                 return
             except discord.HTTPException:
                 pass
@@ -425,7 +440,25 @@ class RankedCog(commands.Cog, name="Ranked"):
                                          gif_url=cond.get("gif_url"),
                                          teams=(game.teams.get(challenger.id), game.teams.get(opponent.id)))
         mentions = " ".join(m.mention for m in humans)
-        await channel.send(content=mentions, embed=embed)
+        intro = None
+        try:   # RANKED MATCH intro GIF: both players, their tiers and stars
+            import ranked_start_gif
+
+            def _side(m):
+                if getattr(m, "is_fake", False):
+                    return m.display_name, tier, "AI BOT"
+                info = ranked.get_player(m.id)
+                return m.display_name, info["tier"], int(info["stars"])
+            a_ = await asyncio.to_thread(_side, challenger)
+            b_ = await asyncio.to_thread(_side, opponent)
+            intro = await ranked_start_gif.ranked_start_file(*a_, *b_, overs=ranked.RANKED_OVERS)
+        except Exception as e:
+            print(f"[ranked] intro gif skipped: {type(e).__name__}: {e}")
+        if intro is not None:
+            embed.set_image(url="attachment://ranked_start.gif")
+            await channel.send(content=mentions, embed=embed, file=intro)
+        else:
+            await channel.send(content=mentions, embed=embed)
         await start_toss(channel, game)
 
     # ── rcrank ────────────────────────────────────────────────────────────
