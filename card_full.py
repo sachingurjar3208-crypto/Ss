@@ -91,6 +91,8 @@ THEMES = {
     "icon":            {"bg": ((78, 58, 18), (7, 6, 3)),    "panel": ((92, 70, 22), (16, 12, 4)),   "accent": (250, 210, 105), "tag": "ICON"},
     "bronze":          {"bg": ((92, 52, 28), (14, 8, 5)),   "panel": ((84, 46, 24), (16, 9, 5)),    "accent": (222, 146, 88),  "tag": None},
     "season1":         {"bg": ((22, 122, 86), (3, 16, 14)), "panel": ((14, 84, 56), (3, 16, 12)),   "accent": (120, 235, 160), "tag": None},
+    # Season 2: royal-blue crystal backdrop -> ice-blue numbers / pills / hexagon line, dark blue panel
+    "season2":         {"bg": ((30, 80, 180), (4, 10, 32)), "panel": ((16, 36, 92), (4, 10, 32)),   "accent": (150, 215, 255), "tag": None},
     "diwali":          {"bg": ((122, 44, 18), (28, 6, 10)), "panel": ((110, 36, 16), (26, 6, 8)),   "accent": (255, 196, 70),  "tag": "DIWALI"},
     "rangoli":         {"bg": ((132, 30, 72), (26, 5, 18)), "panel": ((104, 22, 60), (22, 4, 14)),  "accent": (255, 186, 60),  "tag": "RANGOLI"},
     "prestige_diwali": {"bg": ((110, 70, 24), (24, 12, 6)), "panel": ((96, 60, 20), (20, 11, 5)),   "accent": (255, 214, 120), "tag": "PRESTIGE DIWALI"},
@@ -114,7 +116,9 @@ THEMES = {
 
 # Cards with no theme get a look from their EVENT name first, then their background's name
 # (background or s2_bg): a name containing the word on the left uses the theme on the right.
-BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"), ("season", "season1"), ("s1", "season1"),
+BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"),
+                  ("season 2", "season2"), ("season2", "season2"), ("season-2", "season2"), ("season_2", "season2"),
+                  ("season", "season1"), ("s1", "season1"),
                   ("diwali", "diwali"), ("halloween", "halloween"), ("end of an era", "eoae"), ("eoae", "eoae"), ("retro", "retro")]
 
 
