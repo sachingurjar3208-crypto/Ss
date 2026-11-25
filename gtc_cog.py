@@ -46,6 +46,7 @@ HINT_1 = 12            # seconds: country and role
 HINT_2 = 22            # seconds: letters of the name
 START_DELAY = 30       # seconds between the ping and round 1
 ROUND_GAP = 5          # seconds between rounds
+LATE_SKIP_MIN = 15     # a daily game more than this many minutes late (bot was offline) is skipped
 MIN_ACCOUNT_DAYS = 7   # Discord account age needed to score (stops alt accounts)
 RECENT_KEEP = 60       # a card shown in the last N rounds is not picked again
 GREEN = discord.Color.from_rgb(30, 170, 110)
@@ -350,6 +351,11 @@ class GTCCog(commands.Cog, name="Guess the Cricketer"):
                 return
         now = datetime.now(gtc.IST)
         slot = min(gtc.GAME_HOURS, key=lambda hm: abs((hm[0] * 60 + hm[1]) - (now.hour * 60 + now.minute)))
+        late = (now.hour * 60 + now.minute) - (slot[0] * 60 + slot[1])
+        if late > LATE_SKIP_MIN:
+            # the bot was offline / disconnected at game time: skip it, the next game runs on time
+            print(f"[gtc] {slot} skipped ({late} min late)")
+            return
         if slot == gtc.GAME_HOURS[0]:
             # yesterday's 11 PM game didn't run (bot was down): give its day bonus + leaderboard now
             yday = (now - timedelta(days=1)).date().isoformat()
