@@ -57,7 +57,7 @@ DAY = 86_400
 
 # ── Several passes at once ───────────────────────────────────────────────────
 DEFAULT_PASS = "star"                # the normal Star Pass (all old seasons are "star")
-THEMES = ("default", "halloween", "diwali", "christmas", "winter")   # looks, see starpass_image.THEMES
+THEMES = ("default", "halloween", "diwali", "christmas", "winter", "season2")   # looks, see starpass_image.THEMES
 MAX_BG_BYTES = 8 * 1024 * 1024       # biggest background upload
 
 
@@ -283,6 +283,17 @@ def set_background(pass_key: str, data: bytes | None) -> None:
         else:
             conn.execute("INSERT OR REPLACE INTO starpass_bg (pass_key, data, ts) VALUES (?, ?, ?)",
                          (key, data, time.time()))
+
+
+def set_theme(pass_key: str, theme: str) -> bool:
+    """Change the look of the running season of a pass. False when no season is running."""
+    if theme not in THEMES:
+        raise ValueError(f"Unknown theme {theme!r}")
+    with economy._tx() as conn:
+        _ensure(conn)
+        cur = conn.execute("UPDATE starpass_season SET theme = ? WHERE active = 1 AND pass_key = ?",
+                           (theme, norm_key(pass_key)))
+        return cur.rowcount > 0
 
 
 def get_background(pass_key: str) -> bytes | None:

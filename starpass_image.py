@@ -56,6 +56,12 @@ THEMES = {
                    prem_bg=(40, 40, 60), free_bg=(14, 46, 86), pill_bg=(60, 52, 40), star_hi=(255, 236, 170),
                    bg_file="starpass_winter_bg.jpg", glass=True,
                    cell_prem=(40, 34, 58), cell_free=(12, 40, 84)),
+    # Season 2: royal-blue crystal picture, gold Premium row, ice-blue Free row (same colours as the S2 cards)
+    "season2": dict(bg_top=(6, 18, 70), bg_bot=(2, 8, 38), glow1=(90, 180, 255), glow2=(255, 206, 96),
+                    gold=(255, 206, 96), teal=(150, 215, 255), prem_line=(190, 150, 60), free_line=(90, 160, 230),
+                    prem_bg=(34, 34, 62), free_bg=(10, 36, 96), pill_bg=(66, 54, 24), star_hi=(255, 232, 150),
+                    bg_file="starpass_season2_bg.jpg", glass=True,
+                    cell_prem=(30, 32, 70), cell_free=(10, 34, 92)),
 }
 
 K = 4                                      # icons are drawn 4x and scaled down (smooth edges)

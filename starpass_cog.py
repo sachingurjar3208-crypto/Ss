@@ -41,8 +41,10 @@ from security import OwnedView, esc
 from squad_cog import _in_match, _is_premium, _need_debut
 
 EMBED_COLOR = 0xF4C452
-THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78, "winter": 0x8CDCFF}
-THEME_CHOICES = [app_commands.Choice(name=n.capitalize(), value=n) for n in starpass.THEMES]
+THEME_COLORS = {"halloween": 0xFF8C26, "diwali": 0xFFC442, "christmas": 0x50CD78, "winter": 0x8CDCFF,
+                "season2": 0x96D7FF}
+THEME_LABELS = {"season2": "Season 2"}
+THEME_CHOICES = [app_commands.Choice(name=THEME_LABELS.get(n, n.capitalize()), value=n) for n in starpass.THEMES]
 
 
 def _color(season: dict | None) -> int:
@@ -440,7 +442,7 @@ class StarPassCog(commands.Cog, name="StarPass"):
         embed.add_field(name="Pass key", value=key)
         embed.add_field(name="Levels", value=f"{season['levels']} ({len(pages)} pages)")
         embed.add_field(name="Ends", value=f"<t:{int(season['end_ts'])}:R>")
-        embed.add_field(name="Theme", value=season["theme"].capitalize())
+        embed.add_field(name="Theme", value=THEME_LABELS.get(season["theme"], season["theme"].capitalize()))
         embed.add_field(name="Background", value="Custom image" if has_bg else "Theme colors")
         embed.add_field(name="Players open it with", value=f"`{_open_hint(season)}`")
         notes = []
@@ -485,6 +487,24 @@ class StarPassCog(commands.Cog, name="StarPass"):
         await asyncio.to_thread(starpass.set_background, key, data)
         await interaction.followup.send(
             f"New background saved for `{key}`. It shows the next time someone opens the pass.", ephemeral=True)
+
+    @app_commands.command(name="starpasstheme", description="Change the colours of the running Star Pass")
+    @app_commands.describe(theme="New look of the pass image", pass_key="Which pass (empty = the normal Star Pass)")
+    @app_commands.choices(theme=THEME_CHOICES)
+    @app_commands.autocomplete(pass_key=pass_autocomplete)
+    @admin_only()
+    async def starpasstheme(self, interaction: discord.Interaction, theme: app_commands.Choice[str],
+                            pass_key: str | None = None):
+        key = starpass.norm_key(pass_key)
+        ok = await asyncio.to_thread(starpass.set_theme, key, theme.value)
+        if not ok:
+            await interaction.response.send_message(f"No running season for `{key}`.", ephemeral=True)
+            return
+        note = ""
+        if theme.value == "season2" and await asyncio.to_thread(starpass.get_background, key):
+            note = "\nA custom background is saved for this pass and shows instead of the theme picture " \
+                   "(remove it with /starpassbg remove:True to see the Season 2 picture)."
+        await interaction.response.send_message(f"`{key}` now uses the **{theme.name}** theme.{note}", ephemeral=True)
 
     # ── Admin: /starpassend ──────────────────────────────────────────────────
     @app_commands.command(name="starpassend", description="End the running Star Pass right now")
