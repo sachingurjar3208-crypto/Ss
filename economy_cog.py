@@ -35,6 +35,7 @@ import quest
 import security
 import squad_logic as sl
 import card_cache
+import market_switch
 from card_narratives import ROLES
 from security import OwnedView, esc, fmt_wait
 from squad_cog import _card_line, price_line, _in_match, _is_premium, _need_debut, squad_order, squad_entries
@@ -443,8 +444,8 @@ class BuyBrowseView(OwnedView):
         return self.cards[self.index]
 
     def _sync_buttons(self) -> None:
-        # Cards nobody may buy: the tick stays visible but grey and dead.
-        locked = not card_db.is_obtainable(self.card)
+        # Cards nobody may buy (or the market is off): the tick stays visible but grey and dead.
+        locked = not card_db.is_obtainable(self.card) or not market_switch.is_open()
         self.yes.disabled = locked
         self.yes.style = discord.ButtonStyle.secondary if locked else discord.ButtonStyle.success
 
@@ -469,7 +470,7 @@ class BuyBrowseView(OwnedView):
 
     @ui.button(emoji="✅", style=discord.ButtonStyle.success, row=0)
     async def yes(self, interaction: discord.Interaction, button: ui.Button):
-        if self.used:
+        if self.used or not market_switch.is_open():     # market off: the grey tick does nothing
             await interaction.response.defer()
             return
         self.used = True
@@ -1239,6 +1240,22 @@ class EconomyCog(commands.Cog, name="Economy"):
             return
         # Buy / owned / squad-full checks happen when ✅ is pressed, for the card on screen.
         await _send_buy_browser(ctx, cards)
+
+    @commands.command(name="rcmarket")
+    async def rcmarket(self, ctx: commands.Context, state: str = ""):
+        """Owner: `rcmarket off` greys out the buy button in rcbuy, `rcmarket on` opens it again."""
+        if ctx.author.id != OWNER_ID:
+            return
+        state = state.lower().strip()
+        if state in ("off", "close", "closed"):
+            await asyncio.to_thread(market_switch.set_open, False)
+            await ctx.send("Market is OFF. `rcbuy` shows cards with a grey buy button.")
+        elif state in ("on", "open"):
+            await asyncio.to_thread(market_switch.set_open, True)
+            await ctx.send("Market is ON. Players can buy again.")
+        else:
+            now = "ON" if await asyncio.to_thread(market_switch.is_open) else "OFF"
+            await ctx.send(f"Market is **{now}**. Use `rcmarket off` or `rcmarket on`.")
 
     @commands.command(name="rcsell")
     @economy_gate(BUYSELL_COOLDOWN)
