@@ -71,6 +71,7 @@ def _event_dict(row) -> dict:
         "days_left": left // DAY,
         "pity_every": int(row["pity_every"]),
         "odds_a": float(row["odds_a"]),
+        "odds_b": (float(row["odds_b"]) if "odds_b" in row.keys() and row["odds_b"] is not None else None),
         "c_min": int(row["c_min"]),
         "c_max": int(row["c_max"]),
     }
@@ -169,6 +170,30 @@ def create_event(name: str, duration_key: str, admin_id: int = 0, theme: str = "
                     (new_id, int(pity_every), int(prev)),
                 )
         return _event_dict(conn.execute("SELECT * FROM draft_event WHERE id = ?", (new_id,)).fetchone())
+
+
+def set_odds(key: str, odds_a: float | None = None, pity_every: int | None = None,
+             odds_b: float | None = None, theme: str | None = None) -> dict | str:
+    """Change Pool A chance / Pool A guarantee / Pool B chance of a RUNNING event draft."""
+    with economy._tx() as conn:
+        row = _active(conn, norm_key(key))
+        if row is None:
+            return "That event draft is not running."
+        a = float(row["odds_a"]) if odds_a is None else float(odds_a)
+        b_old = row["odds_b"] if "odds_b" in row.keys() else None
+        b = (float(b_old) if b_old is not None else None) if odds_b is None else float(odds_b)
+        p = int(row["pity_every"]) if pity_every is None else int(pity_every)
+        if not 0 <= a <= 100 or (b is not None and not 0 <= b <= 100) or a + (b or 0) > 100:
+            return "Chances must be between 0 and 100 and Pool A + Pool B can't be more than 100."
+        if not 2 <= p <= 1000:
+            return "The guarantee must be between 2 and 1000 drafts."
+        th = row["theme"] if theme is None else theme
+        if th not in THEMES:
+            return "Unknown theme."
+        conn.execute("UPDATE draft_event SET odds_a = ?, odds_b = ?, pity_every = ?, theme = ? WHERE id = ?",
+                     (a, b, p, th, int(row["id"])))
+        row = conn.execute("SELECT * FROM draft_event WHERE id = ?", (int(row["id"]),)).fetchone()
+    return _event_dict(row)
 
 
 def end_event(key: str) -> dict | None:

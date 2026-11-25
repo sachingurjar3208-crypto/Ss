@@ -1533,6 +1533,8 @@ def _ensure_draft_tables(conn: sqlite3.Connection) -> None:
         "pity_every INTEGER NOT NULL DEFAULT 50, odds_a REAL NOT NULL DEFAULT 3, "
         "c_min INTEGER NOT NULL DEFAULT 60, c_max INTEGER NOT NULL DEFAULT 79)"
     )
+    if "odds_b" not in {r["name"] for r in conn.execute("PRAGMA table_info(draft_event)")}:
+        conn.execute("ALTER TABLE draft_event ADD COLUMN odds_b REAL")      # NULL = the normal Pool B chance
     conn.execute("CREATE INDEX IF NOT EXISTS idx_draft_event_key ON draft_event (event_key, id)")
     conn.execute(
         "CREATE TABLE IF NOT EXISTS draft_event_bg ("

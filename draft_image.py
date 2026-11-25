@@ -81,9 +81,8 @@ THEMES = {
                     plate_glow=(70, 160, 255)),
 }
 
-# Theme of the NORMAL draft. With a custom background (/draftbg) only the colours are used,
-# without one the theme's own picture shows (season2 = blue crystals). "default" = the old blue look.
-MAIN_THEME = "season2"
+# Theme of the NORMAL draft (Season 1) when it has a custom background (/draftbg). "default" = the blue look.
+MAIN_THEME = "season1"
 
 
 def theme_of(look: dict | None) -> dict:

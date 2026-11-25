@@ -30,6 +30,11 @@ PITY_A_EVERY = 50
 # the Pool B guarantee is used on the very next draft. 0 = no Pool B guarantee.
 PITY_B_EVERY = 10
 
+# ── Default draft ────────────────────────────────────────────────────────────
+# `rcdraft` (no name) opens this running event draft instead of the old normal draft (Season 1).
+# The old one stays in the dropdown and opens with `rcdraft s1`. "" = the old normal draft.
+DEFAULT_EVENT = "season-2"
+
 # ── Cost ─────────────────────────────────────────────────────────────────────
 VOUCHERS_PER_DRAFT = 1
 DRAFT_MULTI = 10            # the "10 Drafts" button

@@ -96,8 +96,12 @@ def _c_range(event: dict | None) -> tuple[int, int]:
 
 
 def _odds(event: dict | None) -> dict:
-    if event:                                     # the event sets Pool A; B / C keep the normal split
-        return {"A": float(event["odds_a"]), "B": cfg.ODDS.get("B", 0), "C": cfg.ODDS.get("C", 0)}
+    if event:                                     # the event sets Pool A (and Pool B when it has its own chance)
+        a = float(event["odds_a"])
+        if event.get("odds_b") is not None:
+            b = float(event["odds_b"])
+            return {"A": a, "B": b, "C": max(0.0, 100.0 - a - b)}
+        return {"A": a, "B": cfg.ODDS.get("B", 0), "C": cfg.ODDS.get("C", 0)}
     return dict(cfg.ODDS)
 
 
@@ -222,9 +226,7 @@ async def _look(event: dict | None) -> dict | None:
     bg = await asyncio.to_thread(draft_event.get_background, _ckey(event))
     if event is None:
         if bg is None:
-            if draft_image.MAIN_THEME == "default":
-                return None
-            return {"theme": draft_image.MAIN_THEME, "title": "", "bg": None, "stamp": None}
+            return None
         return {"theme": draft_image.MAIN_THEME, "title": "", "bg": bg[0], "stamp": bg[1]}
     return {
         "theme": event["theme"], "title": event["name"], "left": draft_event.fmt_left(event["seconds_left"]),
@@ -298,9 +300,14 @@ class DraftView(OwnedView):
         self.add_item(many)
         if self.actives:                                  # an event is running: dropdown to switch
             cur = _ckey(self.event)
-            opts = [discord.SelectOption(label="Normal Draft", value=MAIN, default=cur == MAIN)]
-            opts += [discord.SelectOption(label=a["name"][:100], value=a["event_key"], default=a["event_key"] == cur)
-                     for a in self.actives[:24]]
+            dflt = getattr(cfg, "DEFAULT_EVENT", "")
+            has_dflt = any(a["event_key"] == dflt for a in self.actives)
+            main_opt = discord.SelectOption(label="Season 1 Draft" if has_dflt else "Normal Draft", value=MAIN,
+                                            default=cur == MAIN)
+            evs = sorted(self.actives, key=lambda a: a["event_key"] != dflt)[:24]     # default draft first
+            ev_opts = [discord.SelectOption(label=(a["name"] + (" (Normal)" if a["event_key"] == dflt else ""))[:100],
+                                            value=a["event_key"], default=a["event_key"] == cur) for a in evs]
+            opts = (ev_opts[:1] + [main_opt] + ev_opts[1:]) if has_dflt else ([main_opt] + ev_opts)
             sel = ui.Select(placeholder="Switch draft", options=opts, row=3)
             sel.callback = self._switch
             self.add_item(sel)
@@ -570,6 +577,8 @@ class DraftCog(commands.Cog, name="Draft"):
         actives = await asyncio.to_thread(draft_event.list_active)
         event = None
         key = draft_event.norm_key(name)
+        if not (name or "").strip() and getattr(cfg, "DEFAULT_EVENT", ""):   # plain rcdraft -> the default draft
+            key = next((a["event_key"] for a in actives if a["event_key"] == cfg.DEFAULT_EVENT), MAIN)
         if key != MAIN:
             event = next((a for a in actives if a["event_key"] == key), None)
             if event is None:
@@ -866,6 +875,33 @@ class DraftCog(commands.Cog, name="Draft"):
             await interaction.response.send_message("That event is not running.", ephemeral=True)
         else:
             await interaction.response.send_message(f"{ended['name']} has been ended.", ephemeral=True)
+
+    @app_commands.command(name="draftodds", description="Change chances / theme of a running event draft")
+    @app_commands.describe(event="Which event draft", pool_a_chance="Pool A chance per draft in % (e.g. 0.3)",
+                           pool_a_guarantee="Pool A guaranteed every N drafts (e.g. 50)",
+                           pool_b_chance="Pool B chance per draft in % (e.g. 2). Pool C gets the rest",
+                           theme="New look of this draft (empty = keep)")
+    @app_commands.choices(theme=[app_commands.Choice(name="Season 2" if t == "season2" else t.capitalize(), value=t)
+                                 for t in draft_event.THEMES])
+    @app_commands.autocomplete(event=_event_autocomplete)
+    @admin_only()
+    async def draftodds(self, interaction: discord.Interaction, event: str,
+                        pool_a_chance: app_commands.Range[float, 0, 100] | None = None,
+                        pool_a_guarantee: app_commands.Range[int, 2, 1000] | None = None,
+                        pool_b_chance: app_commands.Range[float, 0, 100] | None = None,
+                        theme: app_commands.Choice[str] | None = None):
+        res = await asyncio.to_thread(draft_event.set_odds, event, pool_a_chance, pool_a_guarantee, pool_b_chance,
+                                      theme.value if theme else None)
+        if isinstance(res, str):
+            await interaction.response.send_message(res, ephemeral=True)
+            return
+        drop_cache(res["event_key"])
+        o = _odds(res)
+        await interaction.response.send_message(
+            f"**{res['name']}** now: Pool A **{o['A']:g}%** (guaranteed every **{res['pity_every']}**), "
+            f"Pool B **{o['B']:g}%** (guaranteed every **{cfg.PITY_B_EVERY}**), Pool C **{o['C']:g}%**. "
+            f"Theme: **{res['theme']}**.",
+            ephemeral=True)
 
     @app_commands.command(name="draftreopen", description="Bring an ended event draft back for some days")
     @app_commands.describe(event="Which event", days="Run it for this many days from now")
