@@ -92,7 +92,8 @@ THEMES = {
     "bronze":          {"bg": ((92, 52, 28), (14, 8, 5)),   "panel": ((84, 46, 24), (16, 9, 5)),    "accent": (222, 146, 88),  "tag": None},
     "season1":         {"bg": ((22, 122, 86), (3, 16, 14)), "panel": ((14, 84, 56), (3, 16, 12)),   "accent": (120, 235, 160), "tag": None},
     # Season 2: royal-blue crystal backdrop -> ice-blue numbers / pills / hexagon line, dark blue panel
-    "season2":         {"bg": ((30, 80, 180), (4, 10, 32)), "panel": ((16, 36, 92), (4, 10, 32)),   "accent": (150, 215, 255), "tag": None},
+    "season2":         {"bg": ((30, 80, 180), (4, 10, 32)), "panel": ((16, 36, 92), (4, 10, 32)),   "accent": (150, 215, 255), "tag": None,
+                        "side_tag": "SEASON 2"},
     "diwali":          {"bg": ((122, 44, 18), (28, 6, 10)), "panel": ((110, 36, 16), (26, 6, 8)),   "accent": (255, 196, 70),  "tag": "DIWALI"},
     "rangoli":         {"bg": ((132, 30, 72), (26, 5, 18)), "panel": ((104, 22, 60), (22, 4, 14)),  "accent": (255, 186, 60),  "tag": "RANGOLI"},
     "prestige_diwali": {"bg": ((110, 70, 24), (24, 12, 6)), "panel": ((96, 60, 20), (20, 11, 5)),   "accent": (255, 214, 120), "tag": "PRESTIGE DIWALI"},
@@ -1136,6 +1137,35 @@ def _v2_tag(canvas, text, accent):
     _spaced(d, _q(x0 + 20 + tw / 2, y + 1), text, f, accent + (255,), 2.5)
 
 
+SIDE_TAG_BOX = (995, 757, 161)   # centre x, centre y, length: same spot as the text printed on the S2 background
+
+
+def _v2_side_tag(canvas, text):
+    """Spaced text standing on the right edge, read bottom to top (Season 2), instead of the corner pill.
+    Drawn exactly where the Season 2 card background prints it, so it never shows twice."""
+    cx, cy, length = SIDE_TAG_BOX
+    size = 34
+    for _ in range(12):                                   # fit the spaced text to the target length
+        f = _font(ci.FONT_LABEL, size)
+        sp = size * 0.3 * S
+        widths = [f.getlength(c) for c in text]
+        tw = sum(widths) + sp * (len(text) - 1)
+        if abs(tw / S - length) < 3:
+            break
+        size *= length / (tw / S)
+    th_ = int(size * 1.6 * S)
+    strip = Image.new("RGBA", (int(tw) + 8, th_), (0, 0, 0, 0))
+    shadow = strip.copy()
+    d, sd = ImageDraw.Draw(strip), ImageDraw.Draw(shadow)
+    x = 4
+    for c, w in zip(text, widths):
+        sd.text((x + 2 * S, th_ / 2 + 2 * S), c, font=f, fill=(0, 0, 0, 140), anchor="lm")
+        d.text((x, th_ / 2), c, font=f, fill=(205, 220, 240, 240), anchor="lm")
+        x += w + sp
+    strip = Image.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(2 * S)), strip).rotate(90, expand=True)
+    canvas.alpha_composite(strip, (int(cx * S - strip.width / 2), int(cy * S - strip.height / 2)))
+
+
 def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
     if not th.get("style_bg"):              # the Signature backdrop has its own light lines
         _v2_diagonals(canvas, accent)
@@ -1148,7 +1178,9 @@ def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
     else:
         if SHOW_BRAND:
             _v2_brand(canvas)
-        if th["tag"]:
+        if th.get("side_tag"):
+            _v2_side_tag(canvas, th["side_tag"])
+        elif th["tag"]:
             _v2_tag(canvas, th["tag"], accent)
         _draw_panel(canvas, card_row, role, accent, themed)
     if _is_full(card_row):
