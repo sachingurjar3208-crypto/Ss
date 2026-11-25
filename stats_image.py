@@ -106,7 +106,7 @@ def _themed_banner(theme):
     pal = match_theme.palette(style)
     base = Image.open(_BANNER).convert("RGBA")
     w, h = base.size
-    bg = match_theme.backdrop(img, (w, h), blur=5, dark=0.5, tint=pal["tint"]).convert("RGBA")
+    bg = match_theme.backdrop(img, (w, h), blur=30, dark=0.5, tint=pal["tint"]).convert("RGBA")
     # darker strip behind the stats so the numbers stay readable
     strip = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     sd = ImageDraw.Draw(strip)

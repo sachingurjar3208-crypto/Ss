@@ -67,7 +67,7 @@ def _themed_background(theme, innings: int):
     import match_theme
     style, img = theme
     pal = match_theme.palette(style)
-    bg = match_theme.backdrop(img, (W, H), blur=4, dark=0.58, tint=pal["tint"])
+    bg = match_theme.backdrop(img, (W, H), blur=16, dark=0.58, tint=pal["tint"])
     d = ImageDraw.Draw(bg, "RGBA")
     d.rectangle((0, 0, W, 64), fill=(*pal["tint"], 200))
     d.rectangle((0, 0, 8, 64), fill=pal["bat"] if innings == 1 else pal["bowl"])

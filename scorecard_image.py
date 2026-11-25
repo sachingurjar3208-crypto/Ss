@@ -67,7 +67,7 @@ def _backdrop(accent) -> Image.Image:
     if _THEME:
         import match_theme
         pal = match_theme.palette(_THEME[0])
-        im = match_theme.backdrop(_THEME[1], (W, H), blur=7, dark=0.62, tint=pal["tint"])
+        im = match_theme.backdrop(_THEME[1], (W, H), blur=30, dark=0.6, tint=pal["tint"])
     else:
         im = Image.new("RGB", (W, H))
         px = ImageDraw.Draw(im)
