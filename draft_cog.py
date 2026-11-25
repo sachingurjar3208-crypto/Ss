@@ -222,7 +222,9 @@ async def _look(event: dict | None) -> dict | None:
     bg = await asyncio.to_thread(draft_event.get_background, _ckey(event))
     if event is None:
         if bg is None:
-            return None
+            if draft_image.MAIN_THEME == "default":
+                return None
+            return {"theme": draft_image.MAIN_THEME, "title": "", "bg": None, "stamp": None}
         return {"theme": draft_image.MAIN_THEME, "title": "", "bg": bg[0], "stamp": bg[1]}
     return {
         "theme": event["theme"], "title": event["name"], "left": draft_event.fmt_left(event["seconds_left"]),
@@ -761,7 +763,7 @@ class DraftCog(commands.Cog, name="Draft"):
     )
     @app_commands.choices(
         duration=[app_commands.Choice(name=k, value=k) for k in draft_event.DURATIONS],
-        theme=[app_commands.Choice(name=t.capitalize(), value=t) for t in draft_event.THEMES],
+        theme=[app_commands.Choice(name="Season 2" if t == "season2" else t.capitalize(), value=t) for t in draft_event.THEMES],
     )
     @admin_only()
     async def draftmaker(

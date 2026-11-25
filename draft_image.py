@@ -69,10 +69,21 @@ THEMES = {
                    ticket=(150, 225, 255), hole=(6, 28, 70), card=(12, 44, 96), q=(150, 220, 255),
                    guar=(6, 26, 64), gold=(255, 214, 120), dot=(110, 160, 220),
                    bg_file="draft_winter_bg.jpg"),
+    # Season 2: royal-blue crystal picture, gold Pool A, ice-blue accents (same colours as the S2 cards)
+    "season2": dict(pool={"A": (255, 200, 90), "B": (150, 215, 255), "C": (120, 160, 255)},
+                    top=(6, 18, 70), bot=(2, 8, 38), glow=(90, 180, 255),
+                    title=WHITE, dim=(170, 200, 235), pill=(8, 26, 80), pill_line=(150, 215, 255),
+                    ticket=(150, 215, 255), hole=(6, 22, 70), card=(10, 32, 92), q=(150, 215, 255),
+                    guar=(5, 20, 62), gold=(255, 206, 96), dot=(100, 140, 210),
+                    btn=(236, 244, 255), btn_off=(120, 140, 180), btn_text=(8, 28, 80), btn_ticket=(20, 90, 200),
+                    style="gold", bg_file="draft_season2_bg.jpg",
+                    plate_dark=[(22, 52, 130), (10, 28, 82), (5, 16, 54)], plate_line=(150, 215, 255),
+                    plate_glow=(70, 160, 255)),
 }
 
-# Theme of the NORMAL draft when it has a custom background (/draftbg). "default" = the blue look.
-MAIN_THEME = "season1"
+# Theme of the NORMAL draft. With a custom background (/draftbg) only the colours are used,
+# without one the theme's own picture shows (season2 = blue crystals). "default" = the old blue look.
+MAIN_THEME = "season2"
 
 
 def theme_of(look: dict | None) -> dict:
@@ -322,7 +333,8 @@ def _base_screen(pool: str, page: int, cards: list, c_range: tuple[int, int], od
             sub = f"RANDOM CARD  {c_range[0]} TO {c_range[1]} OVR"
         dg.fancy_text(img, (1222, 218), POOL_NAMES[pool], _NUM, 128, stops=dg.POOL_STOPS[pool], anchor="rm",
                       outline=dg.POOL_INK[pool], outline_w=4, glow=tuple(min(255, c) for c in col))
-        dg.plate(img, (760, 268, 1230, 318), stops=dg.DARK, border=(110, 235, 170), slant=22, glow=(40, 200, 130))
+        dg.plate(img, (760, 268, 1230, 318), stops=th.get("plate_dark", dg.DARK), border=th.get("plate_line", (110, 235, 170)),
+                 slant=22, glow=th.get("plate_glow", (40, 200, 130)))
         dg.fancy_text(img, (995, 293), sub, _NUM, 34, stops=[(255, 255, 255), (210, 235, 225)],
                       outline=(4, 30, 22), outline_w=2, shadow=False)
         d = ImageDraw.Draw(img)
@@ -392,12 +404,13 @@ def _gold_dynamic(base, th, vouchers, left, cost_one, cost_multi, multi):
     d = ImageDraw.Draw(base)
     nf = _f(_NUM, 44)
     tw = d.textlength(f"{vouchers:,}", font=nf)
-    dg.plate(base, (int(1230 - tw - 120), 30, 1230, 92), stops=dg.DARK, border=(255, 214, 110), slant=14)
+    dg.plate(base, (int(1230 - tw - 120), 30, 1230, 92), stops=th.get("plate_dark", dg.DARK), border=(255, 214, 110), slant=14)
     d = ImageDraw.Draw(base)
     _ticket(d, int(1230 - tw - 92), 47, 28, (120, 200, 255), (6, 44, 34))
     d.text((1208, 61), f"{vouchers:,}", font=nf, fill=WHITE, anchor="rm")
 
-    dg.plate(base, (640, 466, 1230, 528), stops=dg.DARK, border=(110, 235, 170), slant=20, glow=(40, 200, 130))
+    dg.plate(base, (640, 466, 1230, 528), stops=th.get("plate_dark", dg.DARK), border=th.get("plate_line", (110, 235, 170)),
+             slant=20, glow=th.get("plate_glow", (40, 200, 130)))
     dg.plate(base, (640, 466, 812, 528), stops=dg.GOLD, border=(255, 236, 170), slant=20)
     dg.fancy_text(base, (724, 497), "POOL A", _NUM, 34, stops=[(60, 34, 4)] * 2, outline_w=0, shadow=False)
     dg.fancy_text(base, (830, 497), "Guaranteed in:", _NUM, 32, stops=[(255, 255, 255), (215, 235, 225)],
