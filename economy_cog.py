@@ -356,6 +356,7 @@ async def _send_buysell(ctx: commands.Context, card, text: str, action: Callable
 
 
 LOCKED_CARD_TEXT = "🔒 This card isn't sold in the shop"
+MARKET_OFF_TEXT = "The market is currently unavailable"
 
 
 class BuySellView(OwnedView):
@@ -402,7 +403,9 @@ class BuySellView(OwnedView):
 
 def _buy_text(card) -> str:
     text = f"**Price:** `{sl.buy_price(card):,}` {emojis.COIN}"
-    if not card_db.is_obtainable(card):
+    if not market_switch.is_open():
+        text += "\n" + MARKET_OFF_TEXT
+    elif not card_db.is_obtainable(card):
         text += "\n" + LOCKED_CARD_TEXT
     return text
 
