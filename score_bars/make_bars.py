@@ -64,12 +64,12 @@ WK_SM_C=text_img(WORD,30,CYAN); WK_SM_W=text_img(WORD,30,WHITE)
 
 def frame(i):
     t=i/FPS
-    canvas=Image.new('RGBA',(W*S,H*S),(14,12,28,255))
+    canvas=Image.new('RGBA',(W*S,H*S),(0,0,0,0))
     cd=ImageDraw.Draw(canvas,'RGBA')
     # soft glow behind the bar
     open_=ease(prog(t,0.0,0.35)); close=ease(prog(t,DUR-0.3,DUR))
     vis=open_*(1-close)
-    if vis<=0: return canvas.resize((W,H),Image.LANCZOS).convert('RGB')
+    if vis<=0: return canvas.resize((W,H),Image.LANCZOS)
     bar=BAR.copy().convert('RGBA'); bd=ImageDraw.Draw(bar,'RGBA')
     # ---- content inside the bar ----
     cy=BH//2
@@ -126,28 +126,49 @@ def frame(i):
     m=Image.new('L',(BW,BH),0); ImageDraw.Draw(m).rounded_rectangle([x0,0,x0+w_now,BH],radius=10*S,fill=255)
     bar.putalpha(m)
     gl=Image.new('L',canvas.size,0); ImageDraw.Draw(gl).rounded_rectangle([BX0*S+x0,BY0*S,BX0*S+x0+w_now,BY1*S],radius=14*S,fill=int(140*vis))
-    gl=gl.filter(ImageFilter.GaussianBlur(16*S)); g2=Image.new('RGBA',canvas.size,(120,60,255,0)); g2.putalpha(gl); canvas.alpha_composite(g2)
+    pass
     # end caps (small dark tabs) like a score bug
     for xx in (BX0-34, BX1+6):
         cd.rounded_rectangle([xx*S,(BY0+12)*S,(xx+28)*S,(BY1-12)*S],radius=6*S,fill=(40,36,70,int(255*vis)),outline=(120,100,200,int(200*vis)),width=S)
     canvas.alpha_composite(bar,(BX0*S,BY0*S))
-    return canvas.resize((W,H),Image.LANCZOS).convert('RGB')
+    return canvas.resize((W,H),Image.LANCZOS)
+
+CROP=(BX0-38, BY0-2, BX1+38, BY1+2)
+
+def to_gif_frames(frames):
+    cw,ch=CROP[2]-CROP[0],CROP[3]-CROP[1]
+    fr=[f.crop(CROP) for f in frames]
+    bg=(24,20,44)
+    flat=[]
+    for f in fr:
+        b=Image.new('RGB',f.size,bg); b.paste(f,(0,0),f); flat.append(b)
+    big=Image.new('RGB',(cw,ch*8))
+    for k in range(8): big.paste(flat[int(k*len(flat)/8)],(0,k*ch))
+    pal=big.quantize(colors=200,method=Image.MEDIANCUT)
+    out=[]
+    for f,fl in zip(fr,flat):
+        q=fl.quantize(palette=pal,dither=Image.Dither.NONE)
+        pv=q.getpalette()[:600]+[0,0,0]*55+[0,255,0]
+        q.putpalette(pv)
+        mask=f.getchannel('A').point(lambda v:255 if v<110 else 0)
+        q.paste(255,(0,0),mask)
+        q.info['transparency']=255
+        out.append(q)
+    return out
 
 if __name__=='__main__':
     mode=sys.argv[1]
     if mode=='sheet':
         ts=[0.2,0.5,0.95,1.3,1.85,2.2,2.7,3.2]
         sh=Image.new('RGB',(W,H*len(ts)))
-        for k,tt in enumerate(ts): sh.paste(frame(int(tt*FPS)),(0,k*H))
+        for k,tt in enumerate(ts): fr=frame(int(tt*FPS)); b=Image.new('RGB',(W,H),(54,57,63)); b.paste(fr,(0,0),fr); sh.paste(b,(0,k*H))
         sh.save(f'{OUT}_sheet.png')
     else:
         frames=[frame(i) for i in range(N)]
         # shared palette GIF
-        big=Image.new('RGB',(W,H*8)); 
-        for k in range(8): big.paste(frames[int(k*N/8)],(0,k*H))
-        pal=big.quantize(colors=200,method=Image.MEDIANCUT)
-        q=[f.quantize(palette=pal,dither=Image.Dither.NONE) for f in frames]
-        q[0].save(f'{OUT}.gif',save_all=True,append_images=q[1:],duration=int(1000/FPS),loop=0,optimize=False,disposal=1)
+        q=to_gif_frames(frames)
+        q[0].save(f'{OUT}.gif',save_all=True,append_images=q[1:],duration=int(1000/FPS),loop=0,optimize=False,disposal=2,transparency=255)
+        frames=[Image.alpha_composite(Image.new('RGBA',f.size,(14,12,28,255)),f).convert('RGB') for f in frames]
         p=subprocess.Popen(['ffmpeg','-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s',f'{W}x{H}','-r',str(FPS),'-i','-','-vf','scale=1000:150','-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',f'{OUT}.mp4'],stdin=subprocess.PIPE)
         for f in frames: p.stdin.write(f.tobytes())
         p.stdin.close(); p.wait(); print('done')
