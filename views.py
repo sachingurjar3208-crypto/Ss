@@ -1,5 +1,6 @@
 import asyncio
 import io
+from pathlib import Path
 import os
 import random
 
@@ -1832,6 +1833,11 @@ async def _process_delivery(
             if ump_gif:
                 gif_urls.append(ump_gif)
 
+    # FOUR / SIX / WICKET score-bar animation right after the ball (first in the queue).
+    _bar = {"4": "four", "6": "six", "W": "wicket"}.get(outcome)
+    if _bar and SCORE_BAR_GIFS:
+        gif_urls.insert(0, f"bar:{_bar}")
+
     # Memorable moments: playstyle line, milestone / hat-trick / 5-wicket banners, chase pressure.
     # (Cosmetic only — moments.py never changes the score and never raises.)
     _mom = _moments.after_ball(
@@ -2091,8 +2097,34 @@ UMPIRE_BANNER = True   # False = go back to the GIF links saved in the umpire_me
 MATCH_ANIMATIONS = False
 
 
+# FOUR / SIX / WICKET score-bar animations (score_bars/*.gif, made by score_bars/make_bars.py).
+# Shown right after a four, a six or a wicket (a wicket only once DRS has kept it OUT). False = off.
+SCORE_BAR_GIFS = True
+_SCORE_BAR_DIR = Path(__file__).resolve().parent / "score_bars"
+_score_bar_bytes: dict = {}
+
+
+def _score_bar_file(kind: str):
+    if kind not in ("four", "six", "wicket"):
+        return None
+    data = _score_bar_bytes.get(kind)
+    if data is None:
+        data = (_SCORE_BAR_DIR / f"{kind}.gif").read_bytes()
+        _score_bar_bytes[kind] = data
+    return discord.File(io.BytesIO(data), filename=f"{kind}.gif")
+
+
 async def _send_gif_item(channel, item: str) -> None:
-    """gif_urls holds plain URLs, or "umpire:<event>" for the generated umpire banner."""
+    """gif_urls holds plain URLs, "umpire:<event>" for the generated umpire banner,
+    or "bar:<four|six|wicket>" for the score-bar animation."""
+    if item.startswith("bar:"):
+        try:
+            f = _score_bar_file(item[4:])
+            if f is not None:
+                await channel.send(file=f)
+        except Exception as e:
+            print(f"[score bar] skipped ({type(e).__name__}: {e})")
+        return
     if not MATCH_ANIMATIONS and (item.startswith("moment:") or item.startswith("umpire:")):
         return                       # generated animations are switched off
     if item.startswith("moment:"):   # milestone / hat-trick / maiden / 5-wicket banner
