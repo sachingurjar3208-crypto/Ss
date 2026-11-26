@@ -59,7 +59,10 @@ def _ordinal(n: int) -> str:
 
 
 def short_name(name: str) -> str:
-    """'Virat Kohli' -> 'Kohli', 'AB de Villiers' -> 'de Villiers'."""
+    """'Virat Kohli' -> 'Kohli', 'AB de Villiers' -> 'de Villiers'.
+    A card tag in brackets is dropped first: 'Litton Das (S2)' -> 'Das'."""
+    import re
+    name = re.sub(r"\s*\([^)]*\)?\s*$", "", str(name or "")).strip() or str(name or "")
     parts = str(name or "").split()
     if len(parts) <= 1:
         return str(name or "")

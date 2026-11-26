@@ -29,7 +29,10 @@ def _pname(p) -> str:
 
 
 def _short(name: str) -> str:
-    """Surname for the dismissal text ('Virat Kohli' -> 'Kohli', 'AB de Villiers' -> 'de Villiers')."""
+    """Surname for the dismissal text ('Virat Kohli' -> 'Kohli', 'AB de Villiers' -> 'de Villiers').
+    A card tag in brackets is dropped first: 'Litton Das (S2)' -> 'Das'."""
+    import re
+    name = re.sub(r"\s*\([^)]*\)?\s*$", "", name).strip() or name
     parts = name.split()
     if len(parts) >= 3 and parts[-2].lower() in ("de", "van", "du", "ul", "al"):
         return " ".join(parts[-2:])
