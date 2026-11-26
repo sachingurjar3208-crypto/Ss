@@ -86,16 +86,24 @@ _PURPLE = dict(GOLD=GOLD, GOLD_HI=GOLD_HI, WHITE=WHITE, DIM=DIM, TILE=TILE, TILE
                sub="SIGNATURE EDITION", pic=None)
 _EOAE = dict(GOLD=(255, 196, 104), GOLD_HI=(255, 230, 170), WHITE=(250, 240, 226), DIM=(214, 182, 140),
              TILE=(44, 28, 14), TILE_LINE=(170, 116, 52), sub="END OF AN ERA", pic="sigbox_eoae_bg.jpg")
+_BDAY = dict(GOLD=(255, 210, 120), GOLD_HI=(255, 238, 180), WHITE=(255, 244, 252), DIM=(236, 190, 240),
+             TILE=(46, 14, 66), TILE_LINE=(236, 120, 226), sub="BIRTHDAY SPECIAL", pic="sigbox_birthday_bg.jpg",
+             dark=(28, 6, 44), card_word="Signature card")
 _THEME = _PURPLE
 
 
 def _set_theme(box) -> None:
-    """End of an Era look when the box name says so ("era" / "eoae"), else the normal purple."""
+    """Look by box name: "birthday" / "bday" = birthday special, "era" / "eoae" = End of an Era, else purple."""
     global _THEME, GOLD, GOLD_HI, WHITE, DIM, TILE, TILE_LINE
     name = str((box or {}).get("name", "")).lower()
-    _THEME = _EOAE if ("era" in name or "eoae" in name) else _PURPLE
+    _THEME = (_BDAY if ("birthday" in name or "bday" in name)
+              else _EOAE if ("era" in name or "eoae" in name) else _PURPLE)
     GOLD, GOLD_HI, WHITE, DIM = _THEME["GOLD"], _THEME["GOLD_HI"], _THEME["WHITE"], _THEME["DIM"]
     TILE, TILE_LINE = _THEME["TILE"], _THEME["TILE_LINE"]
+
+
+def _dark():
+    return _THEME.get("dark", (14, 10, 28) if _THEME is _PURPLE else (24, 15, 8))
 
 
 def _background() -> Image.Image:
@@ -186,7 +194,7 @@ def _draw_card(img: Image.Image, board: dict, cards: dict) -> None:
     if card is None:                                  # no image yet: a gold placeholder
         d = ImageDraw.Draw(img)
         d.rounded_rectangle((x0, y0, x1, y1), 22, fill=(70, 48, 20), outline=GOLD, width=4)
-        d.text(((x0 + x1) / 2, (y0 + y1) / 2), "SIGNATURE" if _THEME is _PURPLE else "LEGEND",
+        d.text(((x0 + x1) / 2, (y0 + y1) / 2), "LEGEND" if _THEME is _EOAE else "SIGNATURE",
                font=_f(_NUM, 40), fill=GOLD, anchor="mm")
     else:
         cx = (W - card.width) // 2
@@ -228,7 +236,7 @@ def _base(board: dict, cards: dict) -> Image.Image:
     f = _f(_NUM, 26)
     bw = d.textlength(bal, font=f) + 66
     bx1 = W - SIDE_X
-    d.rounded_rectangle((bx1 - bw, 28, bx1, 72), 22, fill=(14, 10, 28) if _THEME is _PURPLE else (24, 15, 8),
+    d.rounded_rectangle((bx1 - bw, 28, bx1, 72), 22, fill=_dark(),
                         outline=TILE_LINE, width=2)
     gx, gy = bx1 - bw + 28, 50
     d.polygon([(gx, gy - 13), (gx + 11, gy - 3), (gx, gy + 13), (gx - 11, gy - 3)], fill=(70, 200, 220))
@@ -241,10 +249,10 @@ def _base(board: dict, cards: dict) -> Image.Image:
 
     # info panel: progress + next spin
     px0, px1 = SIDE_X, W - SIDE_X
-    dark = (14, 10, 28) if _THEME is _PURPLE else (24, 15, 8)
+    dark = _dark()
     d.rounded_rectangle((px0, PANEL_Y, px1, PANEL_Y + 80), 16, fill=dark, outline=TILE_LINE, width=2)
     d.text((px0 + 24, PANEL_Y + 24), "Every reward drops once  ·  "
-           + ("Signature card" if _THEME is _PURPLE else "Legend card") + " guaranteed by spin 10",
+           + _THEME.get("card_word", "Signature card" if _THEME is _PURPLE else "Legend card") + " guaranteed by spin 10",
            font=_f(_LAB, 20), fill=WHITE, anchor="lm")
     bx0, bx1_, by = px0 + 24, px0 + 640, PANEL_Y + 56
     spins = board["spins"]
