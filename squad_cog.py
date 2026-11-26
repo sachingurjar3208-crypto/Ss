@@ -940,8 +940,8 @@ class SquadCog(commands.Cog, name="Squad"):
             await ctx.send(f"🛑 Autoplay **OFF** for {ctx.author.mention}. You are back in control.")
             return
         limit_note = ""
-        if getattr(game, "ranked", False):                     # ranked: 10 matches a day, normal: unlimited
-            import autoplay_limit
+        import autoplay_limit
+        if getattr(game, "ranked", False) and autoplay_limit.RANKED_AUTOPLAY_PER_DAY > 0:   # 0 = unlimited
             counted = game.__dict__.setdefault("_ap_counted", set())
             if ctx.author.id not in counted:
                 ok, left = await asyncio.to_thread(autoplay_limit.try_use, ctx.author.id)

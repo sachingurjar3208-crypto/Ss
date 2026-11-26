@@ -7,7 +7,7 @@ import time
 
 import economy
 
-RANKED_AUTOPLAY_PER_DAY = 10
+RANKED_AUTOPLAY_PER_DAY = 0      # 0 = unlimited (no daily limit in ranked)
 
 
 def _day() -> str:
