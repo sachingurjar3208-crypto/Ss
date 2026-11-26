@@ -939,12 +939,24 @@ class SquadCog(commands.Cog, name="Squad"):
             ids.discard(ctx.author.id)
             await ctx.send(f"🛑 Autoplay **OFF** for {ctx.author.mention}. You are back in control.")
             return
+        limit_note = ""
+        if getattr(game, "ranked", False):                     # ranked: 10 matches a day, normal: unlimited
+            import autoplay_limit
+            counted = game.__dict__.setdefault("_ap_counted", set())
+            if ctx.author.id not in counted:
+                ok, left = await asyncio.to_thread(autoplay_limit.try_use, ctx.author.id)
+                if not ok:
+                    await ctx.send(f"❌ You have used autoplay in **{autoplay_limit.RANKED_AUTOPLAY_PER_DAY}** ranked "
+                                   f"matches today. It resets at midnight (IST). Normal matches have no limit.")
+                    return
+                counted.add(ctx.author.id)
+                limit_note = f"\nRanked autoplay left today: **{left}/{autoplay_limit.RANKED_AUTOPLAY_PER_DAY}**."
         ids.add(ctx.author.id)
         both = all(getattr(p, "id", None) in ids for p in players if p is not None)
         note = "Both sides are on autoplay — the match will run by itself." if both else "The other side still plays manually."
         await ctx.send(
             f"🤖 Autoplay **ON** for {ctx.author.mention}. Bowler, batter, deliveries and shots are chosen for you. "
-            f"{note}\nType `rcautoplay` again to take control back."
+            f"{note}\nType `rcautoplay` again to take control back.{limit_note}"
         )
         autoplay_kick(game)
 

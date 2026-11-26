@@ -378,6 +378,62 @@ def _fill(line: str, **kw) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Rare special moments: these lines appear ONLY for the biggest moments, so they feel special.
+#   * monster six (100 m+), a small random share of sixes
+#   * the third wicket of a hat-trick
+#   * the chase won off the very last ball / the last ball defended
+# (No line here may contain stump / caught / catch / lbw / plumb / in front, see module doc.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MONSTER_SIX_CHANCE = 0.10          # share of sixes that become a 100 m+ monster
+MONSTER_SIX_GOOD_SHOT = 0.18       # ... when it was the right shot for that ball
+
+SPECIAL_HEADLINES = {
+    "monster": ["MONSTER HIT! **{m}m SIX**", "OUT OF THE STADIUM! **{m}m SIX**", "INTO ORBIT! **{m}m SIX**",
+                "THAT'S GONE MILES! **{m}m SIX**"],
+    "hattrick": ["HAT-TRICK! **OUT**", "THREE IN THREE! **OUT**", "HISTORY! **HAT-TRICK**"],
+    "last_win": ["OFF THE LAST BALL! **{tag}**", "WON IT ON THE LAST BALL! **{tag}**", "WHAT A FINISH! **{tag}**"],
+    "last_save": ["HELD HIS NERVE! **{tag}**", "DEFENDED OFF THE LAST BALL! **{tag}**"],
+}
+SPECIAL_LINES = {
+    "monster": ["{b} has sent that one onto the roof.", "The crowd will be looking for that ball for a while.",
+                "Pure timing and pure power from {b}.", "One of the biggest hits you will ever see."],
+    "hattrick": ["Three wickets in three balls for {bw}. Take a bow.", "{bw} has done it. A hat-trick to remember.",
+                 "The whole team mobs {bw}. Three in three."],
+    "last_win": ["{b} wins it with the final ball of the match.", "Nerves of steel from {b} on the last ball.",
+                 "Down to the last ball, and {b} delivers."],
+    "last_save": ["{bw} keeps his cool and wins it on the last ball.", "Last ball, and {bw} gets it just right."],
+}
+
+
+def _special(game, outcome: str, shot_quality, bowler: str):
+    """(kind, extra) for a rare special moment on this ball, or (None, {})."""
+    if game is None or outcome in ("Wd", "NB", "NB+1"):
+        return None, {}
+    try:
+        if outcome == "W":
+            streak = game.__dict__.get("hattrick_streak", {}).get(f"{game.innings}:{bowler}", 0)
+            if streak == 2:
+                return "hattrick", {}
+        if game.innings == 2:
+            needed = game.runs[0] + 1 - game.runs[1]
+            balls_left = game.overs * 6 - game.current_legal_balls
+            if balls_left == 1 and needed > 0:
+                runs_in = {"1": 1, "2": 2, "3": 3, "4": 4, "6": 6}.get(outcome, 0)
+                if runs_in >= needed:
+                    return "last_win", {}
+                if runs_in < needed - 1:           # not even a tie: the bowler defended it
+                    return "last_save", {}
+        if outcome == "6":
+            chance = MONSTER_SIX_GOOD_SHOT if shot_quality == "good" else MONSTER_SIX_CHANCE
+            if random.random() < chance:
+                return "monster", {"m": random.randint(100, 112)}
+    except Exception:
+        pass
+    return None, {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Situation line (at most one per ball)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -588,6 +644,10 @@ def build_ball_commentary(
         body.append(SUBTEXT + _esc(clean(situation)))
 
     headline = _pick(game, HEADLINES[outcome]) if (outcome in HEADLINES and HEADLINE_BIG) else None
+    sp, sp_kw = _special(game, outcome, shot_quality, bowler_name)
+    if sp and HEADLINE_BIG:                 # rare moment: its own headline + line instead of the situation line
+        headline = _fill(random.choice(SPECIAL_HEADLINES[sp]), tag=tag, **sp_kw)
+        body = [text, SUBTEXT + _esc(clean(_fill(_pick(game, SPECIAL_LINES[sp]), **kw)))]
     header = _header(game, bowler_name, batsman_name, None if headline else tag)
     block = _render(header, body, headline)
 

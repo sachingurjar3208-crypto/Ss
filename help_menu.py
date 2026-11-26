@@ -75,7 +75,7 @@ TOPICS: dict[str, tuple[str, str, list[tuple]]] = {
         ("Challenge", "rcmp @user <overs>", "Challenge a player. Overs can be 1 to 20, default is 5.", "rcmp"),
         ("Cancel", "rccancel", "End the match running in this channel. Either player or a moderator can use it."),
         ("Resume", "rcresume", "Re-send the current prompt if your match looks stuck."),
-        ("Auto Play", "rcautoplay", "Premium only. The bot plays your side for you. Use it again to switch it off."),
+        ("Auto Play", "rcautoplay", "Premium only. The bot plays your side for you. Use it again to switch it off. Ranked: 10 matches a day."),
         ("Bowling", "Line + Power", "Pick a line first (Wide Off, Off, Stumps, Pads, Wide Leg), then the power (Slow, Medium, Fast, MAX). The batter can't see your line. MAX is fastest but can be a no-ball.", "bowling"),
         ("Batting", "Direction + Shot", "Pick a direction first (Off Side, Straight, Leg Side, Behind), then the shot: Drive = fours, Loft = sixes but risky, Flick = safe singles, Block = defend. Guess the bowler's line for more runs.", "batting"),
     ]),
