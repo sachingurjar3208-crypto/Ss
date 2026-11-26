@@ -94,8 +94,8 @@ THEMES = {
     # Season 2: royal-blue crystal backdrop -> ice-blue numbers / pills / hexagon line, dark blue panel
     "season2":         {"bg": ((30, 80, 180), (4, 10, 32)), "panel": ((16, 36, 92), (4, 10, 32)),   "accent": (150, 215, 255), "tag": None,
                         "side_tag": "SEASON 2"},
-    # Birthday special: purple-pink celebration backdrop, pink numbers / pills, deep purple panel
-    "birthday":        {"bg": ((185, 60, 205), (26, 4, 52)), "panel": ((70, 16, 100), (18, 3, 36)), "accent": (255, 160, 235),
+    # Birthday special: navy splash backdrop, gold numbers / pills, dark navy panel
+    "birthday":        {"bg": ((18, 30, 70), (4, 6, 16)), "panel": ((14, 30, 80), (4, 8, 22)), "accent": (255, 196, 90),
                         "tag": "BIRTHDAY SPECIAL"},
     "diwali":          {"bg": ((122, 44, 18), (28, 6, 10)), "panel": ((110, 36, 16), (26, 6, 8)),   "accent": (255, 196, 70),  "tag": "DIWALI"},
     "rangoli":         {"bg": ((132, 30, 72), (26, 5, 18)), "panel": ((104, 22, 60), (22, 4, 14)),  "accent": (255, 186, 60),  "tag": "RANGOLI"},
