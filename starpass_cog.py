@@ -64,11 +64,18 @@ _cooldowns = commands.CooldownMapping.from_cooldown(1, starpass.RCSTARPASS_COOLD
 
 
 def _has_star_role(member) -> bool:
+    import premium_whitelist
+    if premium_whitelist.whitelisted(getattr(member, "id", None)):
+        return True
     return any(r.id == starpass.STARPASS_PREMIUM_ROLE_ID for r in getattr(member, "roles", []))
 
 
 def _pass_premium(member, season: dict | None = None) -> bool:
-    """Star Pass Premium benefits: ONLY the Premium role of that pass (default: the Star Pass role)."""
+    """Star Pass Premium benefits: ONLY the Premium role of that pass (default: the Star Pass role),
+    or a user in premium_whitelist."""
+    import premium_whitelist
+    if premium_whitelist.whitelisted(getattr(member, "id", None)):
+        return True
     role_id = season["premium_role"] if season else starpass.STARPASS_PREMIUM_ROLE_ID
     return any(r.id == role_id for r in getattr(member, "roles", []))
 

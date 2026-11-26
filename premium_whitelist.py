@@ -1,7 +1,8 @@
-"""Users who get every bot Premium perk WITHOUT the Premium role (e.g. a bot-list reviewer testing
+"""Users who get every bot Premium perk AND Star Pass Premium WITHOUT the roles (e.g. a bot-list reviewer testing
 the bot in their own server, where the role can't exist). Add or remove IDs here, then restart."""
 PREMIUM_USER_IDS = {
     333949691962195969,   # Top.gg Verification Center (bot review)
+    401058073231491082,   # Top.gg reviewer
 }
 
 
