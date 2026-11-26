@@ -1,15 +1,23 @@
+"""Score-bar GIFs (four / six / wicket). HOW TO REMAKE (run inside score_bars/):
+  WORD=FOUR   OUT=four   ACC=255,225,80 BARD=8,28,105 BARM=24,84,205 EDGE=130,200,255 STREAK=140,220,255 python3 make_bars.py full
+  WORD=SIX    OUT=six    ACC=20,30,100  BARD=105,45,0 BARM=212,128,8 EDGE=255,215,110 STREAK=255,245,180 python3 make_bars.py full
+  WORD=WICKET OUT=wicket ACC=255,225,80 BARD=95,0,12  BARM=195,20,36 EDGE=255,120,120 STREAK=255,170,90  python3 make_bars.py full
+"""
 import math, sys, subprocess
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
 F=str(__import__('pathlib').Path(__file__).resolve().parent.parent)+'/'
 S=2                                   # supersample
 W,H=1000,150                          # output size
-BX0,BX1,BY0,BY1=60,940,40,110         # the bar
+BX0,BX1,BY0,BY1=0,1000,40,110          # the bar: full width
 FPS=20; DUR=3.4; N=int(FPS*DUR)
 import os
 WORD=os.environ.get('WORD','WICKET')
 CYAN=tuple(int(x) for x in os.environ.get('ACC','80,240,255').split(','))
 WHITE=(245,248,255); PINK=tuple(int(x) for x in os.environ.get('STREAK','255,90,220').split(','))
 OUT=os.environ.get('OUT','wicket_bar')
+BAR_DARK=tuple(int(x) for x in os.environ.get('BARD','40,12,90').split(','))
+BAR_MID=tuple(int(x) for x in os.environ.get('BARM','90,22,160').split(','))
+EDGE=tuple(int(x) for x in os.environ.get('EDGE','160,120,255').split(','))
 font=lambda sz: ImageFont.truetype(F+'label.ttf', sz*S)
 def ease(t): t=max(0,min(1,t)); return 1-(1-t)**3
 def prog(t,a,b): return max(0,min(1,(t-a)/(b-a)))
@@ -21,11 +29,12 @@ def bar_base():
     for x in range(w):
         u=x/w
         # deep indigo -> violet -> indigo, like a broadcast bar
-        c=(int(40+50*math.sin(u*math.pi)), int(12+10*math.sin(u*math.pi)), int(90+70*math.sin(u*math.pi*0.9+0.2)))
+        k=math.sin(u*math.pi)
+        c=tuple(int(BAR_DARK[i]+(BAR_MID[i]-BAR_DARK[i])*k) for i in range(3))
         for y in range(h): px[x,y]=c
     d=ImageDraw.Draw(g,'RGBA')
     d.rectangle([0,0,w,int(h*0.45)],fill=(255,255,255,18))            # gloss
-    d.line([(0,0),(w,0)],fill=(160,120,255,200),width=2*S); d.line([(0,h-1),(w,h-1)],fill=(20,0,60,255),width=2*S)
+    d.line([(0,0),(w,0)],fill=EDGE+(200,),width=2*S); d.line([(0,h-1),(w,h-1)],fill=(20,0,60,255),width=2*S)
     return g
 BAR=bar_base()
 BW,BH=BAR.size
@@ -34,12 +43,13 @@ def text_img(txt,sz,fill,spacing=0):
     f=font(sz); ws=[f.getlength(c) for c in txt]; tw=int(sum(ws)+spacing*S*(len(txt)-1))+4*S
     im=Image.new('RGBA',(tw,int(sz*1.4*S)),(0,0,0,0)); d=ImageDraw.Draw(im); x=2*S
     for c,w_ in zip(txt,ws):
-        d.text((x,im.height/2),c,font=f,fill=fill,anchor='lm'); x+=w_+spacing*S
+        d.text((x+2*S,im.height/2+3*S),c,font=f,fill=(0,0,0,150),anchor='lm')
+        d.text((x,im.height/2),c,font=f,fill=fill,anchor='lm',stroke_width=S,stroke_fill=(0,0,0,90)); x+=w_+spacing*S
     return im
 
 def glow(im,col,r=6):
     a=im.getchannel('A').filter(ImageFilter.GaussianBlur(r*S))
-    g=Image.new('RGBA',im.size,col+(0,)); g.putalpha(a.point(lambda v:int(v*0.9)))
+    g=Image.new('RGBA',im.size,(0,0,0,0)); g.putalpha(a.point(lambda v:int(v*0.55)))
     out=Image.new('RGBA',im.size,(0,0,0,0)); out.alpha_composite(g); out.alpha_composite(im); return out
 
 def mblur(im,amount):
@@ -123,17 +133,14 @@ def frame(i):
             pk=Image.new('RGBA',(BW,BH),PINK+(0,)); pk.putalpha(st); bar.alpha_composite(pk)
     # rounded bar mask, opening from the centre
     w_now=int(BW*vis); x0=(BW-w_now)//2
-    m=Image.new('L',(BW,BH),0); ImageDraw.Draw(m).rounded_rectangle([x0,0,x0+w_now,BH],radius=10*S,fill=255)
+    m=Image.new('L',(BW,BH),0); ImageDraw.Draw(m).rounded_rectangle([x0,0,x0+w_now,BH],radius=6*S,fill=255)
     bar.putalpha(m)
     gl=Image.new('L',canvas.size,0); ImageDraw.Draw(gl).rounded_rectangle([BX0*S+x0,BY0*S,BX0*S+x0+w_now,BY1*S],radius=14*S,fill=int(140*vis))
     pass
-    # end caps (small dark tabs) like a score bug
-    for xx in (BX0-34, BX1+6):
-        cd.rounded_rectangle([xx*S,(BY0+12)*S,(xx+28)*S,(BY1-12)*S],radius=6*S,fill=(40,36,70,int(255*vis)),outline=(120,100,200,int(200*vis)),width=S)
     canvas.alpha_composite(bar,(BX0*S,BY0*S))
     return canvas.resize((W,H),Image.LANCZOS)
 
-CROP=(BX0-38, BY0-2, BX1+38, BY1+2)
+CROP=(BX0, BY0, BX1, BY1)
 
 def to_gif_frames(frames):
     cw,ch=CROP[2]-CROP[0],CROP[3]-CROP[1]
