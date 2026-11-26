@@ -200,6 +200,9 @@ class SummaryThemeCog(commands.Cog, name="SummaryTheme"):
     # ── Premium = every theme unlocked (kept in summary_theme._PREMIUM) ──────
     @staticmethod
     def _has_role(member) -> bool:
+        import premium_whitelist
+        if premium_whitelist.whitelisted(getattr(member, "id", None)):
+            return True
         return any(r.id == PREMIUM_ROLE_ID for r in getattr(member, "roles", []))
 
     async def sync_premium(self, user) -> None:

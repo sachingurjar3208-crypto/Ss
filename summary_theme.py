@@ -35,6 +35,9 @@ def set_premium(user_id, value: bool) -> None:
 
 
 def is_premium(user_id) -> bool:
+    import premium_whitelist
+    if premium_whitelist.whitelisted(user_id):
+        return True
     return _PREMIUM.get(int(user_id), False)
 
 

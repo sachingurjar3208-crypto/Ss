@@ -40,6 +40,9 @@ PREMIUM_ROLE_ID = 1556957776415035423
 
 
 def _is_premium(member) -> bool:
+    import premium_whitelist
+    if premium_whitelist.whitelisted(getattr(member, "id", None)):
+        return True
     return any(r.id == PREMIUM_ROLE_ID for r in getattr(member, "roles", []))
 
 
