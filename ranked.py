@@ -64,22 +64,23 @@ TIER_BY_NAME = {t["name"]: t for t in TIERS}
 # One-time reward the first time a tier is reached in a season.
 # "card": (min ovr, max ovr) of the random card.
 TIER_UP_REWARDS = {
-    "Silver":    {"vouchers": 5,  "card": (86, 90)},
-    "Gold":      {"vouchers": 10, "card": (88, 91)},
-    "Platinum":  {"vouchers": 15, "card": (90, 93)},
-    "Legendary": {"vouchers": 25, "card": (94, 97)},
-    "Ruby":      {"vouchers": 40, "card": (97, 99)},
+    "Silver":    {"vouchers": 3,  "coins": 100_000},
+    "Gold":      {"vouchers": 5,  "card": (85, 88)},
+    "Platinum":  {"vouchers": 8,  "card": (88, 91)},
+    "Legendary": {"vouchers": 12, "card": (91, 94)},
+    "Ruby":      {"vouchers": 20, "card": (94, 96)},
 }
 
 # Paid at the monthly reset, by the tier the player finished the season in.
+# "min_stars": the reward is only paid with at least this many stars (default: more than 0).
 SEASON_REWARDS = {
-    "Ruby":      {"vouchers": 100, "packs": {"legendary": 1}},
+    "Ruby":      {"vouchers": 40, "card": (97, 99), "packs": {"legendary": 1}},
     # "weights": relative chance per OVR inside the range (missing OVR = 1.0). Not shown to players.
-    "Legendary": {"vouchers": 50, "card": (95, 99), "weights": {98: 0.25, 99: 0.1}},
-    "Platinum":  {"vouchers": 30, "card": (90, 93)},
-    "Gold":      {"vouchers": 20, "card": (87, 90)},
-    "Silver":    {"vouchers": 10, "card": (85, 87)},
-    "Bronze":    {"coins": 200_000},
+    "Legendary": {"vouchers": 25, "card": (94, 98), "weights": {98: 0.15}},
+    "Platinum":  {"vouchers": 15, "card": (90, 93)},
+    "Gold":      {"vouchers": 10, "card": (87, 90)},
+    "Silver":    {"vouchers": 5,  "card": (85, 87)},
+    "Bronze":    {"coins": 100_000, "min_stars": 5},
 }
 
 # Bot strength per tier. ovr = card rating range its XI is built from,
@@ -338,7 +339,7 @@ def _settle_season(conn, old_season: str) -> dict:
             continue
         tier = tier_of(stars)
         spec = SEASON_REWARDS.get(tier)
-        if not spec:
+        if not spec or stars < int(spec.get("min_stars", 1)):
             continue
         lines, pending = _grant_bundle(conn, uid, spec, f"Ranked {old_season} ({tier})", idx_cache)
         text = (
@@ -881,6 +882,8 @@ def _bundle_parts(spec: dict) -> list[str]:
     if spec.get("card"):
         lo, hi = spec["card"]
         parts.append(f"{lo} OVR Card" if lo == hi else f"{lo}-{hi} OVR Card")
+    if spec.get("min_stars"):
+        parts.append(f"(needs {int(spec['min_stars'])}+ stars)")
     return parts
 
 
