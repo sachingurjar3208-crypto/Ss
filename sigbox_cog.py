@@ -319,18 +319,21 @@ class SigBoxCog(commands.Cog, name="SigBox"):
 
     @group.command(name="create", description="Open a Signature Box (the open one, if any, closes)")
     @app_commands.describe(playername="The Signature card (the big prize)", days="How many days it stays open",
-                           name="Box name shown on the image (default: Signature Box)")
+                           name="Box name shown on the image (default: Signature Box)",
+                           last_only="True = the Signature card comes ONLY on the last spin (0% on spins 1-9)")
     @app_commands.autocomplete(playername=player_autocomplete)
     @app_commands.check(lambda i: is_staff(i.user))
     async def create(self, interaction: discord.Interaction, playername: str,
-                     days: app_commands.Range[int, 1, sigbox.MAX_DAYS], name: str | None = None):
+                     days: app_commands.Range[int, 1, sigbox.MAX_DAYS], name: str | None = None,
+                     last_only: bool = False):
         card = await asyncio.to_thread(card_db.get_card, playername)
         if card is None:
             await interaction.response.send_message(f"No card named {esc(playername)}. Pick one from the list.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        box = await asyncio.to_thread(sigbox.create_box, card["playername_key"], days, name, interaction.user.id)
-        note = ""
+        box = await asyncio.to_thread(sigbox.create_box, card["playername_key"], days, name, interaction.user.id,
+                                      last_only)
+        note = "\nSignature card: ONLY on the last spin (0% on spins 1-9)." if last_only else ""
         theme = str(card["s2_theme"] or "").lower() if "s2_theme" in card.keys() else ""
         if theme != "signature":
             note = "\nNote: this card is not a Signature Edition card yet (`/editcard theme:Signature Edition`)."

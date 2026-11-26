@@ -195,8 +195,10 @@ def get_active() -> dict | None:
         return _box_dict(conn, row) if row else None
 
 
-def create_box(player_key: str, days: int, name: str | None = None, admin_id: int = 0) -> dict:
-    """Open a new box (the running one, if any, ends). Fresh spins for everybody."""
+def create_box(player_key: str, days: int, name: str | None = None, admin_id: int = 0,
+               last_only: bool = False) -> dict:
+    """Open a new box (the running one, if any, ends). Fresh spins for everybody.
+    last_only = Signature chance 0% on spins 1-9, so the Signature card only comes on spin 10."""
     now = time.time()
     with economy._tx() as conn:
         _ensure(conn)
@@ -205,7 +207,8 @@ def create_box(player_key: str, days: int, name: str | None = None, admin_id: in
             "INSERT INTO sigbox_box (name, player_key, start_ts, end_ts, active, costs, chances, weights, created_by) "
             "VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)",
             ((name or "").strip()[:40] or DEFAULT_NAME, player_key, now, now + int(days) * DAY,
-             json.dumps(DEFAULT_COSTS), json.dumps(DEFAULT_CHANCES), json.dumps(DEFAULT_WEIGHTS), int(admin_id)))
+             json.dumps(DEFAULT_COSTS), json.dumps([0.0] * OTHER_SLOTS if last_only else DEFAULT_CHANCES),
+             json.dumps(DEFAULT_WEIGHTS), int(admin_id)))
         row = conn.execute("SELECT * FROM sigbox_box WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _box_dict(conn, row)
 
