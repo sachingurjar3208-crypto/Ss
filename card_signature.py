@@ -230,24 +230,48 @@ def apply_signature_look(base: Image.Image, card_row, role: str) -> Image.Image:
     alpha = base.getchannel("A")
     card = base.copy()
 
+    # Panel style Clear / Glass with the card's own background (/cardbg): keep THAT background
+    # under the signature and stats instead of the purple Signature backdrop.
+    mode = str(ci._col(card_row, "panel_mode", "") or "").lower()
+    own_back = None
+    if mode in ("clear", "glass"):
+        try:
+            import card_full
+            ob = card_full._card_bg(card_row)
+            if ob is not None:
+                ob = ob.convert("RGB").resize((W, H), Image.LANCZOS)
+                if mode == "glass":
+                    ob = ob.filter(ImageFilter.GaussianBlur(18))
+                own_back = Image.blend(ob, Image.new("RGB", (W, H), (0, 0, 0)), 0.35).convert("RGBA")
+        except Exception as e:
+            print(f"[signature] own background skipped: {type(e).__name__}: {e}")
+
     # 1) the player fades into deep purple (the backdrop's light swirls still show through)
     fade = Image.new("L", (W, H), 0)
     fd = ImageDraw.Draw(fade)
     for y in range(FADE_TOP + 120, H):
         v = int(150 * min(1.0, ((y - FADE_TOP - 120) / 330)) ** 1.4)
         fd.line((0, y, W, y), fill=v)
-    card = Image.composite(Image.new("RGBA", (W, H), PURPLE_DEEP + (255,)), card, fade)
+    fade_to = own_back if own_back is not None else Image.new("RGBA", (W, H), PURPLE_DEEP + (255,))
+    card = Image.composite(fade_to, card, fade)
     # the normal stats panel of the base card is covered with the backdrop again
-    try:
-        import card_full
-        back = card_full._sig_icon_bg().resize((W, H), Image.LANCZOS).convert("RGBA")
-        back = Image.blend(back, Image.new("RGBA", (W, H), PURPLE_DEEP + (255,)), 0.25)
-    except Exception:
-        back = Image.new("RGBA", (W, H), PURPLE_DEEP + (255,))
+    if own_back is not None:
+        back = own_back
+    else:
+        try:
+            import card_full
+            back = card_full._sig_icon_bg().resize((W, H), Image.LANCZOS).convert("RGBA")
+            back = Image.blend(back, Image.new("RGBA", (W, H), PURPLE_DEEP + (255,)), 0.25)
+        except Exception:
+            back = Image.new("RGBA", (W, H), PURPLE_DEEP + (255,))
     cover = Image.new("L", (W, H), 0)
     cd = ImageDraw.Draw(cover)
-    for y in range(985, H):
-        cd.line((0, y, W, y), fill=min(255, int(255 * ((y - 985) / 130) ** 1.3)))
+    if own_back is not None:      # bright own backgrounds: hide the old stats panel completely
+        for y in range(900, H):
+            cd.line((0, y, W, y), fill=min(255, int(255 * ((y - 900) / 90))))
+    else:
+        for y in range(985, H):
+            cd.line((0, y, W, y), fill=min(255, int(255 * ((y - 985) / 130) ** 1.3)))
     card = Image.composite(back, card, cover)
 
     # 2) the signature in gold (or the name, big, when there is no signature file)
