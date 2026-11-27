@@ -117,6 +117,7 @@ async def load_cogs():
         "myplayer_cog",
         "help_cog",
         "invites_cog",
+        "vote_cog",
         # Add other cogs here as needed
     ]
     for cog_name in cog_files:
