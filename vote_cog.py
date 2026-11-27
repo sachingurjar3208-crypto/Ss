@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import json
 import os
+import random
 import time
 
 import aiohttp
@@ -26,12 +27,13 @@ import discord
 from aiohttp import web
 from discord.ext import commands, tasks
 
+import card_db
 import economy
 import emojis
 
-VOTE_COINS = 25_000           # reward per vote
-VOTE_VOUCHERS = 1
-WEEKEND_MULTIPLIER = 2        # Top.gg counts weekend votes double, so do we
+VOTE_VOUCHERS = 2             # reward per vote: 2 vouchers + 1 random card
+VOTE_CARD_OVR = (78, 83)      # card OVR range (inclusive)
+WEEKEND_MULTIPLIER = 2        # weekend votes: vouchers x2 (card stays 1)
 VOTE_COOLDOWN = 12 * 3600     # Top.gg allows one vote every 12 hours
 STREAK_BONUS_EVERY = 7        # every 7th vote in a row (within 36 h of the last one) = bonus
 STREAK_BONUS_VOUCHERS = 3
@@ -84,6 +86,8 @@ def _last(user_id: int):
 def _claim(user_id: int, weekend: bool) -> dict | None:
     """Pay one vote. None = already claimed for this vote (or not debuted)."""
     uid, now = int(user_id), time.time()
+    lo, hi = VOTE_CARD_OVR
+    pool = [c["playername_key"] for c in card_db.list_obtainable_cards() if lo <= int(c["ovr"]) <= hi]
     with economy._tx() as conn:
         _ensure(conn)
         if conn.execute("SELECT 1 FROM users WHERE user_id = ?", (uid,)).fetchone() is None:
@@ -96,12 +100,19 @@ def _claim(user_id: int, weekend: bool) -> dict | None:
         conn.execute("INSERT INTO vote_claims (user_id, last_ts, streak, total, reminded) VALUES (?, ?, ?, ?, 0) "
                      "ON CONFLICT(user_id) DO UPDATE SET last_ts = excluded.last_ts, streak = excluded.streak, "
                      "total = excluded.total, reminded = 0", (uid, now, streak, total))
+        card = None
+        if pool:
+            owned = {r[0] for r in conn.execute("SELECT player_key FROM owned WHERE user_id = ?", (uid,))}
+            fresh = [k for k in pool if k not in owned]
+            card = random.choice(fresh or pool)
+            economy._ensure_pending_table(conn)
+            if economy._grant(conn, uid, card, "Top.gg vote") == "blocked":
+                card = None
     mult = WEEKEND_MULTIPLIER if weekend else 1
-    coins, vouchers = VOTE_COINS * mult, VOTE_VOUCHERS * mult
+    vouchers = VOTE_VOUCHERS * mult
     bonus = STREAK_BONUS_VOUCHERS if streak % STREAK_BONUS_EVERY == 0 else 0
-    economy.add_coins(uid, coins, "Top.gg vote")
     economy.add_vouchers(uid, vouchers + bonus, "Top.gg vote")
-    return {"coins": coins, "vouchers": vouchers, "bonus": bonus, "streak": streak, "total": total}
+    return {"vouchers": vouchers, "bonus": bonus, "streak": streak, "total": total, "card": card}
 
 
 ACCENT = 0xF5B342
@@ -109,8 +120,18 @@ ACCENT = 0xF5B342
 
 def _reward_line(weekend: bool = False) -> str:
     m = WEEKEND_MULTIPLIER if weekend else 1
-    return (f"{emojis.COIN} **{VOTE_COINS * m:,}** coins\n{emojis.VOUCHER} **{VOTE_VOUCHERS * m}** "
-            f"voucher{'s' if VOTE_VOUCHERS * m != 1 else ''}")
+    lo, hi = VOTE_CARD_OVR
+    return (f"{emojis.VOUCHER} **{VOTE_VOUCHERS * m}** voucher{'s' if VOTE_VOUCHERS * m != 1 else ''}\n"
+            f"**1** random card ({lo}-{hi} OVR)")
+
+
+def _card_line(res: dict, weekend: bool) -> str:
+    m = WEEKEND_MULTIPLIER if weekend else 1
+    line = f"{emojis.VOUCHER} **{VOTE_VOUCHERS * m}** vouchers"
+    card = card_db.get_card(res["card"]) if res.get("card") else None
+    if card:
+        line += f"\n**{card['playername']}** ({card['ovr']} OVR)"
+    return line
 
 
 class VoteView(discord.ui.View):
@@ -161,7 +182,7 @@ class VoteCog(commands.Cog):
         e = discord.Embed(title="Vote reward unlocked", color=ACCENT,
                           description="Thanks for backing **Rush Cricket** on Top.gg. Here's your reward:")
         e.add_field(name="Reward" + (" (weekend x2)" if weekend else ""),
-                    value=_reward_line(weekend) + (f"\n{emojis.VOUCHER} **+{res['bonus']}** streak bonus"
+                    value=_card_line(res, weekend) + (f"\n{emojis.VOUCHER} **+{res['bonus']}** streak bonus"
                                                    if res["bonus"] else ""), inline=True)
         nxt = STREAK_BONUS_EVERY - res["streak"] % STREAK_BONUS_EVERY
         streak_txt = (f"**{res['streak']}** in a row" + (f"\n{nxt} more for +{STREAK_BONUS_VOUCHERS} vouchers"
