@@ -173,6 +173,7 @@ class VoteCog(commands.Cog):
     async def _pay_and_dm(self, user_id: int, weekend: bool, channel=None) -> bool:
         res = await asyncio.to_thread(_claim, user_id, weekend)
         if res is None:
+            print(f"[vote] no reward for {user_id}: already claimed in last 12h or not debuted")
             return False
         embed = self._reward_embed(res, weekend)
         sent = False
@@ -201,11 +202,16 @@ class VoteCog(commands.Cog):
 
     async def _webhook(self, request: web.Request) -> web.Response:
         body = await request.read()
+        print(f"[vote] webhook hit from {request.remote} "
+              f"(sig={'yes' if request.headers.get('x-topgg-signature') else 'no'}, "
+              f"auth={'yes' if request.headers.get('Authorization') else 'no'}, {len(body)} bytes)")
         if not self._authorised(request, body):
+            print("[vote] webhook rejected: secret/signature did not match")
             return web.Response(status=401)
         try:
             data = json.loads(body or b"{}")
         except ValueError:
+            print("[vote] webhook rejected: body is not JSON")
             return web.Response(status=400)
         kind = str(data.get("type", ""))
         inner = data.get("data") if isinstance(data.get("data"), dict) else {}
@@ -217,7 +223,9 @@ class VoteCog(commands.Cog):
         try:
             uid = int(user)
         except (TypeError, ValueError):
+            print(f"[vote] webhook had no user id: type={kind!r}")
             return web.Response(status=400)
+        print(f"[vote] vote received from {uid} (type={kind!r}, weekend={weekend})")
         asyncio.create_task(self._pay_and_dm(uid, weekend))
         return web.Response(status=200)
 
