@@ -1,7 +1,8 @@
-"""Score-bar GIFs (four / six / wicket). HOW TO REMAKE (run inside score_bars/):
+"""Score-bar GIFs (four / six / wicket / no ball). HOW TO REMAKE (run inside score_bars/):
   WORD=FOUR   OUT=four   ACC=255,225,80 BARD=8,28,105 BARM=24,84,205 EDGE=130,200,255 STREAK=140,220,255 python3 make_bars.py full
   WORD=SIX    OUT=six    ACC=20,30,100  BARD=105,45,0 BARM=212,128,8 EDGE=255,215,110 STREAK=255,245,180 python3 make_bars.py full
   WORD=WICKET OUT=wicket ACC=255,225,80 BARD=95,0,12  BARM=195,20,36 EDGE=255,120,120 STREAK=255,170,90  python3 make_bars.py full
+  WORD="NO BALL" OUT=noball ACC=255,225,80 BARD=48,10,100 BARM=125,40,205 EDGE=200,150,255 STREAK=230,180,255 python3 make_bars.py full
 """
 import math, sys, subprocess
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
@@ -62,7 +63,7 @@ def mblur(im,amount):
         acc=Image.blend(acc,sh,1/(i+1))
     return acc
 
-SPC=int(14*6/len(WORD)) if len(WORD)<6 else 14
+SPC=int(14*6/len(WORD)) if len(WORD)<6 else (14 if len(WORD)==6 else 4)
 POPSZ=int(40*min(1.35,6/len(WORD)))
 WK_BIG_C=glow(text_img(WORD,46,CYAN,SPC),CYAN,5)
 WK_BIG_W=glow(text_img(WORD,46,WHITE,SPC),(150,180,255),4)

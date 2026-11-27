@@ -1834,7 +1834,7 @@ async def _process_delivery(
                 gif_urls.append(ump_gif)
 
     # FOUR / SIX / WICKET score-bar animation right after the ball (first in the queue).
-    _bar = {"4": "four", "6": "six", "W": "wicket"}.get(outcome)
+    _bar = {"4": "four", "6": "six", "W": "wicket", "NB": "noball", "NB+1": "noball"}.get(outcome)
     if _bar and SCORE_BAR_GIFS:
         gif_urls.insert(0, f"bar:{_bar}")
 
@@ -2105,7 +2105,7 @@ _score_bar_bytes: dict = {}
 
 
 def _score_bar_file(kind: str):
-    if kind not in ("four", "six", "wicket"):
+    if kind not in ("four", "six", "wicket", "noball"):
         return None
     data = _score_bar_bytes.get(kind)
     if data is None:
