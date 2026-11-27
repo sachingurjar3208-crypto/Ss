@@ -1054,6 +1054,13 @@ class EconomyCog(commands.Cog, name="Economy"):
         else:
             rows.append(row("Monthly", "rcmonthly", state(status["monthly"])))
         rows.append(row("Claim", "rcclaim", state(status["claim"])))
+        try:
+            import vote_cog
+            last = await asyncio.to_thread(vote_cog._last, ctx.author.id)
+            vote_wait = int(float(last[0]) + vote_cog.VOTE_COOLDOWN - time.time()) if last and last[0] else 0
+        except Exception:
+            vote_wait = 0
+        rows.append(row("Vote", "rcvote", state(vote_wait)))
 
         embed = discord.Embed(title="Cooldowns", description="\n\n".join(rows), color=discord.Color.teal())
         embed.set_footer(text=f"Requested by: {ctx.author.name}")
