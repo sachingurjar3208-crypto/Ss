@@ -1,15 +1,18 @@
-"""Score-bar GIFs (four / six / wicket / no ball). HOW TO REMAKE (run inside score_bars/):
+"""Score-bar GIFs (four / six / wicket / no ball / fifty / century). HOW TO REMAKE (run inside score_bars/):
   WORD=FOUR   OUT=four   ACC=255,225,80 BARD=8,28,105 BARM=24,84,205 EDGE=130,200,255 STREAK=140,220,255 python3 make_bars.py full
   WORD=SIX    OUT=six    ACC=20,30,100  BARD=105,45,0 BARM=212,128,8 EDGE=255,215,110 STREAK=255,245,180 python3 make_bars.py full
   WORD=WICKET OUT=wicket ACC=255,225,80 BARD=95,0,12  BARM=195,20,36 EDGE=255,120,120 STREAK=255,170,90  python3 make_bars.py full
   WORD="NO BALL" OUT=noball ACC=255,225,80 BARD=48,10,100 BARM=125,40,205 EDGE=200,150,255 STREAK=230,180,255 python3 make_bars.py full
+  BARH=110 WORD=FIFTY   OUT=fifty   ACC=255,225,80 BARD=0,55,70  BARM=0,135,150  EDGE=120,240,240 STREAK=170,255,250 python3 make_bars.py full
+  BARH=110 WORD=CENTURY OUT=century ACC=255,215,90 BARD=85,0,55  BARM=185,20,110 EDGE=255,140,210 STREAK=255,200,120 python3 make_bars.py full
 """
 import math, sys, subprocess
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageChops
 F=str(__import__('pathlib').Path(__file__).resolve().parent.parent)+'/'
 S=2                                   # supersample
-W,H=1000,150                          # output size
-BX0,BX1,BY0,BY1=0,1000,40,110          # the bar: full width
+BARH=int(__import__('os').environ.get('BARH','70'))   # bar thickness (70 = four/six/wicket, 110 = milestones)
+W,H=1000,BARH+80                      # output size
+BX0,BX1,BY0,BY1=0,1000,40,40+BARH      # the bar: full width
 FPS=20; DUR=3.4; N=int(FPS*DUR)
 import os
 WORD=os.environ.get('WORD','WICKET')
@@ -19,7 +22,7 @@ OUT=os.environ.get('OUT','wicket_bar')
 BAR_DARK=tuple(int(x) for x in os.environ.get('BARD','40,12,90').split(','))
 BAR_MID=tuple(int(x) for x in os.environ.get('BARM','90,22,160').split(','))
 EDGE=tuple(int(x) for x in os.environ.get('EDGE','160,120,255').split(','))
-font=lambda sz: ImageFont.truetype(F+'label.ttf', sz*S)
+font=lambda sz: ImageFont.truetype(F+'label.ttf', int(sz*S*min(1.45,BARH/70)))
 def ease(t): t=max(0,min(1,t)); return 1-(1-t)**3
 def prog(t,a,b): return max(0,min(1,(t-a)/(b-a)))
 
@@ -177,6 +180,6 @@ if __name__=='__main__':
         q=to_gif_frames(frames)
         q[0].save(f'{OUT}.gif',save_all=True,append_images=q[1:],duration=int(1000/FPS),loop=0,optimize=False,disposal=2,transparency=255)
         frames=[Image.alpha_composite(Image.new('RGBA',f.size,(14,12,28,255)),f).convert('RGB') for f in frames]
-        p=subprocess.Popen(['ffmpeg','-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s',f'{W}x{H}','-r',str(FPS),'-i','-','-vf','scale=1000:150','-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',f'{OUT}.mp4'],stdin=subprocess.PIPE)
+        p=subprocess.Popen(['ffmpeg','-y','-loglevel','error','-f','rawvideo','-pix_fmt','rgb24','-s',f'{W}x{H}','-r',str(FPS),'-i','-','-vf',f'scale=1000:{H}','-c:v','libx264','-preset','veryfast','-crf','18','-pix_fmt','yuv420p',f'{OUT}.mp4'],stdin=subprocess.PIPE)
         for f in frames: p.stdin.write(f.tobytes())
         p.stdin.close(); p.wait(); print('done')

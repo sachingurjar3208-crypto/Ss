@@ -1859,6 +1859,8 @@ async def _process_delivery(
                 if milestone in (50, 100):
                     _m_word = "CENTURY" if milestone == 100 else "HALF-CENTURY"
                     commentary = _comm.add_lines(commentary, f"{_m_word} for {sname}! {runs_after} runs.")
+                    if SCORE_BAR_GIFS:   # thick FIFTY / CENTURY bar right after the FOUR/SIX bar
+                        gif_urls.insert(1 if _bar else 0, "bar:" + ("century" if milestone == 100 else "fifty"))
                 gif = get_milestone_gif(sname, str(milestone))
                 if not gif:
                     gif = get_player_media(sname, str(milestone))
@@ -2105,7 +2107,7 @@ _score_bar_bytes: dict = {}
 
 
 def _score_bar_file(kind: str):
-    if kind not in ("four", "six", "wicket", "noball"):
+    if kind not in ("four", "six", "wicket", "noball", "fifty", "century"):
         return None
     data = _score_bar_bytes.get(kind)
     if data is None:
