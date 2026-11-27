@@ -131,6 +131,7 @@ class VoteCog(commands.Cog):
         if self.secret:
             app = web.Application()
             app.router.add_post("/topgg", self._webhook)
+            app.router.add_route("*", "/{tail:.*}", self._webhook)   # any path / method: log + handle
             self.runner = web.AppRunner(app)
             await self.runner.setup()
             try:
@@ -202,7 +203,10 @@ class VoteCog(commands.Cog):
 
     async def _webhook(self, request: web.Request) -> web.Response:
         body = await request.read()
-        print(f"[vote] webhook hit from {request.remote} "
+        if request.method != "POST":
+            print(f"[vote] {request.method} {request.path} (not a webhook)")
+            return web.Response(text="Rush Cricket vote webhook is up")
+        print(f"[vote] webhook hit on {request.path} from {request.remote} "
               f"(sig={'yes' if request.headers.get('x-topgg-signature') else 'no'}, "
               f"auth={'yes' if request.headers.get('Authorization') else 'no'}, {len(body)} bytes)")
         if not self._authorised(request, body):
