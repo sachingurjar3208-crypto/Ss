@@ -44,7 +44,7 @@ _UNSET = object()
 # Columns added after the first version of the table. They are added to an
 # existing cards_maker.db automatically on start-up, so old cards keep working.
 _NEW_CARD_COLUMNS = [
-    ("panel_mode",    "TEXT"),                              # normal / glass / clear (/editcard panelstyle)
+    ("panel_mode",    "TEXT"),                              # normal / glass / clear / tint (/editcard panelstyle)
     ("own_bg",        "TEXT"),                              # card-only background (beats the event bg)
     ("own_glass",     "INTEGER"),                           # 1 = glass stats panel showing own_bg
     ("role",          "TEXT"),                              # BAT / BOWL / AR / WK

@@ -857,7 +857,9 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
         glass_on = False
     elif mode == "glass":
         glass_on = True
-    if mode == "clear" and themed.get("raw_bg") is not None:
+    if mode == "tint":                           # transparent: dark theme panel, photo shows through a little
+        canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.58)))
+    elif mode == "clear" and themed.get("raw_bg") is not None:
         _clear_panel(canvas, st, accent, themed["raw_bg"])
     elif glass_on and themed.get("raw_bg") is not None:
         _glass_panel(canvas, st, accent, themed["raw_bg"], icy=_is_winter(card_row))

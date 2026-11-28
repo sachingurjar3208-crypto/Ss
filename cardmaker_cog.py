@@ -854,6 +854,7 @@ class CardMakerCog(commands.Cog):
         panelstyle=[app_commands.Choice(name="Normal (theme colour)", value="normal"),
                     app_commands.Choice(name="Glass (blurred background)", value="glass"),
                     app_commands.Choice(name="Clear (background as it is)", value="clear"),
+                    app_commands.Choice(name="Transparent (dark, photo shows through)", value="tint"),
                     app_commands.Choice(name="Auto (event decides)", value="auto")],
     )
     @app_commands.autocomplete(
