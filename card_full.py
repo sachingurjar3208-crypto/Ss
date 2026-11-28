@@ -858,7 +858,7 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     elif mode == "glass":
         glass_on = True
     if mode == "tint":                           # transparent: dark theme panel, photo shows through a little
-        canvas.paste(_panel_fill(themed), (0, 0), st["panel"].point(lambda v: int(v * 0.58)))
+        canvas.paste((0, 0, 0, 255), (0, 0), st["panel"].point(lambda v: int(v * 0.42)))   # neutral, no theme colour
     elif mode == "clear" and themed.get("raw_bg") is not None:
         _clear_panel(canvas, st, accent, themed["raw_bg"])
     elif glass_on and themed.get("raw_bg") is not None:
@@ -902,7 +902,7 @@ def _draw_panel(canvas, card_row, role, accent, themed, num_grad=None):
     right = (bowl, "BOWLING") if is_batter else (bat, "BATTING")
     num_f = _font(ci.FONT_DISPLAY_BOLD, 175)
     lab_f = _font(ci.FONT_LABEL, 30)
-    if mode == "clear":                          # clear panel: dark soft shadow behind every label / number
+    if mode in ("clear", "tint"):                # clear / transparent panel: dark soft shadow behind every label / number
         sh = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
         sd_ = ImageDraw.Draw(sh)
         for cx, (val, lab) in ((172, left), (865, right)):
