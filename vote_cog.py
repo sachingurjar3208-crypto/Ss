@@ -27,6 +27,7 @@ import discord
 from aiohttp import web
 from discord.ext import commands, tasks
 
+import card_cache
 import card_db
 import economy
 import emojis
@@ -125,15 +126,6 @@ def _reward_line(weekend: bool = False) -> str:
             f"**1** random card ({lo}-{hi} OVR)")
 
 
-def _card_line(res: dict, weekend: bool) -> str:
-    m = WEEKEND_MULTIPLIER if weekend else 1
-    line = f"{emojis.VOUCHER} **{VOTE_VOUCHERS * m}** vouchers"
-    card = card_db.get_card(res["card"]) if res.get("card") else None
-    if card:
-        line += f"\n**{card['playername']}** ({card['ovr']} OVR)"
-    return line
-
-
 class VoteView(discord.ui.View):
     def __init__(self, url: str):
         super().__init__(timeout=None)
@@ -178,36 +170,52 @@ class VoteCog(commands.Cog):
                 return await r.json()
 
     # ── paying + DM ─────────────────────────────────────────────────────────
-    def _reward_embed(self, res: dict, weekend: bool) -> discord.Embed:
-        e = discord.Embed(title="Vote reward unlocked", color=ACCENT,
-                          description="Thanks for backing **Rush Cricket** on Top.gg. Here's your reward:")
-        e.add_field(name="Reward" + (" (weekend x2)" if weekend else ""),
-                    value=_card_line(res, weekend) + (f"\n{emojis.VOUCHER} **+{res['bonus']}** streak bonus"
-                                                   if res["bonus"] else ""), inline=True)
+    def _reward_embed(self, res: dict, weekend: bool) -> tuple[discord.Embed, str | None]:
+        """Clean reward message: the card first, then the vouchers. Returns (embed, card image path)."""
+        card = card_db.get_card(res["card"]) if res.get("card") else None
+        lines = ["**You got:**"]
+        if card:
+            lines.append(f"Player: **{card['playername']}** ({card['ovr']} OVR)")
+        lines.append(f"Vouchers: **{res['vouchers']}**" + (" (weekend double)" if weekend else ""))
+        if res["bonus"]:
+            lines.append(f"Streak bonus: **{res['bonus']}** vouchers")
+        total = res["vouchers"] + res["bonus"]
+        if res["bonus"]:
+            lines.append(f"Total vouchers: **{total}**")
         nxt = STREAK_BONUS_EVERY - res["streak"] % STREAK_BONUS_EVERY
-        streak_txt = (f"**{res['streak']}** in a row" + (f"\n{nxt} more for +{STREAK_BONUS_VOUCHERS} vouchers"
-                                                          if not res["bonus"] else "\nBonus paid!"))
-        e.add_field(name="Vote streak", value=streak_txt, inline=True)
-        e.add_field(name="Next vote", value=f"<t:{int(time.time() + VOTE_COOLDOWN)}:R>", inline=False)
-        e.set_footer(text=f"Total votes: {res['total']}  ·  rcvotereminder = DM when you can vote again")
-        return e
+        lines += ["", f"Vote streak: **{res['streak']}**"
+                  + ("" if res["bonus"] else f" ({nxt} more for +{STREAK_BONUS_VOUCHERS} vouchers)"),
+                  f"Next vote: <t:{int(time.time() + VOTE_COOLDOWN)}:R>"]
+        e = discord.Embed(title="Thanks for voting!", description="\n".join(lines), color=ACCENT)
+        e.set_footer(text="rcvotereminder = DM when you can vote again")
+        return e, (card.get("image_path") if card else None)
+
+    async def _send_reward(self, dest, embed: discord.Embed, path: str | None) -> None:
+        file = await card_cache.card_file(path) if path else None
+        if file:
+            embed.set_image(url=f"attachment://{file.filename}")
+            await dest.send(embed=embed, file=file)
+        else:
+            await dest.send(embed=embed)
 
     async def _pay_and_dm(self, user_id: int, weekend: bool, channel=None) -> bool:
         res = await asyncio.to_thread(_claim, user_id, weekend)
         if res is None:
             print(f"[vote] no reward for {user_id}: already claimed in last 12h or not debuted")
             return False
-        embed = self._reward_embed(res, weekend)
+        embed, path = self._reward_embed(res, weekend)
         sent = False
         try:
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
-            await user.send(embed=embed)
+            await self._send_reward(user, embed, path)
             sent = True
         except Exception as e:
             print(f"[vote] DM to {user_id} failed: {type(e).__name__}: {e}")
         if channel is not None:
-            await channel.send(embed=embed) if not sent else await channel.send(
-                f"<@{user_id}> your vote reward was sent to your DMs.")
+            if sent:
+                await channel.send(f"<@{user_id}> your vote reward was sent to your DMs.")
+            else:
+                await self._send_reward(channel, embed, path)
         print(f"[vote] paid {user_id}: {res}")
         return True
 
