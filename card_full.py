@@ -695,6 +695,13 @@ PANEL_BG_MIX = 0.42      # how much of the background shows in the panel (0 = fl
 PANEL_BG_THEMES = ("icon",)   # only these themes get the textured panel; the rest stay plain
 
 
+def _fade_for(card_row, st):
+    """Dark fade above the stats panel. Clear panel: only a light fade, so the area above stays bright too."""
+    if str(ci._col(card_row, "panel_mode", "") or "").lower() == "clear":
+        return st["fade"].point(lambda v: int(v * 0.22))
+    return st["fade"]
+
+
 def _is_full(card_row) -> bool:
     """Cards of an event with its own background use the full rectangle (no cut corners)."""
     return (bool(ci._col(card_row, "own_bg")) or bool((_event(card_row) or {}).get("bg")) or _is_winter(card_row)) \
@@ -1178,7 +1185,7 @@ def _build_v2(card_row, fg_image, role, st, th, themed, accent, canvas):
     if not th.get("style_bg"):              # the Signature backdrop has its own light lines
         _v2_diagonals(canvas, accent)
     _draw_player(canvas, card_row, fg_image)
-    canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
+    canvas.paste((4, 6, 14, 255), (0, 0), _fade_for(card_row, st))
     _v2_name(canvas, card_row)
     if V2_STATS == "bars":
         _v2_gem(canvas, card_row, role, accent, themed, th["tag"])
@@ -1428,7 +1435,7 @@ def _build_premium(card_row, fg_image, role, st, th, themed, accent, canvas):
         canvas.alpha_composite(wm)
         del wm
     _draw_player(canvas, card_row, fg_image, style=style)
-    canvas.paste((4, 6, 14, 255), (0, 0), st["fade"])
+    canvas.paste((4, 6, 14, 255), (0, 0), _fade_for(card_row, st))
     _premium_name(canvas, card_row, style, accent)
     if SHOW_BRAND:
         _v2_brand(canvas)
@@ -1490,7 +1497,8 @@ def build(card_row, fg_image, role) -> io.BytesIO:
         return buf
 
     _draw_player(canvas, card_row, fg_image)
-    canvas.paste((4, 6, 16, 255), (0, 0), st["fade"])
+    # Clear panel: keep the area above it bright too (only a light fade; the name has its own shadow)
+    canvas.paste((4, 6, 16, 255), (0, 0), _fade_for(card_row, st))
     _draw_name(canvas, card_row)
     if th["tag"]:
         _draw_tag(canvas, th["tag"], accent)
