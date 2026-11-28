@@ -176,12 +176,10 @@ class VoteCog(commands.Cog):
         lines = ["**You got:**"]
         if card:
             lines.append(f"Player: **{card['playername']}** ({card['ovr']} OVR)")
-        lines.append(f"Vouchers: **{res['vouchers']}**" + (" (weekend double)" if weekend else ""))
+        v = res["vouchers"]
+        lines.append(f"+ {v} voucher{'s' if v != 1 else ''}" + (" (weekend double)" if weekend else ""))
         if res["bonus"]:
-            lines.append(f"Streak bonus: **{res['bonus']}** vouchers")
-        total = res["vouchers"] + res["bonus"]
-        if res["bonus"]:
-            lines.append(f"Total vouchers: **{total}**")
+            lines.append(f"+ {res['bonus']} vouchers streak bonus")
         nxt = STREAK_BONUS_EVERY - res["streak"] % STREAK_BONUS_EVERY
         lines += ["", f"Vote streak: **{res['streak']}**"
                   + ("" if res["bonus"] else f" ({nxt} more for +{STREAK_BONUS_VOUCHERS} vouchers)"),
