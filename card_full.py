@@ -115,6 +115,8 @@ THEMES = {
     "sig_base":        {"bg": ((70, 58, 38), (10, 9, 8)),   "panel": ((40, 34, 24), (10, 9, 8)),    "accent": (232, 192, 104), "tag": None, "style_bg": "sig_icon"},
     # Winter Wonder: snowy frozen-lake backdrop (winter_bg.jpg), ice-glass stats panel, full rectangle.
     "winter":          {"bg": ((40, 70, 130), (6, 10, 28)), "panel": ((20, 40, 80), (6, 10, 28)),   "accent": (130, 210, 255), "tag": "WINTER WONDER"},
+    # Player of the Month: dark ember backdrop (potm_bg), orange-gold numbers.
+    "potm":            {"bg": ((96, 34, 10), (12, 5, 4)),   "panel": ((70, 26, 10), (14, 6, 4)),    "accent": (255, 172, 72),  "tag": "PLAYER OF THE MONTH"},
     "myplayer":        {"bg": ((60, 46, 20), (6, 5, 3)),    "panel": ((26, 20, 10), (8, 7, 5)),     "accent": (232, 182, 80),  "tag": "MY PLAYER", "style": "gold"},
 }
 
@@ -123,7 +125,7 @@ THEMES = {
 BG_NAME_THEMES = [("icon", "icon"), ("bronze", "bronze"),
                   ("season 2", "season2"), ("season2", "season2"), ("season-2", "season2"), ("season_2", "season2"),
                   ("season", "season1"), ("s1", "season1"),
-                  ("birthday", "birthday"), ("bday", "birthday"),
+                  ("player of the month", "potm"), ("potm", "potm"), ("birthday", "birthday"), ("bday", "birthday"),
                   ("diwali", "diwali"), ("halloween", "halloween"), ("end of an era", "eoae"), ("eoae", "eoae"), ("retro", "retro")]
 
 
